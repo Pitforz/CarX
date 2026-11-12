@@ -58,3 +58,7 @@ crashlytics-build.properties
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Mixamo characters/animations (~570 MB): too big for free GitHub LFS (1 GB), shared as an archive
+/[Aa]ssets/ThirdParty/Mixamo/
+/[Aa]ssets/ThirdParty/Mixamo.meta
