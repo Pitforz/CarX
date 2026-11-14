@@ -527,25 +527,25 @@ namespace CarX.EditorTools
             c *= 1f - 0.55f * pore;
             h -= pore * 0.7f;
 
-            // seepage at the slab joints (u = 0 and u = 1)
+            // light seepage right at the slab joints (u = 0 and u = 1): a narrow, faint band, so joints don't stand out
             float dj = Mathf.Min(u, 1f - u) * 2f;
             float edgeN = Fbm(u, v, 6, 8, 4, 105);
-            float seep = Sat(1f - dj / (0.3f + edgeN * 0.25f));
+            float seep = Sat(1f - dj / (0.10f + edgeN * 0.08f));
             seep *= seep;
             float streak = Sat((Fbm(u, v, 28, 2, 4, 106) - 0.04f) * 3.4f);
             streak *= Sat(0.3f + Fbm(u, v, 3, 2, 3, 107) * 1.6f);
-            float wet = Sat(seep * 0.95f + streak * 0.6f);
+            float wet = Sat(seep * 0.35f + streak * 0.6f);
             c = Color.Lerp(c, c * new Color(0.40f, 0.40f, 0.36f), wet);
             sm = Mathf.Lerp(sm, 0.62f, wet);
 
             // efflorescence: whitish mineral crust along the joints
-            float eff = Sat((Fbm(u, v, 9, 4, 108) + seep * 0.55f - 0.34f) * 4f) * Sat(seep * 2.5f);
+            float eff = Sat((Fbm(u, v, 9, 4, 108) + seep * 0.25f - 0.34f) * 4f) * Sat(seep * 2.5f) * 0.5f;
             c = Color.Lerp(c, new Color(0.80f, 0.79f, 0.74f), eff * 0.55f);
             sm = Mathf.Lerp(sm, 0.08f, eff);
             h += eff * 0.18f;
 
             // black mould growing out of the joints and streaks
-            float moldN = Fbm(u, v, 5, 5, 109) + seep * 0.5f + streak * 0.22f;
+            float moldN = Fbm(u, v, 5, 5, 109) + seep * 0.12f + streak * 0.22f;
             Worley(u, v, 110, 110, out f1, out f2, out id);
             float speck = Sat((0.38f - f1) / 0.16f) * (R01(id, 12) > 0.35f ? 1f : 0f);
             float mold = Sat((moldN - 0.30f) * 6f);
@@ -664,7 +664,8 @@ namespace CarX.EditorTools
             var s = new S { a = 1f };
             float m = Fbm(u, v, 5, 5, 401);
             float fine = Fbm(u, v, 40, 3, 402);
-            Color c = Color.Lerp(new Color(0.11f, 0.085f, 0.06f), new Color(0.22f, 0.165f, 0.115f), Sat(m * 1.5f + 0.5f));
+            // grey, close to the concrete, so soil showing in the seams barely stands out
+            Color c = Color.Lerp(new Color(0.17f, 0.163f, 0.15f), new Color(0.30f, 0.288f, 0.265f), Sat(m * 1.5f + 0.5f));
             c *= 0.85f + fine * 0.3f;
             float f1, f2; int id;
             Worley(u, v, 14, 403, out f1, out f2, out id);
@@ -674,7 +675,7 @@ namespace CarX.EditorTools
             float peb = R01(id, 8) > 0.75f ? Sat((0.3f - f1) / 0.08f) : 0f;
             c = Color.Lerp(c, new Color(0.38f, 0.35f, 0.3f) * (0.7f + R01(id, 16) * 0.5f), peb);
             float root = Sat(1f - Mathf.Abs(Fbm(u, v, 12, 3, 3, 405)) / 0.02f) * Sat((Fbm(u, v, 3, 2, 406) - 0.1f) * 4f);
-            c = Color.Lerp(c, new Color(0.3f, 0.22f, 0.14f), root * 0.6f);
+            c = Color.Lerp(c, new Color(0.30f, 0.285f, 0.26f), root * 0.4f);
             s.c = c;
             s.h = 0.5f + m * 0.3f + clump * 0.3f + peb * 0.5f + fine * 0.1f;
             s.sm = 0.3f + Sat(-m) * 0.25f;

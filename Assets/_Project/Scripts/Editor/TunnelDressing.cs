@@ -5,7 +5,7 @@ using UnityEngine;
 namespace CarX.EditorTools
 {
     /// <summary>
-    /// Scatters puddles and sand heaps along a tunnel: puddles collect in low, flat places,
+    /// Scatters puddles along a tunnel: puddles collect in low, flat places,
     /// slopes stay almost dry, sand piles up near the walls (or as islands in a wet channel).
     /// Everything it creates is ordinary objects under "_Dressing": move, scale or delete them freely.
     /// </summary>
@@ -28,7 +28,7 @@ namespace CarX.EditorTools
             if (path.slabs.Count == 0) return;
             Clear(path, undo);
             var root = new GameObject(TunnelPath.DressingName);
-            if (undo) Undo.RegisterCreatedObjectUndo(root, "Scatter puddles and sand");
+            if (undo) Undo.RegisterCreatedObjectUndo(root, "Scatter puddles");
             root.transform.SetParent(path.transform, false);
             var rnd = new System.Random(seed);
             var sec = path.section;
@@ -71,34 +71,39 @@ namespace CarX.EditorTools
                     p.materials = path.materials;
                     p.Build();
                 }
-
-                double pSand = !flat ? 0.2 : 0.24;
-                if (rnd.NextDouble() < pSand)
-                {
-                    float sx, x, h;
-                    if (curbs)
-                    {
-                        sx = Range(rnd, 0.5f, Mathf.Max(0.55f, 2f * half - 0.1f));
-                        x = Range(rnd, -(half - sx * 0.4f), half - sx * 0.4f) * 0.7f;
-                        h = Range(rnd, 0.07f, 0.16f);
-                    }
-                    else
-                    {
-                        sx = Range(rnd, 0.5f, 1.1f);
-                        x = (rnd.NextDouble() < 0.5 ? -1f : 1f) * Mathf.Max(0f, half - sx * 0.3f);
-                        h = Range(rnd, 0.1f, 0.3f);
-                    }
-                    float sz = Range(rnd, 0.6f, Mathf.Min(1.8f, len));
-                    float s = sl.tStart + len * Range(rnd, 0.2f, 0.8f);
-                    var sp = Make<SandPile>(root.transform, "SandPile", sl, s, x, sec.FloorHeightAt(x) - 0.015f, undo);
-                    sp.size = new Vector2(sx, sz);
-                    sp.height = h;
-                    sp.seed = rnd.Next(1, 99999);
-                    sp.materials = path.materials;
-                    sp.Build();
-                }
             }
         }
+
+        /// <summary>Removes the old random sand heaps (they looked bad) from every loaded scene. Undo-able.</summary>
+        [MenuItem("CarX/Tunnels/Remove Sand Piles (open scenes)", priority = 41)]
+        public static void RemoveSandPiles()
+        {
+            int n = 0;
+            foreach (var sp in Object.FindObjectsByType<SandPile>(FindObjectsInactive.Include))
+            {
+                Undo.DestroyObjectImmediate(sp.gameObject);
+                n++;
+            }
+            Debug.Log("CarX: removed sand piles: " + n);
+        }
+
+        /// <summary>For the remote bridge: open a scene additively, remove sand piles, save, close. Skips a loaded dirty scene.</summary>
+        public static void RemoveSandPilesInScene(string scenePath)
+        {
+            var open = UnityEditor.SceneManagement.EditorSceneManager.GetSceneByPath(scenePath);
+            bool wasLoaded = open.IsValid() && open.isLoaded;
+            if (wasLoaded && open.isDirty) { Debug.LogWarning("CarX: scene has unsaved changes, sand not removed: " + scenePath); return; }
+            var scene = wasLoaded ? open : UnityEditor.SceneManagement.EditorSceneManager.OpenScene(scenePath, UnityEditor.SceneManagement.OpenSceneMode.Additive);
+            int n = 0;
+            foreach (var root in scene.GetRootGameObjects())
+                foreach (var sp in root.GetComponentsInChildren<SandPile>(true)) { Object.DestroyImmediate(sp.gameObject); n++; }
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
+            UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene);
+            if (!wasLoaded) UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
+            Debug.Log("CarX: removed " + n + " sand piles from " + scenePath);
+        }
+
+        public static void RemoveSandPilesFromMazeDemo() { RemoveSandPilesInScene("Assets/_Project/Scenes/TunnelMaze_Demo.unity"); }
 
         static T Make<T>(Transform parent, string name, TunnelPath.Slab sl, float s, float x, float y, bool undo) where T : Component
         {

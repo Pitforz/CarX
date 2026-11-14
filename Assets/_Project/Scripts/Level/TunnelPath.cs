@@ -21,12 +21,12 @@ namespace CarX.Level
         [Range(0.5f, 6f)] public float segmentLength = 2f;
         [Tooltip("Толщина стенки плиты, видна в торцах стыков, м")]
         [Range(0.08f, 0.6f)] public float slabThickness = 0.25f;
-        [Tooltip("Зазор стыка с внутренней стороны поворота, м")]
-        [Range(0f, 0.1f)] public float minJointGap = 0.025f;
-        [Tooltip("Насколько просела замытая песком щель в полу, м")]
-        [Range(0f, 0.15f)] public float jointSink = 0.04f;
-        [Tooltip("Фаска на кромках плит, м")]
-        [Range(0f, 0.06f)] public float edgeBevel = 0.02f;
+        [Tooltip("Ширина шва между плитами, м (одинаковая по всему кругу, и на поворотах)")]
+        [Range(0f, 0.03f)] public float minJointGap = 0.006f;
+        [Tooltip("На сколько шов в полу ниже пола, м (не больше 5 мм: пол остаётся одной плоскостью)")]
+        [Range(0f, 0.005f)] public float jointSink = 0.001f;
+        [Tooltip("Фаска на кромках плит на стенах и потолке, м (на полу фаски нет)")]
+        [Range(0f, 0.03f)] public float edgeBevel = 0.006f;
         [Tooltip("Высота грязной полосы (след воды) на стенах, м. 0 = без полосы")]
         [Range(0f, 1.5f)] public float dirtLine = 0.9f;
 
@@ -43,6 +43,8 @@ namespace CarX.Level
         public bool capStart;
         [Tooltip("Заглушить конец бетонной стенкой (тупик)")]
         public bool capEnd;
+        [Tooltip("Без швов между плитами: стыки срезаны под углом, текстура непрерывная")]
+        public bool seamless;
         [Tooltip("Случайное зерно: поворот текстур на плитах")]
         public int seed = 1;
 
@@ -56,6 +58,40 @@ namespace CarX.Level
         [Header("Материалы (пусто = стандартные)")]
         public TunnelMaterials materials;
 
+        /// <summary>Set by TunnelNetwork: ready-made slab joints (local). When present, child points are ignored.</summary>
+        [HideInInspector] public List<Vector3> drivenSamples = new List<Vector3>();
+        [HideInInspector] public int drivenSignature;
+        public bool IsDriven { get { return drivenSamples != null && drivenSamples.Count >= 2; } }
+        /// <summary>Set by TunnelNetwork: holes in the side walls where smaller tunnels join this one.</summary>
+        [HideInInspector] public List<SideOpening> openings = new List<SideOpening>();
+        /// <summary>Set by TunnelNetwork: sharp corners (elbows), joined with a mitre cut instead of a joint.</summary>
+        [HideInInspector] public List<Vector3> drivenMiters = new List<Vector3>();
+        /// <summary>Set by TunnelNetwork: the start/end is cut along a wall with this normal (zero = square end).</summary>
+        [HideInInspector] public Vector3 startPlane, endPlane;
+        /// <summary>Set by TunnelNetwork: opening in the end wall (profile coordinates), where another tunnel type goes on.</summary>
+        [HideInInspector] public List<Vector2> capHoleStart = new List<Vector2>(), capHoleEnd = new List<Vector2>();
+        /// <summary>Set by TunnelNetwork: the start/end enters the side wall of a bigger tunnel through this opening (profile coordinates).
+        /// The reveal says how far the walls go on past the end at each height (x = height, y = depth) to meet a leaning main wall.</summary>
+        [HideInInspector] public List<Vector2> startOpening = new List<Vector2>(), endOpening = new List<Vector2>();
+        [HideInInspector] public List<Vector2> startReveal = new List<Vector2>(), endReveal = new List<Vector2>();
+
+        /// <summary>World positions of the first and last point of the tunnel axis.</summary>
+        public bool EndsWorld(out Vector3 a, out Vector3 b)
+        {
+            a = b = Vector3.zero;
+            if (IsDriven)
+            {
+                a = transform.TransformPoint(drivenSamples[0]);
+                b = transform.TransformPoint(drivenSamples[drivenSamples.Count - 1]);
+                return true;
+            }
+            var pts = Points();
+            if (pts.Count < 2) return false;
+            a = pts[0].position;
+            b = pts[pts.Count - 1].position;
+            return true;
+        }
+
         [SerializeField, HideInInspector] List<GameObject> shaftObjects = new List<GameObject>();
         [SerializeField, HideInInspector] List<int> shaftHashes = new List<int>();
 
@@ -65,7 +101,19 @@ namespace CarX.Level
         {
             public Vector3 a, b, fwd, right, up;
             public float length, tStart, tEnd, startDistance;
+            public Vector3 mStart, mEnd;   // mitre plane normals at the ends (zero = square end)
+            public bool gapStart, gapEnd;  // mitred joint with a thin seam (bevel and joint fill stay), not a closed mitre
             public Vector3 Point(float s, float x, float y) { return a + fwd * s + right * x + up * y; }
+            /// <summary>Like Point, but near a mitred end the cross-section is cut parallel to the mitre plane
+            /// (start half of the slab: start mitre, end half: end mitre), so a seam has the same width all round.</summary>
+            public Vector3 MPoint(float s, float x, float y)
+            {
+                var o = right * x + up * y;
+                var X = a + fwd * s + o;
+                if (s <= length * 0.5f) { if (mStart != Vector3.zero) X -= fwd * (Vector3.Dot(o, mStart) / Vector3.Dot(fwd, mStart)); }
+                else if (mEnd != Vector3.zero) X -= fwd * (Vector3.Dot(o, mEnd) / Vector3.Dot(fwd, mEnd));
+                return X;
+            }
             public Vector3 Dir(Vector2 v) { return right * v.x + up * v.y; }
         }
 
@@ -150,7 +198,12 @@ namespace CarX.Level
 
             slabs.Clear();
             totalLength = 0f;
-            if (pts.Count >= 2)
+            if (IsDriven)
+            {
+                BuildSlabsFromSamples(new List<Vector3>(drivenSamples));
+                CutEnds();
+            }
+            else if (pts.Count >= 2)
             {
                 var local = new List<Vector3>(pts.Count);
                 foreach (var p in pts) local.Add(transform.InverseTransformPoint(p.position));
@@ -192,7 +245,11 @@ namespace CarX.Level
 
         void BuildSlabs(List<Vector3> p)
         {
-            var q = SamplePath(p);
+            BuildSlabsFromSamples(SamplePath(p));
+        }
+
+        void BuildSlabsFromSamples(List<Vector3> q)
+        {
             float dist = 0f;
             Vector3 lastRight = Vector3.right;
             for (int i = 0; i + 1 < q.Count; i++)
@@ -217,22 +274,75 @@ namespace CarX.Level
             {
                 var s0 = slabs[k - 1];
                 var s1 = slabs[k];
-                float t = minJointGap * 0.5f;
+                if (seamless || IsMiter(s0.b))
+                {
+                    var nm = s0.fwd + s1.fwd;
+                    if (nm.sqrMagnitude > 1e-6f)
+                    {
+                        s0.mEnd = s1.mStart = nm.normalized;
+                        s0.tEnd = s1.tStart = 0f;
+                        slabs[k - 1] = s0;
+                        slabs[k] = s1;
+                        continue;
+                    }
+                }
+                float t = Mathf.Max(0.001f, minJointGap) * 0.5f;
                 float ang = Vector3.Angle(s0.fwd, s1.fwd) * Mathf.Deg2Rad;
+                float e = 0f;
                 if (ang > 1e-4f)
                 {
                     Vector3 n = (s1.fwd - s0.fwd).normalized;
                     float nx = Vector3.Dot(n, s0.right), ny = Vector3.Dot(n, s0.up);
-                    float e = 0f;
                     foreach (var v in outline) e = Mathf.Max(e, v.x * nx + v.y * ny);
-                    t += e * Mathf.Tan(Mathf.Min(ang, 1.2f) * 0.5f);
                 }
+                // regular joint: both slab ends cut parallel to the bisector plane, so the seam is equally thin
+                // on the inside and the outside of a bend (a square cut leaves a wedge there)
+                var bis = s0.fwd + s1.fwd;
+                float shear = ang < 1.2f ? e * Mathf.Tan(ang * 0.5f) / Mathf.Cos(ang * 0.5f) : float.MaxValue;
+                if (bis.sqrMagnitude > 1e-6f && t + shear + edgeBevel < 0.4f * Mathf.Min(s0.length, s1.length))
+                {
+                    s0.mEnd = s1.mStart = bis.normalized;
+                    s0.gapEnd = s1.gapStart = true;
+                    s0.tEnd = s1.tStart = t;
+                    slabs[k - 1] = s0;
+                    slabs[k] = s1;
+                    continue;
+                }
+                if (ang > 1e-4f) t += e * Mathf.Tan(Mathf.Min(ang, 1.2f) * 0.5f);
                 t = Mathf.Min(t, 0.45f * Mathf.Min(s0.length, s1.length));
                 s0.tEnd = t;
                 s1.tStart = t;
                 slabs[k - 1] = s0;
                 slabs[k] = s1;
             }
+        }
+
+        void CutEnds()
+        {
+            if (!IsDriven || slabs.Count == 0) return;
+            if (startPlane != Vector3.zero)
+            {
+                var s = slabs[0];
+                s.mStart = startPlane.normalized;
+                s.gapStart = false;
+                s.tStart = 0f;
+                slabs[0] = s;
+            }
+            if (endPlane != Vector3.zero)
+            {
+                var s = slabs[slabs.Count - 1];
+                s.mEnd = endPlane.normalized;
+                s.gapEnd = false;
+                s.tEnd = 0f;
+                slabs[slabs.Count - 1] = s;
+            }
+        }
+
+        bool IsMiter(Vector3 p)
+        {
+            if (drivenMiters == null || !IsDriven) return false;
+            foreach (var m in drivenMiters) if ((m - p).sqrMagnitude < 1e-4f) return true;
+            return false;
         }
 
         List<Vector3> SamplePath(List<Vector3> p)
@@ -399,7 +509,7 @@ namespace CarX.Level
         static Vector3 P(Slab sl, Profile prof, int j, float s, float expand)
         {
             Vector2 v = prof.Offset(j, expand);
-            return sl.a + sl.fwd * s + sl.right * v.x + sl.up * v.y;
+            return sl.MPoint(s, v.x, v.y);
         }
 
         void BuildTunnel(MeshKit kit, Profile prof, Dictionary<int, Hole> holes)
@@ -409,10 +519,16 @@ namespace CarX.Level
             int last = slabs.Count - 1;
             float thick = Mathf.Max(0.05f, slabThickness);
             var rnd = new System.Random(seed * 7919 + 13);
+            var cuts = PlanCuts();
             for (int k = 0; k <= last; k++)
             {
                 var sl = slabs[k];
-                bool wallStart = k == 0 && startAtWall, wallEnd = k == last && endAtWall;
+                List<Cut> slabCuts;
+                cuts.TryGetValue(k, out slabCuts);
+                bool wallStart = (k == 0 && startAtWall) || (sl.mStart != Vector3.zero && !sl.gapStart);
+                bool wallEnd = (k == last && endAtWall) || (sl.mEnd != Vector3.zero && !sl.gapEnd);
+                // at a joint between slabs the floor runs flat right up to the seam: no chamfer, no groove
+                bool flatS = !wallStart && k > 0, flatE = !wallEnd && k < last;
                 float s0 = sl.tStart, s1 = sl.length - sl.tEnd;
                 float bev = Mathf.Min(edgeBevel, (s1 - s0) * 0.2f);
                 bool flip = rnd.NextDouble() < 0.5;
@@ -440,24 +556,42 @@ namespace CarX.Level
                             continue;
                         }
                         int j0 = e, j1 = (e + 1) % n;
-                        Vector3 A = P(sl, prof, j0, sa, ea), B = P(sl, prof, j1, sa, ea);
-                        Vector3 C = P(sl, prof, j1, sb, eb), D = P(sl, prof, j0, sb, eb);
                         int sub = prof.edgeSub[e];
+                        float eA = ea, eB = eb;
+                        if (sub == 1)
+                        {
+                            if (flatS && r == 0) eA = 0f;
+                            if (flatE && r + 2 == ringS.Count) eB = 0f;
+                        }
+                        Vector3 A = P(sl, prof, j0, sa, eA), B = P(sl, prof, j1, sa, eA);
+                        Vector3 C = P(sl, prof, j1, sb, eB), D = P(sl, prof, j0, sb, eB);
                         Vector2 uA, uB, uC, uD;
                         if (sub == 1)
                         {
-                            float va = (sl.startDistance + sa) * 0.5f, vb = (sl.startDistance + sb) * 0.5f;
-                            uA = new Vector2(prof.points[j0].x * 0.5f, va); uB = new Vector2(prof.points[j1].x * 0.5f, va);
-                            uC = new Vector2(prof.points[j1].x * 0.5f, vb); uD = new Vector2(prof.points[j0].x * 0.5f, vb);
+                            // world-planar: the floor texture runs on unbroken from one tunnel into the next
+                            uA = FloorUV(A); uB = FloorUV(B); uC = FloorUV(C); uD = FloorUV(D);
                         }
                         else
                         {
                             float ua = sa / sl.length, ub = sb / sl.length;
-                            if (flip) { ua = 1f - ua; ub = 1f - ub; }
+                            if (seamless) { ua = (sl.startDistance + sa) / Mathf.Max(0.5f, segmentLength); ub = (sl.startDistance + sb) / Mathf.Max(0.5f, segmentLength); }
+                            else if (flip) { ua = 1f - ua; ub = 1f - ub; }
                             float v0, v1;
                             if (sub == 4) { v0 = prof.points[j0].y * 0.5f; v1 = prof.points[j1].y * 0.5f; }
                             else { v0 = prof.perim[e] * 0.5f + vOff; v1 = prof.perim[e + 1] * 0.5f + vOff; }
                             uA = new Vector2(ua, v0); uB = new Vector2(ua, v1); uC = new Vector2(ub, v1); uD = new Vector2(ub, v0);
+                        }
+                        if (slabCuts != null)
+                        {
+                            Vector2 inw = prof.EdgeInward(e);
+                            List<List<Vector2>> hit = null;
+                            foreach (var cut in slabCuts)
+                                if (cut.side * inw.x < -0.05f) (hit ??= new List<List<Vector2>>()).Add(cut.poly);
+                            if (hit != null)
+                            {
+                                QuadCut(kit, sub, sl, A, B, C, D, uA, uB, uC, uD, sl.Dir(inw), hit);
+                                continue;
+                            }
                         }
                         if (prof.smooth && sub != 1)
                         {
@@ -467,12 +601,41 @@ namespace CarX.Level
                         else kit.Quad(sub, A, B, C, D, uA, uB, uC, uD, sl.Dir(prof.EdgeInward(e)));
                     }
                 }
-                if (!wallStart) Lip(kit, sl, prof, s0, bev, thick, -sl.fwd, vOff);
-                if (!wallEnd) Lip(kit, sl, prof, s1, bev, thick, sl.fwd, vOff);
-                if (k == 0 && capStart && !startAtWall) Cap(kit, sl, prof, s0 - 0.01f, thick, sl.fwd);
-                if (k == last && capEnd && !endAtWall) Cap(kit, sl, prof, s1 + 0.01f, thick, -sl.fwd);
+                if (!wallStart) Lip(kit, sl, prof, s0, bev, thick, -sl.fwd, vOff, flatS);
+                if (!wallEnd) Lip(kit, sl, prof, s1, bev, thick, sl.fwd, vOff, flatE);
+                // where a flat floor edge meets a chamfered wall edge: close the tiny corner between them
+                if ((flatS || flatE) && bev > 1e-4f)
+                    for (int j = 0; j < n; j++)
+                    {
+                        if ((prof.edgeSub[(j + n - 1) % n] == 1) == (prof.edgeSub[j] == 1)) continue;
+                        if (flatS) Tri2(kit, P(sl, prof, j, s0, 0f), P(sl, prof, j, s0 + bev, 0f), P(sl, prof, j, s0, bev));
+                        if (flatE) Tri2(kit, P(sl, prof, j, s1, 0f), P(sl, prof, j, s1 - bev, 0f), P(sl, prof, j, s1, bev));
+                    }
+                // dead end: a wall just past the rim; a wall with an opening (meets another tunnel): exactly at the end
+                bool holeS = capHoleStart != null && capHoleStart.Count >= 3, holeE = capHoleEnd != null && capHoleEnd.Count >= 3;
+                // (a wall with an opening covers only the inside of the tunnel: nothing of it lies on the other tunnel's walls)
+                if (k == 0 && capStart && (!startAtWall || holeS)) Cap(kit, sl, prof, startAtWall ? s0 : s0 - 0.01f, startAtWall ? 0f : thick, sl.fwd, capHoleStart);
+                if (k == last && capEnd && (!endAtWall || holeE)) Cap(kit, sl, prof, endAtWall ? s1 : s1 + 0.01f, endAtWall ? 0f : thick, -sl.fwd, capHoleEnd);
+                if (k == 0 && startReveal != null && startReveal.Count >= 2) Reveal(kit, sl, s0, -1f, startOpening, startReveal);
+                if (k == last && endReveal != null && endReveal.Count >= 2) Reveal(kit, sl, s1, 1f, endOpening, endReveal);
             }
-            for (int k = 1; k <= last; k++) JointFill(kit, prof, slabs[k - 1], slabs[k], thick);
+            for (int k = 1; k <= last; k++)
+                if (slabs[k].mStart == Vector3.zero || slabs[k].gapStart) JointFill(kit, prof, slabs[k - 1], slabs[k], thick);
+        }
+
+        Vector2 FloorUV(Vector3 local)
+        {
+            var w = transform.TransformPoint(local);
+            return new Vector2(w.x * 0.5f, w.z * 0.5f);
+        }
+
+        static void Tri2(MeshKit kit, Vector3 a, Vector3 b, Vector3 c)
+        {
+            var nrm = Vector3.Cross(b - a, c - a);
+            if (nrm.sqrMagnitude < 1e-14f) return;
+            Vector2 u = Vector2.zero, v = new Vector2(0.01f, 0f), w = new Vector2(0f, 0.01f);
+            kit.Tri(0, a, b, c, u, v, w, nrm);
+            kit.Tri(0, a, b, c, u, v, w, -nrm);
         }
 
         void CeilingWithHole(MeshKit kit, Slab sl, Profile prof, Hole hole, float sa, float sb, bool flip, float vOff)
@@ -486,9 +649,15 @@ namespace CarX.Level
             for (int t = 0; t + 2 < tris.Count; t += 3)
             {
                 Vector2 a = tris[t], b = tris[t + 1], d = tris[t + 2];
-                kit.Tri(0, sl.Point(a.y, a.x, y), sl.Point(b.y, b.x, y), sl.Point(d.y, d.x, y),
+                kit.Tri(0, CeilPoint(sl, a, y, sa, sb), CeilPoint(sl, b, y, sa, sb), CeilPoint(sl, d, y, sa, sb),
                         CeilUV(a, sl, prof, pa, flip, vOff), CeilUV(b, sl, prof, pa, flip, vOff), CeilUV(d, sl, prof, pa, flip, vOff), -sl.up);
             }
+        }
+
+        /// <summary>Rim corners follow the slab's cut ends (like the rest of the ring); the opening stays as planned.</summary>
+        static Vector3 CeilPoint(Slab sl, Vector2 v, float y, float sa, float sb)
+        {
+            return v.y <= sa + 1e-4f || v.y >= sb - 1e-4f ? sl.MPoint(v.y, v.x, y) : sl.Point(v.y, v.x, y);
         }
 
         static Vector2 CeilUV(Vector2 v, Slab sl, Profile prof, Vector2 pa, bool flip, float vOff)
@@ -498,57 +667,128 @@ namespace CarX.Level
             return new Vector2(u, (prof.perim[prof.ceilingEdge] + Mathf.Abs(v.x - pa.x)) * 0.5f + vOff);
         }
 
-        static void Lip(MeshKit kit, Slab sl, Profile prof, float s, float bev, float thick, Vector3 facing, float vOff)
+        static void Lip(MeshKit kit, Slab sl, Profile prof, float s, float bev, float thick, Vector3 facing, float vOff, bool flatFloor)
         {
             int n = prof.Count;
             for (int e = 0; e < n; e++)
             {
                 int j0 = e, j1 = (e + 1) % n;
-                Vector3 A = P(sl, prof, j0, s, bev), B = P(sl, prof, j1, s, bev);
+                float e0 = flatFloor && prof.edgeSub[e] == 1 ? 0f : bev;
+                Vector3 A = P(sl, prof, j0, s, e0), B = P(sl, prof, j1, s, e0);
                 Vector3 C = P(sl, prof, j1, s, thick), D = P(sl, prof, j0, s, thick);
                 float u0 = prof.perim[e] * 0.5f + vOff, u1 = prof.perim[e + 1] * 0.5f + vOff;
-                kit.Quad(0, A, B, C, D, new Vector2(u0, bev * 0.5f), new Vector2(u1, bev * 0.5f), new Vector2(u1, thick * 0.5f), new Vector2(u0, thick * 0.5f), facing);
+                kit.Quad(0, A, B, C, D, new Vector2(u0, e0 * 0.5f), new Vector2(u1, e0 * 0.5f), new Vector2(u1, thick * 0.5f), new Vector2(u0, thick * 0.5f), facing);
             }
         }
 
-        static void Cap(MeshKit kit, Slab sl, Profile prof, float s, float thick, Vector3 facing)
+        static void Cap(MeshKit kit, Slab sl, Profile prof, float s, float thick, Vector3 facing, List<Vector2> hole)
         {
             var ring = new List<Vector2>(prof.Count);
             for (int j = 0; j < prof.Count; j++) ring.Add(prof.Offset(j, thick));
-            var tris = MeshKit.FanFill(prof.centre, ring);
+            List<Vector2> tris;
+            if (hole != null && hole.Count >= 3)
+            {
+                // wall with an opening: fill between the opening and the outer edge
+                Vector2 c = Vector2.zero;
+                foreach (var v in hole) c += v;
+                tris = MeshKit.RingFill(c / hole.Count, hole, ring);
+            }
+            else tris = MeshKit.FanFill(prof.centre, ring);
             for (int t = 0; t + 2 < tris.Count; t += 3)
             {
                 Vector2 a = tris[t], b = tris[t + 1], c = tris[t + 2];
-                kit.Tri(0, sl.Point(s, a.x, a.y), sl.Point(s, b.x, b.y), sl.Point(s, c.x, c.y), a * 0.5f, b * 0.5f, c * 0.5f, facing);
+                kit.Tri(0, sl.MPoint(s, a.x, a.y), sl.MPoint(s, b.x, b.y), sl.MPoint(s, c.x, c.y), a * 0.5f, b * 0.5f, c * 0.5f, facing);
             }
+        }
+
+        /// <summary>Walls of this tunnel carried on past its end (dir -1 = before the start, +1 = after the end) by the reveal depth,
+        /// so they meet a bigger tunnel's leaning wall exactly: no gap, no part sticking into it.</summary>
+        void Reveal(MeshKit kit, Slab sl, float s, float dir, List<Vector2> opening, List<Vector2> reveal)
+        {
+            if (opening == null || opening.Count < 3) return;
+            float line = dirtLine > 0.01f ? dirtLine : -1f;
+            var cuts = new List<float>();
+            foreach (var r in reveal) cuts.Add(r.x);
+            if (line > 0f) cuts.Add(line);
+            float perim = 0f;
+            for (int i = 0; i < opening.Count; i++)
+            {
+                Vector2 p = opening[i], q = opening[(i + 1) % opening.Count];
+                float len = Vector2.Distance(p, q);
+                if (len < 1e-4f) continue;
+                // split the edge where the depth changes slope and at the dirt line
+                var ts = new List<float> { 0f, 1f };
+                if (Mathf.Abs(q.y - p.y) > 1e-4f)
+                    foreach (var y in cuts)
+                    {
+                        float t = (y - p.y) / (q.y - p.y);
+                        if (t > 1e-4f && t < 1f - 1e-4f) ts.Add(t);
+                    }
+                ts.Sort();
+                bool floor = Mathf.Abs(p.y) < 1e-3f && Mathf.Abs(q.y) < 1e-3f;
+                Vector2 inw = new Vector2(p.y - q.y, q.x - p.x).normalized;   // into the opening (outline is counter-clockwise)
+                for (int k = 0; k + 1 < ts.Count; k++)
+                {
+                    Vector2 a = Vector2.Lerp(p, q, ts[k]), b = Vector2.Lerp(p, q, ts[k + 1]);
+                    float ea = Depth(reveal, a.y), eb = Depth(reveal, b.y);
+                    if (ea < 1e-3f && eb < 1e-3f) continue;
+                    Vector3 A = sl.Point(s, a.x, a.y), B = sl.Point(s, b.x, b.y);
+                    Vector3 C = sl.Point(s + dir * eb, b.x, b.y), D = sl.Point(s + dir * ea, a.x, a.y);
+                    float pa = (perim + len * ts[k]) * 0.5f, pb = (perim + len * ts[k + 1]) * 0.5f;
+                    int sub = floor ? 1 : (line > 0f && Mathf.Max(a.y, b.y) <= line + 1e-3f ? 4 : 0);
+                    Vector2 uA, uB, uC, uD;
+                    if (floor) { uA = FloorUV(A); uB = FloorUV(B); uC = FloorUV(C); uD = FloorUV(D); }
+                    else if (sub == 4) { uA = new Vector2(0f, a.y * 0.5f); uB = new Vector2(0f, b.y * 0.5f); uC = new Vector2(eb * 0.5f, b.y * 0.5f); uD = new Vector2(ea * 0.5f, a.y * 0.5f); }
+                    else { uA = new Vector2(0f, pa); uB = new Vector2(0f, pb); uC = new Vector2(eb * 0.5f, pb); uD = new Vector2(ea * 0.5f, pa); }
+                    if (ea < 1e-3f) kit.Tri(sub, A, B, C, uA, uB, uC, sl.Dir(inw));
+                    else if (eb < 1e-3f) kit.Tri(sub, A, B, D, uA, uB, uD, sl.Dir(inw));
+                    else kit.Quad(sub, A, B, C, D, uA, uB, uC, uD, sl.Dir(inw));
+                }
+                perim += len;
+            }
+        }
+
+        static float Depth(List<Vector2> reveal, float y)
+        {
+            if (y <= reveal[0].x) return reveal[0].y;
+            for (int i = 0; i + 1 < reveal.Count; i++)
+                if (y <= reveal[i + 1].x)
+                {
+                    float span = reveal[i + 1].x - reveal[i].x;
+                    return span > 1e-6f ? Mathf.Lerp(reveal[i].y, reveal[i + 1].y, (y - reveal[i].x) / span) : reveal[i + 1].y;
+                }
+            return reveal[reveal.Count - 1].y;
         }
 
         void JointFill(MeshKit kit, Profile prof, Slab A, Slab B, float thick)
         {
             int n = prof.Count;
             float sEnd = A.length - A.tEnd, sStart = B.tStart;
-            float depth = thick * 0.6f;
-            float va = (A.startDistance + sEnd - 0.12f) / 1.5f, vb = (B.startDistance + sStart + 0.12f) / 1.5f;
+            float gap = Vector3.Distance(A.Point(sEnd, 0f, 0f), B.Point(sStart, 0f, 0f));
+            // grey soil just behind the seam: shallow, so the seam reads as a thin line, not a dark slot
+            float depth = Mathf.Min(thick * 0.6f, Mathf.Max(0.015f, gap * 2f + edgeBevel * 2f));
+            float ia = Mathf.Min(0.06f, A.length * 0.3f), ib = Mathf.Min(0.06f, B.length * 0.3f);
+            float va = (A.startDistance + sEnd - ia) / 1.5f, vb = (B.startDistance + sStart + ib) / 1.5f;
             for (int e = 0; e < n; e++)
             {
+                if (prof.edgeSub[e] == 1) continue;   // the floor seam is filled flush below
                 int j0 = e, j1 = (e + 1) % n;
-                Vector3 a0 = P(A, prof, j0, sEnd - 0.12f, depth), a1 = P(A, prof, j1, sEnd - 0.12f, depth);
-                Vector3 b0 = P(B, prof, j0, sStart + 0.12f, depth), b1 = P(B, prof, j1, sStart + 0.12f, depth);
+                Vector3 a0 = P(A, prof, j0, sEnd - ia, depth), a1 = P(A, prof, j1, sEnd - ia, depth);
+                Vector3 b0 = P(B, prof, j0, sStart + ib, depth), b1 = P(B, prof, j1, sStart + ib, depth);
                 float p0 = prof.perim[e] / 1.5f, p1 = prof.perim[e + 1] / 1.5f;
                 kit.Quad(2, a0, a1, b1, b0, new Vector2(p0, va), new Vector2(p1, va), new Vector2(p1, vb), new Vector2(p0, vb), A.Dir(prof.EdgeInward(e)));
             }
-            // washed-in sand in the floor joint
+            // floor: the seam is filled with the same floor surface, at most a few mm lower, so the floor stays one plane
+            float sink = Mathf.Clamp(jointSink, 0f, 0.005f);
             for (int e = 0; e < n; e++)
             {
                 if (prof.edgeSub[e] != 1) continue;
                 Vector2 p0 = prof.points[e], p1 = prof.points[(e + 1) % n];
-                Vector2 dir = (p1 - p0).normalized;
                 Vector2 down = prof.edgeOut[e];
-                Vector2 q0 = p0 - dir * 0.06f + down * jointSink, q1 = p1 + dir * 0.06f + down * jointSink;
-                Vector3 a0 = A.Point(sEnd - 0.06f, q0.x, q0.y), a1 = A.Point(sEnd - 0.06f, q1.x, q1.y);
-                Vector3 b0 = B.Point(sStart + 0.06f, q0.x, q0.y), b1 = B.Point(sStart + 0.06f, q1.x, q1.y);
-                float da = (A.startDistance + sEnd - 0.06f) / 1.2f, db = (B.startDistance + sStart + 0.06f) / 1.2f;
-                kit.Quad(3, a0, a1, b1, b0, new Vector2(q0.x / 1.2f, da), new Vector2(q1.x / 1.2f, da), new Vector2(q1.x / 1.2f, db), new Vector2(q0.x / 1.2f, db), A.Dir(-down));
+                Vector2 q0 = p0 + down * sink, q1 = p1 + down * sink;
+                Vector3 a0 = A.MPoint(sEnd, q0.x, q0.y), a1 = A.MPoint(sEnd, q1.x, q1.y);
+                Vector3 b0 = B.MPoint(sStart, q0.x, q0.y), b1 = B.MPoint(sStart, q1.x, q1.y);
+                kit.Quad(1, a0, a1, b1, b0, FloorUV(a0), FloorUV(a1), FloorUV(b1), FloorUV(b0), A.Dir(-down));
             }
         }
 
@@ -571,7 +811,7 @@ namespace CarX.Level
                 var sl = slabs[k];
                 float s0 = k == 0 ? sl.tStart : 0f, s1 = k == last ? sl.length - sl.tEnd : sl.length;
                 float d0 = (sl.startDistance + s0) * 0.5f, d1 = (sl.startDistance + s1) * 0.5f;
-                kit.Quad(0, sl.Point(s0, -half, y), sl.Point(s0, half, y), sl.Point(s1, half, y), sl.Point(s1, -half, y),
+                kit.Quad(0, sl.MPoint(s0, -half, y), sl.MPoint(s0, half, y), sl.MPoint(s1, half, y), sl.MPoint(s1, -half, y),
                          new Vector2(-half * 0.5f, d0), new Vector2(half * 0.5f, d0), new Vector2(half * 0.5f, d1), new Vector2(-half * 0.5f, d1), sl.up);
             }
             if (waterMesh == null) waterMesh = new Mesh { name = name + "_Water", hideFlags = HideFlags.DontSave };
@@ -589,6 +829,160 @@ namespace CarX.Level
         }
 
         // ------------------------------------------------------------------ shafts
+
+        // ------------------------------------------------------------------ side openings (tunnel-to-tunnel joins)
+
+        struct Cut
+        {
+            public int side;
+            public List<Vector2> poly;   // slab space: x = along the slab from its start, y = height; convex, CCW
+        }
+
+        Dictionary<int, List<Cut>> PlanCuts()
+        {
+            var res = new Dictionary<int, List<Cut>>();
+            if (openings == null) return res;
+            foreach (var op in openings)
+            {
+                if (op == null || op.outline == null || op.outline.Count < 3) continue;
+                float half = 0f;
+                foreach (var v in op.outline) half = Mathf.Max(half, Mathf.Abs(v.x));
+                for (int k = 0; k < slabs.Count; k++)
+                {
+                    var sl = slabs[k];
+                    if (sl.startDistance > op.distance + half || sl.startDistance + sl.length < op.distance - half) continue;
+                    float c = op.distance - sl.startDistance;
+                    var pts = new List<Vector2>(op.outline.Count);
+                    foreach (var v in op.outline) pts.Add(new Vector2(c + v.x, v.y));
+                    List<Cut> list;
+                    if (!res.TryGetValue(k, out list)) { list = new List<Cut>(); res[k] = list; }
+                    foreach (var piece in MeshKit.ConvexPieces(pts))
+                        list.Add(new Cut { side = op.side >= 0 ? 1 : -1, poly = piece });
+                }
+            }
+            return res;
+        }
+
+        public string DebugCuts()
+        {
+            var cuts = PlanCuts();
+            var prof = section.Build(dirtLine);
+            string r = name + ": openings " + (openings != null ? openings.Count : -1) + ", slabs " + slabs.Count + ", cut slabs " + cuts.Count;
+            foreach (var kv in cuts)
+                foreach (var c in kv.Value)
+                {
+                    r += "\n   slab " + kv.Key + " len " + slabs[kv.Key].length.ToString("0.00") + " side " + c.side + " poly";
+                    foreach (var v in c.poly) r += " " + v.ToString("0.00");
+                }
+            r += "\n   inward:";
+            for (int e = 0; e < prof.Count; e++) r += " " + prof.EdgeInward(e).ToString("0.0");
+            if (openings != null) foreach (var o in openings) r += "\n   op d=" + o.distance.ToString("0.00") + " side " + o.side;
+            return r;
+        }
+
+        static List<Vector2> Hull(List<Vector2> p)
+        {
+            var pts = new List<Vector2>(p);
+            pts.Sort((a, b) => a.x != b.x ? a.x.CompareTo(b.x) : a.y.CompareTo(b.y));
+            var h = new List<Vector2>();
+            for (int pass = 0; pass < 2; pass++)
+            {
+                int start = h.Count;
+                for (int i = 0; i < pts.Count; i++)
+                {
+                    var q = pass == 0 ? pts[i] : pts[pts.Count - 1 - i];
+                    while (h.Count >= start + 2 && MeshKit.Cross2(h[h.Count - 1] - h[h.Count - 2], q - h[h.Count - 2]) <= 0f) h.RemoveAt(h.Count - 1);
+                    h.Add(q);
+                }
+                h.RemoveAt(h.Count - 1);
+            }
+            return h;   // counter-clockwise
+        }
+
+        static Vector2 To2(Slab sl, Vector3 p) { var q = p - sl.a; return new Vector2(Vector3.Dot(q, sl.fwd), Vector3.Dot(q, sl.up)); }
+
+        static Vector3 From2(Slab sl, Vector2 v, Vector3 onPlane, Vector3 N, float nr)
+        {
+            Vector3 b = sl.a + sl.fwd * v.x + sl.up * v.y;
+            return b + sl.right * (Vector3.Dot(N, onPlane - b) / nr);
+        }
+
+        static bool Bary(Vector2 p, Vector2 a, Vector2 b, Vector2 c, out Vector3 w)
+        {
+            float den = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+            if (Mathf.Abs(den) < 1e-9f) { w = new Vector3(1f, 0f, 0f); return false; }
+            float l1 = ((b.y - c.y) * (p.x - c.x) + (c.x - b.x) * (p.y - c.y)) / den;
+            float l2 = ((c.y - a.y) * (p.x - c.x) + (a.x - c.x) * (p.y - c.y)) / den;
+            w = new Vector3(l1, l2, 1f - l1 - l2);
+            return l1 >= -1e-3f && l2 >= -1e-3f && w.z >= -1e-3f;
+        }
+
+        static List<Vector2> ClipHalf(List<Vector2> poly, Vector2 h0, Vector2 h1, bool keepInside)
+        {
+            var res = new List<Vector2>();
+            Vector2 e = h1 - h0;
+            for (int i = 0; i < poly.Count; i++)
+            {
+                Vector2 p = poly[i], q = poly[(i + 1) % poly.Count];
+                float sp = MeshKit.Cross2(e, p - h0), sq = MeshKit.Cross2(e, q - h0);
+                if (!keepInside) { sp = -sp; sq = -sq; }
+                bool pin = sp >= 0f, qin = sq >= 0f;
+                if (pin) res.Add(p);
+                if (pin != qin) res.Add(Vector2.Lerp(p, q, sp / (sp - sq)));
+            }
+            return res;
+        }
+
+        static float Area2(List<Vector2> p)
+        {
+            float a = 0f;
+            for (int i = 0; i < p.Count; i++) a += MeshKit.Cross2(p[i], p[(i + 1) % p.Count]);
+            return Mathf.Abs(a) * 0.5f;
+        }
+
+        /// <summary>Convex polygon minus a convex CCW hole, as convex pieces.</summary>
+        static void Subtract(List<Vector2> P, List<Vector2> H, List<List<Vector2>> output)
+        {
+            var rest = P;
+            for (int i = 0; i < H.Count && rest.Count >= 3; i++)
+            {
+                Vector2 h0 = H[i], h1 = H[(i + 1) % H.Count];
+                var outside = ClipHalf(rest, h0, h1, false);
+                if (outside.Count >= 3 && Area2(outside) > 1e-6f) output.Add(outside);
+                rest = ClipHalf(rest, h0, h1, true);
+            }
+        }
+
+        static void QuadCut(MeshKit kit, int sub, Slab sl, Vector3 A, Vector3 B, Vector3 C, Vector3 D,
+                            Vector2 uA, Vector2 uB, Vector2 uC, Vector2 uD, Vector3 facing, List<List<Vector2>> holes)
+        {
+            Vector3 N = Vector3.Cross(C - A, D - B);
+            if (N.sqrMagnitude < 1e-12f) return;
+            N.Normalize();
+            float nr = Vector3.Dot(N, sl.right);
+            if (Mathf.Abs(nr) < 0.05f) { kit.Quad(sub, A, B, C, D, uA, uB, uC, uD, facing); return; }
+            Vector2 a = To2(sl, A), b = To2(sl, B), c = To2(sl, C), d = To2(sl, D);
+            var pieces = new List<List<Vector2>> { new List<Vector2> { a, b, c, d } };
+            foreach (var h in holes)
+            {
+                var next = new List<List<Vector2>>();
+                foreach (var p in pieces) Subtract(p, h, next);
+                pieces = next;
+            }
+            foreach (var p in pieces)
+            {
+                var w3 = new Vector3[p.Count];
+                var uv = new Vector2[p.Count];
+                for (int i = 0; i < p.Count; i++)
+                {
+                    w3[i] = From2(sl, p[i], A, N, nr);
+                    Vector3 w;
+                    if (Bary(p[i], a, b, c, out w)) uv[i] = uA * w.x + uB * w.y + uC * w.z;
+                    else { Bary(p[i], a, c, d, out w); uv[i] = uA * w.x + uC * w.y + uD * w.z; }
+                }
+                for (int i = 1; i + 1 < p.Count; i++) kit.Tri(sub, w3[0], w3[i], w3[i + 1], uv[0], uv[i], uv[i + 1], facing);
+            }
+        }
 
         void SyncShafts(Dictionary<int, Hole> holes, TunnelMaterials mats, bool force)
         {
@@ -664,6 +1058,15 @@ namespace CarX.Level
     }
 
     /// <summary>Objects that sit on the tunnel floor and follow it after rebuilds.</summary>
+    /// <summary>Hole in a tunnel side wall: outline in (offset along the tunnel, height above its floor).</summary>
+    [Serializable]
+    public class SideOpening
+    {
+        public float distance;
+        [Tooltip("+1 = правая стена, -1 = левая")] public int side = 1;
+        public List<Vector2> outline = new List<Vector2>();
+    }
+
     public interface IFloorDressing
     {
         float FloorOffset { get; }

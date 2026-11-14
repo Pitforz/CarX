@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 98696f901bdce1947978acfb1f5422a8, type: 3}
+  m_Name: TunnelTypes
+  m_EditorClassIdentifier: Assembly-CSharp::CarX.Level.TunnelTypeLibrary
+  types:
+  - {fileID: 11400000, guid: 90a77110023db5d4291c7a2fe9a0e956, type: 2}
+  - {fileID: 11400000, guid: af7c46b7422fb9a4f998c23e08eb89e9, type: 2}
+  - {fileID: 11400000, guid: 84ec7e18f056cd447876ffbf7ef1516d, type: 2}
+  - {fileID: 11400000, guid: 6432ec81533e9554a95983d87da36a7d, type: 2}
+  - {fileID: 11400000, guid: cad8b4cdc80df8b448cace19c7208e74, type: 2}
+  materials: {fileID: 11400000, guid: 602004a58c5e57341a3a1f614714beb7, type: 2}

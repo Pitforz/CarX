@@ -14,6 +14,13 @@ namespace CarX.EditorTools
         public override void OnInspectorGUI()
         {
             var path = (TunnelPath)target;
+            if (path.IsDriven)
+            {
+                EditorGUILayout.HelpBox("Этот тоннель построен графом (TunnelNetwork). Меняйте его через граф: выберите объект TunnelNetwork.", MessageType.Info);
+                var graph = path.GetComponentInParent<TunnelNetwork>();
+                if (graph != null && GUILayout.Button("Выбрать граф")) Selection.activeGameObject = graph.gameObject;
+                return;
+            }
             EditorGUILayout.HelpBox(
                 "Тоннель строится по точкам — это дочерние объекты Point_0, Point_1… Двигайте их стрелками в окне Scene.\n" +
                 "Подъёмы наверх (ливнёвки, люки) добавляются кнопками ниже и двигаются жёлтым шариком вдоль тоннеля.\n" +
@@ -35,8 +42,8 @@ namespace CarX.EditorTools
             }
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Раскидать лужи и песок")) TunnelDressing.Scatter(path, Random.Range(1, 99999), true);
-                if (GUILayout.Button("Убрать лужи и песок")) TunnelDressing.Clear(path, true);
+                if (GUILayout.Button("Раскидать лужи")) TunnelDressing.Scatter(path, Random.Range(1, 99999), true);
+                if (GUILayout.Button("Убрать лужи")) TunnelDressing.Clear(path, true);
             }
             if (GUILayout.Button("Пересобрать")) path.Rebuild(true);
             EditorGUILayout.Space();
@@ -93,6 +100,7 @@ namespace CarX.EditorTools
         void OnSceneGUI()
         {
             var path = (TunnelPath)target;
+            if (path.IsDriven) return;
             var pts = path.Points();
             var line = new List<Vector3>();
             foreach (var p in pts) line.Add(p.position);
@@ -187,6 +195,12 @@ namespace CarX.EditorTools
         public override void OnInspectorGUI()
         {
             var j = (TunnelJunction)target;
+            if (j.drivenSignature != 0 && j.GetComponentInParent<TunnelNetwork>() != null)
+            {
+                EditorGUILayout.HelpBox("Эта камера построена графом (TunnelNetwork). Размеры и подъём меняйте в узле графа.", MessageType.Info);
+                if (GUILayout.Button("Выбрать граф")) Selection.activeGameObject = j.GetComponentInParent<TunnelNetwork>().gameObject;
+                return;
+            }
             EditorGUILayout.HelpBox(
                 "Камера-развязка. Перетащите тоннели (объекты с Tunnel Path) в поля сторон и нажмите «Пристыковать тоннели»: " +
                 "ближняя крайняя точка тоннеля встанет в центр стены, а в стене вырежется проём точно по форме тоннеля.", MessageType.Info);

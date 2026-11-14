@@ -271,6 +271,136 @@ namespace CarX.Level
             return res;
         }
 
+        /// <summary>
+        /// For an outline that every horizontal line crosses in one piece (all tunnel profiles are like that):
+        /// horizontal bands between its corner heights, clipped to [yMin, yMax]. Each band: left and right edge at its bottom and top.
+        /// </summary>
+        static List<Vector2[]> Bands(IList<Vector2> poly, float yMin, float yMax)
+        {
+            var res = new List<Vector2[]>();
+            int n = poly.Count;
+            if (n < 3) return res;
+            float lo = float.MaxValue, hi = float.MinValue;
+            foreach (var v in poly) { lo = Mathf.Min(lo, v.y); hi = Mathf.Max(hi, v.y); }
+            lo = Mathf.Max(lo, yMin);
+            hi = Mathf.Min(hi, yMax);
+            if (hi - lo < 1e-4f) return res;
+            var ys = new List<float> { lo, hi };
+            foreach (var v in poly) if (v.y > lo + 1e-4f && v.y < hi - 1e-4f) ys.Add(v.y);
+            ys.Sort();
+            for (int b = 0; b + 1 < ys.Count; b++)
+            {
+                float ya = ys[b], yb = ys[b + 1];
+                if (yb - ya < 1e-4f) continue;
+                float ym = (ya + yb) * 0.5f;
+                float xl = float.MaxValue, xr = float.MinValue;
+                int el = -1, er = -1;
+                for (int i = 0; i < n; i++)
+                {
+                    Vector2 a = poly[i], c = poly[(i + 1) % n];
+                    if (Mathf.Abs(a.y - c.y) < 1e-6f || ym < Mathf.Min(a.y, c.y) || ym > Mathf.Max(a.y, c.y)) continue;
+                    float x = Mathf.Lerp(a.x, c.x, (ym - a.y) / (c.y - a.y));
+                    if (x < xl) { xl = x; el = i; }
+                    if (x > xr) { xr = x; er = i; }
+                }
+                if (el < 0 || er < 0 || xr - xl < 1e-4f) continue;
+                res.Add(new[] { EdgeAt(poly, el, ya), EdgeAt(poly, er, ya), EdgeAt(poly, er, yb), EdgeAt(poly, el, yb) });
+            }
+            return res;
+        }
+
+        static Vector2 EdgeAt(IList<Vector2> poly, int i, float y)
+        {
+            Vector2 a = poly[i], c = poly[(i + 1) % poly.Count];
+            return new Vector2(Mathf.Lerp(a.x, c.x, (y - a.y) / (c.y - a.y)), y);
+        }
+
+        static List<Vector2> FromChains(List<Vector2> L, List<Vector2> R)
+        {
+            var p = new List<Vector2>();
+            System.Action<Vector2> add = v => { if (p.Count == 0 || (p[p.Count - 1] - v).sqrMagnitude > 1e-8f) p.Add(v); };
+            add(L[0]);
+            foreach (var v in R) add(v);
+            for (int i = L.Count - 1; i >= 1; i--) add(L[i]);
+            while (p.Count > 1 && (p[0] - p[p.Count - 1]).sqrMagnitude <= 1e-8f) p.RemoveAt(p.Count - 1);
+            // drop points in the middle of a straight edge
+            for (int i = p.Count - 1; i >= 0 && p.Count > 3; i--)
+            {
+                Vector2 a = p[(i + p.Count - 1) % p.Count], b = p[i], c = p[(i + 1) % p.Count];
+                if (Mathf.Abs(Cross2(b - a, c - b)) < 1e-7f && Vector2.Dot(b - a, c - b) > 0f) p.RemoveAt(i);
+            }
+            return p;
+        }
+
+        static bool IsConvexCCW(List<Vector2> p)
+        {
+            for (int i = 0; i < p.Count; i++)
+                if (Cross2(p[(i + 1) % p.Count] - p[i], p[(i + 2) % p.Count] - p[(i + 1) % p.Count]) < -1e-6f) return false;
+            return true;
+        }
+
+        /// <summary>The outline cut off below yMin and above yMax, counter-clockwise (the outline must cross every horizontal line in one piece).</summary>
+        public static List<Vector2> ClipOutline(IList<Vector2> poly, float yMin, float yMax)
+        {
+            var bands = Bands(poly, yMin, yMax);
+            if (bands.Count == 0) return new List<Vector2>();
+            var L = new List<Vector2>();
+            var R = new List<Vector2>();
+            foreach (var b in bands) { L.Add(b[0]); L.Add(b[3]); R.Add(b[1]); R.Add(b[2]); }
+            return FromChains(L, R);
+        }
+
+        /// <summary>The same outline as a few convex counter-clockwise pieces (stacked horizontal bands).</summary>
+        public static List<List<Vector2>> ConvexPieces(IList<Vector2> poly, float yMin = float.MinValue, float yMax = float.MaxValue)
+        {
+            var res = new List<List<Vector2>>();
+            List<Vector2> L = null, R = null;
+            foreach (var b in Bands(poly, yMin, yMax))
+            {
+                if (L != null && (L[L.Count - 1] - b[0]).sqrMagnitude < 1e-8f && (R[R.Count - 1] - b[1]).sqrMagnitude < 1e-8f)
+                {
+                    var L2 = new List<Vector2>(L) { b[3] };
+                    var R2 = new List<Vector2>(R) { b[2] };
+                    if (IsConvexCCW(FromChains(L2, R2))) { L = L2; R = R2; continue; }
+                }
+                if (L != null) res.Add(FromChains(L, R));
+                L = new List<Vector2> { b[0], b[3] };
+                R = new List<Vector2> { b[1], b[2] };
+            }
+            if (L != null) res.Add(FromChains(L, R));
+            return res;
+        }
+
+        /// <summary>Sutherland–Hodgman clip of a polygon to an axis-aligned rectangle.</summary>
+        public static List<Vector2> ClipRect(IList<Vector2> poly, float x0, float y0, float x1, float y1)
+        {
+            var p = new List<Vector2>(poly);
+            for (int side = 0; side < 4 && p.Count > 0; side++)
+            {
+                var input = p;
+                p = new List<Vector2>();
+                for (int k = 0; k < input.Count; k++)
+                {
+                    Vector2 cur = input[k], prev = input[(k + input.Count - 1) % input.Count];
+                    float dc = RectDist(cur, side, x0, y0, x1, y1), dp = RectDist(prev, side, x0, y0, x1, y1);
+                    if ((dc >= 0f) != (dp >= 0f)) p.Add(Vector2.Lerp(prev, cur, dp / (dp - dc)));
+                    if (dc >= 0f) p.Add(cur);
+                }
+            }
+            return p;
+        }
+
+        static float RectDist(Vector2 v, int side, float x0, float y0, float x1, float y1)
+        {
+            switch (side)
+            {
+                case 0: return v.x - x0;
+                case 1: return x1 - v.x;
+                case 2: return v.y - y0;
+                default: return y1 - v.y;
+            }
+        }
+
         /// <summary>Splits a 2D triangle by the horizontal line y = line; emits parts below and above.</summary>
         public static void SplitTri(Vector2 a, Vector2 b, Vector2 c, float line, List<Vector2> below, List<Vector2> above)
         {
