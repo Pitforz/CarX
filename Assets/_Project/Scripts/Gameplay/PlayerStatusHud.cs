@@ -1,0 +1,365 @@
+using UnityEngine;
+
+namespace CarX.Gameplay
+{
+    [RequireComponent(typeof(PlayerHealth))]
+    [DisallowMultipleComponent]
+    public class PlayerStatusHud : MonoBehaviour
+    {
+        const float StatusPadding = 24f;
+        const float SubtitleDuration = 3f;
+        const float DamageFlashAttack = 0.04f;
+        const float DamageFlashFade = 0.55f;
+        static readonly Vector2 StatusSize = new(200f, 82f);
+
+        PlayerHealth _health;
+        RectTransform _hudRect;
+        RectTransform _statusPanel;
+        Rect _lastSafeArea;
+        Vector2 _lastCanvasSize;
+        UnityEngine.UI.Slider _healthBar;
+        UnityEngine.UI.Slider _flashlightBar;
+        UnityEngine.UI.Text _healthLabel;
+        UnityEngine.UI.Text _flashlightLabel;
+        UnityEngine.UI.Text _ammoLabel;
+        UnityEngine.UI.Text _reloadLabel;
+        UnityEngine.UI.Text _aimDot;
+        UnityEngine.UI.Text _pickupLabel;
+        UnityEngine.UI.Text _subtitleLabel;
+        UnityEngine.UI.RawImage _damageFlash;
+        Texture2D _damageTexture;
+        int _lastHealth;
+        float _damageFlashElapsed;
+        float _damageFlashStartAlpha;
+        float _damageFlashPeak;
+        float _subtitleUntil;
+        bool _aiming;
+        bool _inventoryOpen;
+        int _displayedLoaded = -1;
+        int _displayedReserve = -1;
+
+        internal RectTransform HudRect => _hudRect;
+
+        void Start()
+        {
+            _health = GetComponent<PlayerHealth>();
+
+            var hud = new GameObject("Player Status HUD", typeof(RectTransform), typeof(Canvas),
+                typeof(UnityEngine.UI.CanvasScaler));
+            if (hud.scene != gameObject.scene)
+                UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(hud, gameObject.scene);
+            _hudRect = (RectTransform)hud.transform;
+            hud.GetComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
+            var scaler = hud.GetComponent<UnityEngine.UI.CanvasScaler>();
+            scaler.uiScaleMode = UnityEngine.UI.CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1280, 720);
+            scaler.matchWidthOrHeight = 0.5f;
+
+            CreateDamageFlash();
+
+            var panel = CreateRect(_hudRect, "Status", typeof(UnityEngine.UI.VerticalLayoutGroup));
+            panel.anchorMin = panel.anchorMax = panel.pivot = Vector2.zero;
+            panel.sizeDelta = StatusSize;
+            _statusPanel = panel;
+            UpdateStatusLayout();
+            var layout = panel.GetComponent<UnityEngine.UI.VerticalLayoutGroup>();
+            layout.spacing = 3;
+            layout.childControlWidth = true;
+            layout.childControlHeight = true;
+            layout.childForceExpandHeight = false;
+            layout.childForceExpandWidth = true;
+
+            var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            _healthLabel = CreateLabel(panel, "Health Label", font);
+            _healthBar = CreateBar(panel, "Health", new Color32(225, 83, 82, 255));
+            _flashlightLabel = CreateLabel(panel, "Flashlight Label", font);
+            _flashlightBar = CreateBar(panel, "Flashlight", new Color32(248, 199, 89, 255));
+
+            var bottomRight = new Vector2(1f, 0f);
+            _ammoLabel = CreateLabel(_hudRect, "Pistol Ammo", font);
+            _ammoLabel.fontSize = 24;
+            _ammoLabel.alignment = TextAnchor.MiddleRight;
+            _ammoLabel.rectTransform.anchorMin = _ammoLabel.rectTransform.anchorMax = bottomRight;
+            _ammoLabel.rectTransform.pivot = bottomRight;
+            _ammoLabel.rectTransform.anchoredPosition = new Vector2(-24f, 24f);
+            _ammoLabel.rectTransform.sizeDelta = new Vector2(160f, 30f);
+            _ammoLabel.gameObject.SetActive(false);
+
+            _reloadLabel = CreateLabel(_hudRect, "Pistol Reload", font);
+            _reloadLabel.text = "Перезарядка";
+            _reloadLabel.alignment = TextAnchor.MiddleRight;
+            _reloadLabel.rectTransform.anchorMin = _reloadLabel.rectTransform.anchorMax = bottomRight;
+            _reloadLabel.rectTransform.pivot = bottomRight;
+            _reloadLabel.rectTransform.anchoredPosition = new Vector2(-24f, 56f);
+            _reloadLabel.rectTransform.sizeDelta = new Vector2(160f, 22f);
+            _reloadLabel.gameObject.SetActive(false);
+
+            _aimDot = CreateLabel(_hudRect, "Aim Dot", font);
+            _aimDot.text = "•";
+            _aimDot.fontSize = 12;
+            _aimDot.alignment = TextAnchor.MiddleCenter;
+            _aimDot.rectTransform.anchorMin = _aimDot.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            _aimDot.rectTransform.anchoredPosition = Vector2.zero;
+            _aimDot.rectTransform.sizeDelta = new Vector2(24f, 24f);
+            _aimDot.gameObject.SetActive(false);
+
+            _pickupLabel = CreateLabel(_hudRect, "Pickup Hint", font);
+            _pickupLabel.alignment = TextAnchor.MiddleCenter;
+            _pickupLabel.rectTransform.anchorMin = _pickupLabel.rectTransform.anchorMax =
+                _pickupLabel.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            _pickupLabel.rectTransform.anchoredPosition = new Vector2(0f, -56f);
+            _pickupLabel.rectTransform.sizeDelta = new Vector2(280f, 52f);
+            _pickupLabel.gameObject.SetActive(false);
+
+            _subtitleLabel = CreateLabel(_hudRect, "Player Subtitle", font);
+            _subtitleLabel.fontSize = 20;
+            _subtitleLabel.alignment = TextAnchor.MiddleCenter;
+            var subtitleRect = _subtitleLabel.rectTransform;
+            subtitleRect.anchorMin = new Vector2(0.15f, 0f);
+            subtitleRect.anchorMax = new Vector2(0.85f, 0f);
+            subtitleRect.pivot = new Vector2(0.5f, 0f);
+            subtitleRect.anchoredPosition = new Vector2(0f, 28f);
+            subtitleRect.sizeDelta = new Vector2(0f, 52f);
+            _subtitleLabel.gameObject.SetActive(false);
+
+            _lastHealth = _health.CurrentHealth;
+            _health.HealthChanged += Refresh;
+            Refresh(_health.CurrentHealth);
+        }
+
+        void LateUpdate()
+        {
+            UpdateStatusLayout();
+            UpdateDamageFlash();
+            if (_subtitleLabel != null && _subtitleLabel.gameObject.activeSelf && Time.unscaledTime >= _subtitleUntil)
+                _subtitleLabel.gameObject.SetActive(false);
+        }
+
+        void UpdateStatusLayout()
+        {
+            if (_statusPanel == null || _hudRect == null || Screen.width <= 0 || Screen.height <= 0)
+                return;
+
+            Rect safePixels = Screen.safeArea;
+            var safeArea = new Rect(safePixels.x / Screen.width, safePixels.y / Screen.height,
+                safePixels.width / Screen.width, safePixels.height / Screen.height);
+            Vector2 canvasSize = _hudRect.rect.size;
+            if (safeArea == _lastSafeArea && canvasSize == _lastCanvasSize)
+                return;
+
+            Vector2 safeSize = Vector2.Scale(safeArea.size, canvasSize);
+            if (safeSize.x <= 0f || safeSize.y <= 0f)
+                return;
+
+            _lastSafeArea = safeArea;
+            _lastCanvasSize = canvasSize;
+            Vector2 paddedSize = StatusSize + Vector2.one * (2f * StatusPadding);
+            float scale = Mathf.Min(1f, Mathf.Min(safeSize.x / paddedSize.x, safeSize.y / paddedSize.y));
+            _statusPanel.anchorMin = _statusPanel.anchorMax = safeArea.min;
+            _statusPanel.anchoredPosition = Vector2.one * (StatusPadding * scale);
+            _statusPanel.localScale = new Vector3(scale, scale, 1f);
+        }
+
+        void OnEnable()
+        {
+            if (_hudRect != null)
+                _hudRect.gameObject.SetActive(true);
+        }
+
+        void OnDisable()
+        {
+            if (_damageFlash != null)
+                _damageFlash.enabled = false;
+            if (_hudRect != null)
+                _hudRect.gameObject.SetActive(false);
+        }
+
+        void OnDestroy()
+        {
+            if (_health != null)
+                _health.HealthChanged -= Refresh;
+            if (_hudRect != null)
+                Destroy(_hudRect.gameObject);
+            if (_damageTexture != null)
+                Destroy(_damageTexture);
+        }
+
+        public void ShowPistol(bool equipped, bool aiming, int loaded, int reserve, bool reloading)
+        {
+            if (_ammoLabel == null)
+                return;
+
+            _ammoLabel.gameObject.SetActive(equipped);
+            _aiming = equipped && aiming;
+            RefreshAimDot();
+            _reloadLabel.gameObject.SetActive(equipped && reloading);
+            if (_displayedLoaded == loaded && _displayedReserve == reserve)
+                return;
+
+            _displayedLoaded = loaded;
+            _displayedReserve = reserve;
+            _ammoLabel.text = $"{loaded} / {reserve}";
+        }
+
+        internal void SetInventoryOpen(bool open)
+        {
+            _inventoryOpen = open;
+            if (open && _subtitleLabel != null)
+                _subtitleLabel.transform.SetAsLastSibling();
+            RefreshAimDot();
+        }
+
+        internal void ShowSubtitle(string text)
+        {
+            if (_subtitleLabel == null)
+                return;
+
+            _subtitleUntil = Time.unscaledTime + SubtitleDuration;
+            _subtitleLabel.text = text;
+            _subtitleLabel.transform.SetAsLastSibling();
+            _subtitleLabel.gameObject.SetActive(true);
+        }
+
+        internal void ShowPickupHint(string text)
+        {
+            if (_pickupLabel == null)
+                return;
+
+            _pickupLabel.text = text;
+            _pickupLabel.gameObject.SetActive(!string.IsNullOrEmpty(text));
+            RefreshAimDot();
+        }
+
+        void RefreshAimDot()
+        {
+            if (_aimDot != null)
+                _aimDot.gameObject.SetActive(!_inventoryOpen && (_aiming || _pickupLabel.gameObject.activeSelf));
+        }
+
+        void Refresh(int health)
+        {
+            if (health < _lastHealth && isActiveAndEnabled)
+                ShowDamageFlash(_lastHealth - health);
+            _lastHealth = health;
+            float charge = Flashlight.ChargeForHealth(health);
+            _healthBar.SetValueWithoutNotify(health / (float)PlayerHealth.MaxHealth);
+            _flashlightBar.SetValueWithoutNotify(charge);
+            _healthLabel.text = $"Здоровье: {health}/{PlayerHealth.MaxHealth}";
+            _flashlightLabel.text = $"Фонарик: {Mathf.RoundToInt(charge * 100f)}%";
+        }
+
+        void CreateDamageFlash()
+        {
+            // Fade in only where the horizontal and vertical edges meet.
+            const int size = 128;
+            const float innerEdge = 0.8f;
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                float edgeY = Mathf.SmoothStep(0f, 1f,
+                    Mathf.InverseLerp(innerEdge, 1f, Mathf.Abs(y * 2f / (size - 1) - 1f)));
+                for (int x = 0; x < size; x++)
+                {
+                    float edgeX = Mathf.SmoothStep(0f, 1f,
+                        Mathf.InverseLerp(innerEdge, 1f, Mathf.Abs(x * 2f / (size - 1) - 1f)));
+                    float alpha = edgeX * edgeY;
+                    pixels[y * size + x] = new Color32(255, 255, 255,
+                        (byte)Mathf.RoundToInt(alpha * 255f));
+                }
+            }
+            _damageTexture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                name = "Damage Screen Corners",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+            _damageTexture.SetPixels32(pixels);
+            _damageTexture.Apply(false, true);
+
+            // First sibling keeps health, ammo, subtitles and menus readable above the flash.
+            var rect = CreateRect(_hudRect, "Damage Flash", typeof(UnityEngine.UI.RawImage));
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = rect.offsetMax = Vector2.zero;
+            rect.SetAsFirstSibling();
+            _damageFlash = rect.GetComponent<UnityEngine.UI.RawImage>();
+            _damageFlash.texture = _damageTexture;
+            _damageFlash.color = new Color(0.8f, 0.02f, 0.01f, 0f);
+            _damageFlash.raycastTarget = false;
+            _damageFlash.enabled = false;
+        }
+
+        void ShowDamageFlash(int damage)
+        {
+            if (_damageFlash == null)
+                return;
+
+            _damageFlashStartAlpha = _damageFlash.enabled ? _damageFlash.color.a : 0f;
+            _damageFlashPeak = Mathf.Max(_damageFlashStartAlpha,
+                Mathf.Clamp(0.25f + damage * 0.015f, 0.25f, 0.65f));
+            _damageFlashElapsed = 0f;
+            _damageFlash.enabled = true;
+        }
+
+        void UpdateDamageFlash()
+        {
+            if (_damageFlash == null || !_damageFlash.enabled)
+                return;
+
+            // Keep fading when a pause menu opens; repeated hits continue from the current opacity.
+            _damageFlashElapsed += Time.unscaledDeltaTime;
+            float alpha = _damageFlashElapsed < DamageFlashAttack
+                ? Mathf.SmoothStep(_damageFlashStartAlpha, _damageFlashPeak,
+                    _damageFlashElapsed / DamageFlashAttack)
+                : Mathf.SmoothStep(_damageFlashPeak, 0f,
+                    (_damageFlashElapsed - DamageFlashAttack) / DamageFlashFade);
+            var color = _damageFlash.color;
+            color.a = alpha;
+            _damageFlash.color = color;
+            if (_damageFlashElapsed >= DamageFlashAttack + DamageFlashFade)
+                _damageFlash.enabled = false;
+        }
+
+        internal static UnityEngine.UI.Text CreateLabel(RectTransform parent, string name, Font font)
+        {
+            var rect = CreateRect(parent, name, typeof(UnityEngine.UI.Text));
+            var label = rect.GetComponent<UnityEngine.UI.Text>();
+            label.font = font;
+            label.fontSize = 16;
+            label.color = Color.white;
+            label.raycastTarget = false;
+            var shadow = rect.gameObject.AddComponent<UnityEngine.UI.Shadow>();
+            shadow.effectColor = Color.black;
+            return label;
+        }
+
+        static UnityEngine.UI.Slider CreateBar(RectTransform parent, string name, Color color)
+        {
+            var rect = CreateRect(parent, name, typeof(UnityEngine.UI.Image));
+            rect.GetComponent<UnityEngine.UI.Image>().color = new Color32(21, 23, 28, 230);
+            rect.GetComponent<UnityEngine.UI.Image>().raycastTarget = false;
+            rect.gameObject.AddComponent<UnityEngine.UI.LayoutElement>().preferredHeight = 12;
+
+            var fill = CreateRect(rect, "Fill", typeof(UnityEngine.UI.Image));
+            fill.anchorMin = Vector2.zero;
+            fill.anchorMax = Vector2.one;
+            fill.offsetMin = fill.offsetMax = Vector2.zero;
+            var image = fill.GetComponent<UnityEngine.UI.Image>();
+            image.color = color;
+            image.raycastTarget = false;
+
+            var bar = rect.gameObject.AddComponent<UnityEngine.UI.Slider>();
+            bar.fillRect = fill;
+            bar.interactable = false;
+            bar.transition = UnityEngine.UI.Selectable.Transition.None;
+            return bar;
+        }
+
+        internal static RectTransform CreateRect(Transform parent, string name, System.Type component)
+        {
+            var rect = new GameObject(name, typeof(RectTransform), component).GetComponent<RectTransform>();
+            rect.SetParent(parent, false);
+            return rect;
+        }
+    }
+}

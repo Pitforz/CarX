@@ -15,3 +15,6 @@
 | Стыки тоннелей разных типов, срез стен комнат, якоря для пропсов/NPC/граффити: Scripts/Level (TunnelAnchor, TunnelNetwork, TunnelPath, TunnelRoom, TunnelSection, MeshKit), Scripts/Editor (TunnelAnchorEditor, TunnelNetworkEditor, TunnelGraphDemo) | код | Claude | BROFedka | 2026-11-13 |
 | Швы между плитами (одинаковые 6 мм, пол одной плоскостью), стыковка врезок на уклоне и повороте, текстура пола в мировых координатах: Scripts/Level (TunnelPath, TunnelNetwork, TunnelType, TunnelRoom, TunnelJunction), Scripts/Editor (TunnelAssets, TunnelGraphDemo), Tunnels/Types/*.asset, перегенерированные текстуры Textures/Tunnel | код/арт | Claude | BROFedka | 2026-11-14 |
 | README.md (инструкция для новичков) | текст | Claude | BROFedka | 2026-11-12 |
+| PlayerCapsule, контроллер от первого лица, Assets/_Project/Scripts/Gameplay и Assets/_Project/Shaders/MuzzleFlash.shader — управление игроком, фонарик, оружие, инвентарь и меню | код/настройки | Codex | Дмитрий | 2026-11-14 |
+| Assets/_Project/Textures/UI/InventoryWheel — колесо инвентаря и иконки | арт | Codex | Дмитрий | 2026-11-14 |
+| Assets/_Project/Audio/Flashlight — обрезка предоставленной записи щелчка | обработка звука | Codex | Дмитрий | 2026-11-14 |
