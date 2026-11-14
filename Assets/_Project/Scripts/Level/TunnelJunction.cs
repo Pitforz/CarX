@@ -31,6 +31,7 @@ namespace CarX.Level
         [Header("Прочее")]
         [Range(0f, 1.5f)] public float dirtLine = 0.9f;
         public int seed = 1;
+        [HideInInspector] public int drivenSignature;
         public TunnelMaterials materials;
 
         [SerializeField, HideInInspector] GameObject shaftObject;
@@ -101,6 +102,12 @@ namespace CarX.Level
 
         public void MarkDirty() { dirty = true; }
 
+        Vector2 FloorUV(Vector3 local)
+        {
+            var w = transform.TransformPoint(local);
+            return new Vector2(w.x * 0.5f, w.z * 0.5f);
+        }
+
         public void Rebuild(bool forceShaft)
         {
             dirty = false;
@@ -133,8 +140,9 @@ namespace CarX.Level
             }
 
             // floor
-            kit.Quad(1, new Vector3(-hx, 0, -hz), new Vector3(hx, 0, -hz), new Vector3(hx, 0, hz), new Vector3(-hx, 0, hz),
-                     new Vector2(-hx, -hz) * 0.5f, new Vector2(hx, -hz) * 0.5f, new Vector2(hx, hz) * 0.5f, new Vector2(-hx, hz) * 0.5f, Vector3.up);
+            // world-planar UV, the same as tunnels use, so the floor texture runs on through the doorways
+            Vector3 f0 = new Vector3(-hx, 0, -hz), f1 = new Vector3(hx, 0, -hz), f2 = new Vector3(hx, 0, hz), f3 = new Vector3(-hx, 0, hz);
+            kit.Quad(1, f0, f1, f2, f3, FloorUV(f0), FloorUV(f1), FloorUV(f2), FloorUV(f3), Vector3.up);
 
             // ceiling, optionally with a shaft opening
             var ceilOuter = new List<Vector2> { new Vector2(-hx, -hz), new Vector2(hx, -hz), new Vector2(hx, hz), new Vector2(-hx, hz) };
@@ -212,11 +220,11 @@ namespace CarX.Level
         {
             inner = null;
             centre = Vector2.zero;
-            var pts = path.Points();
-            if (pts.Count < 2) return false;
+            Vector3 wa, wb;
+            if (!path.EndsWorld(out wa, out wb)) return false;
             Vector3 wallCentre = d * halfDepth;
-            Vector3 pa = transform.InverseTransformPoint(pts[0].position);
-            Vector3 pb = transform.InverseTransformPoint(pts[pts.Count - 1].position);
+            Vector3 pa = transform.InverseTransformPoint(wa);
+            Vector3 pb = transform.InverseTransformPoint(wb);
             Vector3 e = (pa - wallCentre).sqrMagnitude <= (pb - wallCentre).sqrMagnitude ? pa : pb;
             if (Mathf.Abs(Vector3.Dot(e - wallCentre, d)) > 0.6f)
             {

@@ -68,6 +68,12 @@ namespace CarX.Level
             }
         }
 
+        /// <summary>Half of the full opening width (a pipe is widest at mid height, not at the floor).</summary>
+        public float HalfSpan { get { return profile == TunnelProfile.Round ? R : W; } }
+
+        /// <summary>Height above this tunnel's floor where a smaller tunnel joining its side wall puts its floor (the curb top in a box with curbs).</summary>
+        public float JoinFloor { get { return profile == TunnelProfile.BoxWithCurbs ? CurbH : 0f; } }
+
         float Chamfer { get { return Mathf.Clamp(chamfer, 0.02f, Mathf.Min(W, Height * 0.5f) * 0.9f); } }
         float CurbW { get { return Mathf.Clamp(curbWidth, 0.1f, W * 0.8f); } }
         float CurbH { get { return Mathf.Clamp(curbHeight, 0.03f, Height * 0.4f); } }
@@ -200,6 +206,33 @@ namespace CarX.Level
                 if (y < best) best = y;
             }
             return best == float.MaxValue ? 0f : best;
+        }
+
+        /// <summary>Ceiling (highest inner surface) at lateral position x.</summary>
+        public float CeilingHeightAt(float x)
+        {
+            List<int> kind; int ceil;
+            var p = BaseOutline(out kind, out ceil);
+            float best = float.MinValue;
+            for (int i = 0; i < p.Count; i++)
+            {
+                Vector2 a = p[i], b = p[(i + 1) % p.Count];
+                if (Mathf.Abs(a.x - b.x) < 1e-4f) continue;
+                if (x < Mathf.Min(a.x, b.x) - 1e-4f || x > Mathf.Max(a.x, b.x) + 1e-4f) continue;
+                float y = Mathf.Lerp(a.y, b.y, (x - a.x) / (b.x - a.x));
+                if (y > best) best = y;
+            }
+            return best == float.MinValue ? Height : best;
+        }
+
+        /// <summary>Corner heights of the profile, bottom to top (where WallXAt changes slope).</summary>
+        public List<float> CornerHeights()
+        {
+            List<int> kind; int ceil;
+            var ys = new List<float>();
+            foreach (var v in BaseOutline(out kind, out ceil)) ys.Add(v.y);
+            ys.Sort();
+            return ys;
         }
 
         /// <summary>Right wall position (max x of the profile) at height y.</summary>

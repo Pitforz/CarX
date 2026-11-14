@@ -1,0 +1,9 @@
+newmtl M_Concrete
+Kd 0.6 0.6 0.6
+
+newmtl M_Mud
+Kd 0.6 0.6 0.6
+
+newmtl M_ConcreteDirty
+Kd 0.6 0.6 0.6
+
