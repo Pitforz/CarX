@@ -24,7 +24,7 @@ MonoBehaviour:
   releaseDistance: 1.35
   releaseAngle: 140
   maxAnchorSpeed: 3
-  minCameraDistance: 0.28
+  minCameraDistance: 0.46
   palmOffset: 0.008
   palmReach: 0.62
   gripBreakSpeed: 4.8
@@ -54,20 +54,20 @@ MonoBehaviour:
   outlineColor: {r: 0.92, g: 0.95, b: 1, a: 1}
   outlineWidth: 3.5
   innerLines: 0.35
-  zoneRadius: 0.58
+  zoneRadius: 3.2
   zoneSoftness: 0.78
   zoneFadeIn: 0.2
   zoneFadeOut: 0.4
   depthNear: {r: 0.72, g: 0.75, b: 0.8, a: 1}
   depthFar: {r: 0.06, g: 0.07, b: 0.08, a: 1}
   depthEdges: 0.8
-  depthRings: 0.2
+  depthRings: 0
   ringSpacing: 0.03
   dim: 0.15
   desaturate: 0.7
   blurIterations: 4
   renderEvent: 600
-  npcProxies: 1
+  npcProxies: 0
   npcProxyRange: 8
   handShader: {fileID: 4800000, guid: d0a7c3e1b5f94a2c8e6d1f3a9b7c5e22, type: 3}
   blurShader: {fileID: 4800000, guid: d0a7c3e1b5f94a2c8e6d1f3a9b7c5e23, type: 3}

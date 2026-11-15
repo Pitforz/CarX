@@ -40,7 +40,7 @@ namespace CarX.DarkOrientation
         [Tooltip("Рука срывается, если точка движется относительно игрока быстрее, м/с")]
         [Min(0.5f)] public float maxAnchorSpeed = 3f;
         [Tooltip("Кисть не подходит к камере ближе, м (ближняя плоскость камеры 0.2)")]
-        [Min(0.1f)] public float minCameraDistance = 0.28f;
+        [Min(0.1f)] public float minCameraDistance = 0.46f;
         [Tooltip("Зазор между кончиком пальца и поверхностью, м")]
         [Min(0f)] public float palmOffset = 0.008f;
         [Tooltip("Ближе этого рука ложится ладонью. Дальше касается выпрямленными пальцами, м")]
@@ -98,7 +98,7 @@ namespace CarX.DarkOrientation
 
         [Header("Зона касания")]
         [Tooltip("Радиус сферы вокруг точки касания, м")]
-        [Range(0.05f, 1.2f)] public float zoneRadius = 0.58f;
+        [Range(0.05f, 6f)] public float zoneRadius = 3.2f;
         [Tooltip("Доля радиуса, на которой зона плавно гаснет к краю")]
         [Range(0.05f, 0.95f)] public float zoneSoftness = 0.78f;
         [Min(0.01f)] public float zoneFadeIn = 0.2f;
@@ -110,7 +110,7 @@ namespace CarX.DarkOrientation
         [Tooltip("Подсветка рёбер и перепадов глубины")]
         [Range(0f, 2f)] public float depthEdges = 0.8f;
         [Tooltip("Яркость колец вокруг точки касания")]
-        [Range(0f, 1f)] public float depthRings = 0.2f;
+        [Range(0f, 1f)] public float depthRings = 0f;
         [Min(0.005f)] public float ringSpacing = 0.03f;
 
         [Header("Остальная картинка")]
@@ -124,7 +124,7 @@ namespace CarX.DarkOrientation
 
         [Header("NPC")]
         [Tooltip("Создавать невидимые триггеры на костях Humanoid-персонажей без своих коллайдеров, пока режим включён")]
-        public bool npcProxies = true;
+        public bool npcProxies = false;
         [Min(1f)] public float npcProxyRange = 8f;
 
         [Header("Шейдеры (ссылки нужны, чтобы шейдеры попали в сборку)")]

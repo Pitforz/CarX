@@ -74,16 +74,24 @@ Shader "Hidden/CarX/DarkOrientation/Composite"
                 float3 n = normalize(cross(ddy(ws), ddx(ws)));
                 float facing = abs(dot(n, normalize(ray)));
 
-                float radius = _DO_ZoneParams.x;
-                float solid = radius * (1.0 - _DO_ZoneParams.y);
+                // x = how far a wall stays faintly visible. A character zone (_DO_Zones.w > 0.5) stays the old tight 15 cm.
+                float wallReach = _DO_ZoneParams.x;
+                float core = 0.15;
                 float w = 0.0;
-                float dist = radius;
+                float dist = wallReach;
                 float3 centre = ws;
                 [unroll]
                 for (int i = 0; i < ZONE_COUNT; i++)
                 {
                     float d = distance(ws, _DO_Zones[i].xyz);
-                    float wi = (1.0 - smoothstep(solid, radius, d)) * _DO_ZoneWeights[i];
+                    float wi;
+                    if (_DO_Zones[i].w > 0.5)
+                        wi = (1.0 - smoothstep(0.08, 0.15, d)) * _DO_ZoneWeights[i];
+                    else
+                    {
+                        float t = saturate((d - core) / max(wallReach - core, 0.01));
+                        wi = (d <= core ? 1.0 : exp(-3.6 * t)) * _DO_ZoneWeights[i];
+                    }
                     if (wi > w)
                     {
                         w = wi;
@@ -95,10 +103,10 @@ Shader "Hidden/CarX/DarkOrientation/Composite"
                 if (w > 0.001)
                 {
                     float centreEye = dot(centre - _DO_CamPos.xyz, _DO_CamFwd.xyz);
-                    float t = saturate(0.5 + (centreEye - eye) / (2.0 * radius));
+                    float t = saturate(0.5 + (centreEye - eye) / (2.0 * max(wallReach, 0.2)));
                     float lap = abs(EyeAt(px + int2(1, 0)) + EyeAt(px - int2(1, 0)) + EyeAt(px + int2(0, 1)) + EyeAt(px - int2(0, 1)) - 4.0 * eye);
                     float edge = saturate(lap / max(eye, 0.05) * 25.0) * _DO_Look.z;
-                    float ring = _DO_ZoneParams.w * smoothstep(0.85, 1.0, frac(dist / _DO_ZoneParams.z)) * saturate(1.0 - dist / radius);
+                    float ring = _DO_ZoneParams.w * smoothstep(0.85, 1.0, frac(dist / _DO_ZoneParams.z)) * saturate(1.0 - dist / max(wallReach, 0.2));
                     half3 depthMap = lerp(_DO_DepthFar.rgb, _DO_DepthNear.rgb, t) * lerp(0.55, 1.0, facing);
                     depthMap += (edge + ring) * _DO_DepthNear.rgb;
                     col = lerp(col, depthMap, w);

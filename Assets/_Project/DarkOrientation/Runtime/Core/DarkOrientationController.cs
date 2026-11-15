@@ -359,6 +359,13 @@ namespace CarX.DarkOrientation
             Vector3 n = Vector3.ProjectOnPlane(hand.ContactNormal, Vector3.up);
             if (n.sqrMagnitude < 0.05f) return;
             n.Normalize();
+            // Stepping backward lets go. The hold must not pin the player to the wall.
+            if (forward < -0.4f)
+            {
+                assist = 0f;
+                Handle(hand, owner, hand.BreakGrip(Time.time));
+                return;
+            }
             float leaving = Vector3.Dot(velocity, n);
             if (leaving > _settings.gripBreakSpeed)
             {
