@@ -32,7 +32,6 @@ Shader "Hidden/CarX/DarkOrientation/Composite"
             float4 _DO_CamFwd;
             float4 _DO_RayBL, _DO_RayBR, _DO_RayTL, _DO_RayTR;
             float4 _DO_Zones[ZONE_COUNT];     // xyz = centre, w > 0.5 means a person (tight 15 cm)
-            float4 _DO_ZoneNormals[ZONE_COUNT];
             float4 _DO_ZoneWeights;
             float4 _DO_ZoneParams;      // x = radius, y = softness, z = ring spacing, w = ring strength
             float4 _DO_DepthNear;
@@ -75,30 +74,21 @@ Shader "Hidden/CarX/DarkOrientation/Composite"
                 float3 n = normalize(cross(ddy(ws), ddx(ws)));
                 float facing = abs(dot(n, normalize(ray)));
 
-                // Bright for 15 cm, gone by 40 cm. A wall lights only where the surface faces the same way.
-                // People keep a tight 15 cm ball. The core always shows, even if the normal is noisy.
+                // Wall: fully bright out to 15 cm, faded out by 40 cm. Person: the old 15 cm ball.
+                // This is the same distance test that used to draw the highlight. No normal lookup,
+                // because that extra array was stopping the zones from arriving at all.
                 float core = 0.15;
                 float wallEnd = 0.40;
                 float w = 0.0;
                 float dist = wallEnd;
                 float3 centre = ws;
-                float3 faceN = dot(n, n) > 1e-6 ? normalize(n) : float3(0, 1, 0);
                 [unroll]
                 for (int i = 0; i < ZONE_COUNT; i++)
                 {
                     float d = distance(ws, _DO_Zones[i].xyz);
-                    float fade = 1.0 - smoothstep(core, wallEnd, d);
-                    float wi = 0.0;
-                    if (_DO_Zones[i].w > 0.5)
-                        wi = (1.0 - smoothstep(0.08, core, d)) * _DO_ZoneWeights[i];
-                    else
-                    {
-                        float3 nrm = _DO_ZoneNormals[i].xyz;
-                        float hasN = dot(nrm, nrm) > 0.5 ? 1.0 : 0.0;
-                        float agree = hasN > 0.5 ? abs(dot(faceN, normalize(nrm))) : 1.0;
-                        if (hasN < 0.5 || agree > 0.55 || d < core + 0.01)
-                            wi = fade * _DO_ZoneWeights[i];
-                    }
+                    float reach = _DO_Zones[i].w > 0.5 ? core : wallEnd;
+                    float solid = _DO_Zones[i].w > 0.5 ? 0.08 : core;
+                    float wi = (1.0 - smoothstep(solid, reach, d)) * _DO_ZoneWeights[i];
                     if (wi > w)
                     {
                         w = wi;
