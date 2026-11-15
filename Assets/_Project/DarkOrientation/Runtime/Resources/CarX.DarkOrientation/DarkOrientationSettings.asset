@@ -54,7 +54,7 @@ MonoBehaviour:
   outlineColor: {r: 0.92, g: 0.95, b: 1, a: 1}
   outlineWidth: 3.5
   innerLines: 0.35
-  zoneRadius: 3.2
+  zoneRadius: 0.4
   zoneSoftness: 0.78
   zoneFadeIn: 0.2
   zoneFadeOut: 0.4
@@ -67,7 +67,7 @@ MonoBehaviour:
   desaturate: 0.7
   blurIterations: 4
   renderEvent: 600
-  npcProxies: 0
+  npcProxies: 1
   npcProxyRange: 8
   handShader: {fileID: 4800000, guid: d0a7c3e1b5f94a2c8e6d1f3a9b7c5e22, type: 3}
   blurShader: {fileID: 4800000, guid: d0a7c3e1b5f94a2c8e6d1f3a9b7c5e23, type: 3}

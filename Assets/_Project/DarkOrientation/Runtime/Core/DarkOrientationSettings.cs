@@ -124,7 +124,7 @@ namespace CarX.DarkOrientation
 
         [Header("NPC")]
         [Tooltip("Создавать невидимые триггеры на костях Humanoid-персонажей без своих коллайдеров, пока режим включён")]
-        public bool npcProxies = false;
+        public bool npcProxies = true;
         [Min(1f)] public float npcProxyRange = 8f;
 
         [Header("Шейдеры (ссылки нужны, чтобы шейдеры попали в сборку)")]

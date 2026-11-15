@@ -54,6 +54,7 @@ namespace CarX.DarkOrientation
         public DarkOrientationSettings Settings => _settings;
 
         internal readonly Vector4[] ZoneCenters = new Vector4[ZoneCount];
+        internal readonly Vector4[] ZoneNormals = new Vector4[ZoneCount];
         internal Vector4 ZoneWeights;
         internal readonly List<Renderer> HandDraws = new();
         internal Material MaskMaterial;
@@ -63,8 +64,10 @@ namespace CarX.DarkOrientation
         struct Zone
         {
             public Vector3 center;
+            public Vector3 normal;
             public float weight;
             public int owner;   // -1 = fading out, 0 = left hand, 1 = right hand
+            public bool person;
         }
 
         readonly Zone[] _zones = new Zone[ZoneCount];
@@ -359,13 +362,9 @@ namespace CarX.DarkOrientation
             Vector3 n = Vector3.ProjectOnPlane(hand.ContactNormal, Vector3.up);
             if (n.sqrMagnitude < 0.05f) return;
             n.Normalize();
-            // Stepping backward lets go. The hold must not pin the player to the wall.
-            if (forward < -0.4f)
-            {
-                assist = 0f;
-                Handle(hand, owner, hand.BreakGrip(Time.time));
-                return;
-            }
+            // People are not a wall: the hand may rest on them, but it does not drag the player.
+            if (hand.ContactIsPerson) return;
+            // Only motion straight off the wall is resisted. Forward and back along the wall are free.
             float leaving = Vector3.Dot(velocity, n);
             if (leaving > _settings.gripBreakSpeed)
             {
@@ -425,12 +424,18 @@ namespace CarX.DarkOrientation
             {
                 ref var z = ref _zones[i];
                 var hand = z.owner == 0 ? _left : z.owner == 1 ? _right : null;
-                if (hand != null && hand.HasContact) z.center = hand.AnchorPoint;
+                if (hand != null && hand.HasContact)
+                {
+                    z.center = hand.AnchorPoint;
+                    z.normal = hand.ContactNormal;
+                    z.person = hand.ContactIsPerson;
+                }
                 else if (hand != null) z.owner = -1;
                 bool on = z.owner >= 0;
                 z.weight = Mathf.MoveTowards(z.weight, on ? 1f : 0f, dt / (on ? _settings.zoneFadeIn : _settings.zoneFadeOut));
                 ZoneCenters[i] = z.center;
-                ZoneWeights[i] = z.weight;
+                ZoneCenters[i].w = z.person ? 1f : 0f;
+                ZoneNormals[i] = z.normal;
             }
         }
 

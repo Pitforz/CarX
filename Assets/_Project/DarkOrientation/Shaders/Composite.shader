@@ -31,7 +31,8 @@ Shader "Hidden/CarX/DarkOrientation/Composite"
             float4 _DO_CamPos;
             float4 _DO_CamFwd;
             float4 _DO_RayBL, _DO_RayBR, _DO_RayTL, _DO_RayTR;
-            float4 _DO_Zones[ZONE_COUNT];     // xyz = centre
+            float4 _DO_Zones[ZONE_COUNT];     // xyz = centre, w > 0.5 means a person (tight 15 cm)
+            float4 _DO_ZoneNormals[ZONE_COUNT];
             float4 _DO_ZoneWeights;
             float4 _DO_ZoneParams;      // x = radius, y = softness, z = ring spacing, w = ring strength
             float4 _DO_DepthNear;
@@ -74,23 +75,29 @@ Shader "Hidden/CarX/DarkOrientation/Composite"
                 float3 n = normalize(cross(ddy(ws), ddx(ws)));
                 float facing = abs(dot(n, normalize(ray)));
 
-                // x = how far a wall stays faintly visible. A character zone (_DO_Zones.w > 0.5) stays the old tight 15 cm.
-                float wallReach = _DO_ZoneParams.x;
+                // Walls: full brightness for 15 cm along that wall only, gone by 40 cm.
+                // People: the old tight 15 cm ball. Nothing off the touched wall is lit.
                 float core = 0.15;
+                float wallEnd = 0.40;
                 float w = 0.0;
-                float dist = wallReach;
+                float dist = wallEnd;
                 float3 centre = ws;
                 [unroll]
                 for (int i = 0; i < ZONE_COUNT; i++)
                 {
-                    float d = distance(ws, _DO_Zones[i].xyz);
-                    float wi;
+                    float3 nrm = _DO_ZoneNormals[i].xyz;
+                    float3 to = ws - _DO_Zones[i].xyz;
+                    float d = length(to);
+                    float wi = 0.0;
                     if (_DO_Zones[i].w > 0.5)
-                        wi = (1.0 - smoothstep(0.08, 0.15, d)) * _DO_ZoneWeights[i];
-                    else
+                        wi = (1.0 - smoothstep(0.08, core, d)) * _DO_ZoneWeights[i];
+                    else if (dot(nrm, nrm) > 0.5)
                     {
-                        float t = saturate((d - core) / max(wallReach - core, 0.01));
-                        wi = (d <= core ? 1.0 : exp(-3.6 * t)) * _DO_ZoneWeights[i];
+                        float plane = abs(dot(to, nrm));
+                        float along = length(to - nrm * dot(to, nrm));
+                        if (plane < 0.07)
+                            wi = (1.0 - smoothstep(core, wallEnd, along)) * _DO_ZoneWeights[i];
+                        d = along;
                     }
                     if (wi > w)
                     {
@@ -103,10 +110,10 @@ Shader "Hidden/CarX/DarkOrientation/Composite"
                 if (w > 0.001)
                 {
                     float centreEye = dot(centre - _DO_CamPos.xyz, _DO_CamFwd.xyz);
-                    float t = saturate(0.5 + (centreEye - eye) / (2.0 * max(wallReach, 0.2)));
+                    float t = saturate(0.5 + (centreEye - eye) / (2.0 * wallEnd));
                     float lap = abs(EyeAt(px + int2(1, 0)) + EyeAt(px - int2(1, 0)) + EyeAt(px + int2(0, 1)) + EyeAt(px - int2(0, 1)) - 4.0 * eye);
                     float edge = saturate(lap / max(eye, 0.05) * 25.0) * _DO_Look.z;
-                    float ring = _DO_ZoneParams.w * smoothstep(0.85, 1.0, frac(dist / _DO_ZoneParams.z)) * saturate(1.0 - dist / max(wallReach, 0.2));
+                    float ring = _DO_ZoneParams.w * smoothstep(0.85, 1.0, frac(dist / _DO_ZoneParams.z)) * saturate(1.0 - dist / wallEnd);
                     half3 depthMap = lerp(_DO_DepthFar.rgb, _DO_DepthNear.rgb, t) * lerp(0.55, 1.0, facing);
                     depthMap += (edge + ring) * _DO_DepthNear.rgb;
                     col = lerp(col, depthMap, w);

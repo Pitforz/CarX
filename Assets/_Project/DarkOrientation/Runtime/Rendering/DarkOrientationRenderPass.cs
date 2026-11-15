@@ -29,6 +29,7 @@ namespace CarX.DarkOrientation
             public static readonly int RayTL = Shader.PropertyToID("_DO_RayTL");
             public static readonly int RayTR = Shader.PropertyToID("_DO_RayTR");
             public static readonly int Zones = Shader.PropertyToID("_DO_Zones");
+            public static readonly int ZoneNormals = Shader.PropertyToID("_DO_ZoneNormals");
             public static readonly int ZoneWeights = Shader.PropertyToID("_DO_ZoneWeights");
             public static readonly int ZoneParams = Shader.PropertyToID("_DO_ZoneParams");
             public static readonly int DepthNear = Shader.PropertyToID("_DO_DepthNear");
@@ -228,6 +229,7 @@ namespace CarX.DarkOrientation
             c.SetVector(Ids.RayTL, cam.ViewportToWorldPoint(new Vector3(0f, 1f, 1f)) - camPos);
             c.SetVector(Ids.RayTR, cam.ViewportToWorldPoint(new Vector3(1f, 1f, 1f)) - camPos);
             c.SetVectorArray(Ids.Zones, owner.ZoneCenters);
+            c.SetVectorArray(Ids.ZoneNormals, owner.ZoneNormals);
             c.SetVector(Ids.ZoneWeights, owner.ZoneWeights);
             c.SetVector(Ids.ZoneParams, new Vector4(s.zoneRadius, s.zoneSoftness, s.ringSpacing, s.depthRings));
             c.SetColor(Ids.DepthNear, s.depthNear);
