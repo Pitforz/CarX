@@ -17,10 +17,14 @@ namespace CarX.DarkOrientation
         public bool autoInstall = true;
         [Tooltip("Клавиша включения и выключения режима")]
         public Key toggleKey = Key.G;
-        [Tooltip("Время появления рук и эффекта, с")]
-        [Min(0.05f)] public float activateTime = 0.35f;
-        [Tooltip("Время исчезновения рук и эффекта, с")]
-        [Min(0.05f)] public float deactivateTime = 0.3f;
+        [Tooltip("Время, за которое руки поднимаются, с")]
+        [Min(0.05f)] public float activateTime = 0.4f;
+        [Tooltip("Время, за которое темнота и контур проявляются после того, как руки уже подняты, с")]
+        [Min(0.05f)] public float effectTime = 0.55f;
+        [Tooltip("Доля подъёма рук, после которой начинает проявляться эффект")]
+        [Range(0.5f, 1f)] public float effectAfterHands = 0.88f;
+        [Tooltip("Время исчезновения эффекта, затем руки опускаются, с")]
+        [Min(0.05f)] public float deactivateTime = 0.35f;
 
         [Header("Плечи и досягаемость")]
         [Tooltip("Правое плечо относительно камеры (вправо, вверх, вперёд), м. Левое зеркально")]
@@ -37,8 +41,18 @@ namespace CarX.DarkOrientation
         [Min(0.5f)] public float maxAnchorSpeed = 3f;
         [Tooltip("Кисть не подходит к камере ближе, м (ближняя плоскость камеры 0.2)")]
         [Min(0.1f)] public float minCameraDistance = 0.28f;
-        [Tooltip("Зазор между ладонью и поверхностью, м")]
-        [Min(0f)] public float palmOffset = 0.012f;
+        [Tooltip("Зазор между кончиком пальца и поверхностью, м")]
+        [Min(0f)] public float palmOffset = 0.008f;
+        [Tooltip("Насколько пальцы наклонены в стену: 0 вдоль стены, 1 прямо в стену")]
+        [Range(0f, 0.85f)] public float fingertipTilt = 0.42f;
+        [Tooltip("Куда рука стремится скользить относительно камеры (вбок наружу, вверх, вперёд), м")]
+        public Vector3 slideHome = new(0.14f, 0.02f, 0.5f);
+        [Tooltip("Сдвиг меньше этого рука не повторяет: мелкие движения камеры её не двигают, м")]
+        [Min(0f)] public float slideDeadzone = 0.04f;
+        [Tooltip("За какое время точка контакта догоняет руку, с")]
+        [Min(0.01f)] public float slideSmoothTime = 0.16f;
+        [Tooltip("Доля кадра от края, внутри которой рука обязана оставаться")]
+        [Range(0.02f, 0.35f)] public float viewMargin = 0.1f;
         [Tooltip("Две руки не держатся ближе друг к другу, м")]
         [Min(0f)] public float minAnchorSeparation = 0.15f;
         [Tooltip("Пауза после отпускания до нового касания, с")]
@@ -47,12 +61,12 @@ namespace CarX.DarkOrientation
         [Min(0.01f)] public float reachTime = 0.12f;
 
         [Header("Поиск")]
-        [Tooltip("Расстояние ладони от плеча вперёд при поиске, м")]
-        public Vector2 searchDistance = new(0.36f, 0.56f);
-        [Tooltip("Смещение ладони вбок от плеча при поиске (минус = к центру), м")]
-        public Vector2 searchSideRange = new(-0.10f, 0.05f);
-        [Tooltip("Высота ладони над плечом при поиске, м")]
-        public Vector2 searchHeightRange = new(0.08f, 0.20f);
+        [Tooltip("Насколько впереди камеры рука ищет опору, м")]
+        public Vector2 searchDistance = new(0.42f, 0.58f);
+        [Tooltip("Смещение руки вбок от центра взгляда наружу, м")]
+        public Vector2 searchSideRange = new(0.04f, 0.16f);
+        [Tooltip("Смещение руки вверх от центра взгляда, м. Отрицательное — ниже центра")]
+        public Vector2 searchHeightRange = new(-0.02f, 0.08f);
         [Tooltip("Как часто рука выбирает новую точку поиска, с")]
         public Vector2 retargetInterval = new(0.5f, 1.3f);
         [Min(0.01f)] public float searchSmoothTime = 0.28f;
@@ -64,6 +78,8 @@ namespace CarX.DarkOrientation
         public LayerMask touchLayers = Physics.DefaultRaycastLayers;
 
         [Header("Руки")]
+        [Tooltip("Модель рук в рукавах. Если пусто, ищется Resources/CarX.DarkOrientation/SleeveArms, а если нет и её, остаются процедурные руки")]
+        public GameObject sleeveArmsPrefab;
         [Tooltip("Масштаб процедурных рук (1 = длина кисти 19 см)")]
         [Min(0.5f)] public float handScale = 1f;
         public HandStyle handStyle = HandStyle.Outline;

@@ -71,6 +71,7 @@ namespace CarX.DarkOrientation
         readonly HumanoidTouchProxyBuilder _proxies = new();
         HandController _left;
         HandController _right;
+        SleeveArms _sleeve;
         DarkOrientationRenderPass _pass;
         Transform _handRoot;
         bool _bound;
@@ -96,6 +97,9 @@ namespace CarX.DarkOrientation
             if (_subscribed) return;
             RenderPipelineManager.beginCameraRendering += OnBeginCameraRendering;
             _subscribed = true;
+            // After a script reload the hand objects are gone but the player link remains.
+            if (Application.isPlaying && (_left == null || _right == null) && (_body != null || _viewCamera != null))
+                Bind(_body, _viewCamera);
         }
 
         void OnDisable()
@@ -127,8 +131,17 @@ namespace CarX.DarkOrientation
             if (_settings == null) _settings = DarkOrientationSettings.Load();
             _body = body != null ? body : DarkOrientationBootstrap.FindPlayer();
             _viewCamera = viewCamera != null ? viewCamera : Camera.main;
-            if (!_bound)
+            if (!_bound || _left == null || _right == null)
             {
+                if (_handRoot != null)
+                {
+                    Destroy(_handRoot.gameObject);
+                    _handRoot = null;
+                    _sleeve = null;
+                    _left = null;
+                    _right = null;
+                    _bound = false;
+                }
                 if (!CreateMaterials())
                 {
                     Debug.LogError("CarX DarkOrientation: shaders are missing or unsupported, the mode is disabled", this);
@@ -137,8 +150,17 @@ namespace CarX.DarkOrientation
                 }
                 _handRoot = new GameObject("Hands").transform;
                 _handRoot.SetParent(transform, false);
-                _left = CreateHand(HandSide.Left, _leftRig);
-                _right = CreateHand(HandSide.Right, _rightRig);
+                _sleeve = SleeveArms.TryCreate(_settings, _handRoot);
+                if (_sleeve != null)
+                {
+                    _left = new HandController(HandSide.Left, _sleeve.Left, false, _settings, _body, 13.7f);
+                    _right = new HandController(HandSide.Right, _sleeve.Right, false, _settings, _body, 71.3f);
+                }
+                else
+                {
+                    _left = CreateHand(HandSide.Left, _leftRig);
+                    _right = CreateHand(HandSide.Right, _rightRig);
+                }
                 _pass = new DarkOrientationRenderPass(this);
                 _bound = true;
             }
@@ -230,15 +252,30 @@ namespace CarX.DarkOrientation
 
         void LateUpdate()
         {
-            if (!_bound) return;
+            if (!_bound || _left == null || _right == null) return;
             if (_viewCamera == null)
             {
                 _viewCamera = Camera.main;
                 if (_viewCamera == null) return;
             }
             float dt = Time.deltaTime;
-            Blend = Mathf.MoveTowards(Blend, IsActive ? 1f : 0f,
-                dt / (IsActive ? _settings.activateTime : _settings.deactivateTime));
+            bool wantLeft = IsActive && !IsHandOccupied(HandSide.Left);
+            bool wantRight = IsActive && !IsHandOccupied(HandSide.Right);
+            if (_sleeve == null)
+            {
+                Blend = Mathf.MoveTowards(Blend, IsActive ? 1f : 0f,
+                    dt / (IsActive ? _settings.activateTime : _settings.deactivateTime));
+            }
+            else
+            {
+                // Hands come up in their own colour first. The dark picture and the outline follow.
+                float raised = RaisedHands();
+                bool effect = IsActive && raised >= _settings.effectAfterHands;
+                Blend = Mathf.MoveTowards(Blend, effect ? 1f : 0f,
+                    dt / (effect ? _settings.effectTime : _settings.deactivateTime));
+                wantLeft = !IsHandOccupied(HandSide.Left) && (IsActive || Blend > 0.02f);
+                wantRight = !IsHandOccupied(HandSide.Right) && (IsActive || Blend > 0.02f);
+            }
 
             if (!IsActive && Blend <= 0f && !_left.Visible && !_right.Visible)
             {
@@ -261,6 +298,7 @@ namespace CarX.DarkOrientation
                 aim = yaw * Quaternion.Euler(pitch * _settings.pitchFollow, 0f, 0f),
                 camPos = camPos,
                 camFwd = camFwd,
+                cam = _viewCamera,
                 bodyForward = bodyForward,
                 bodyPosition = _body != null ? _body.position : camPos,
                 dt = dt,
@@ -272,11 +310,29 @@ namespace CarX.DarkOrientation
             if (_proxies.Count > 0) Physics.SyncTransforms();
 
             Vector3 so = _settings.shoulderOffset;
-            frame.shoulder = camPos + yaw * new Vector3(-so.x, so.y, so.z);
-            Handle(_left, 0, _left.Tick(frame, IsActive && !IsHandOccupied(HandSide.Left), _right));
-            frame.shoulder = camPos + yaw * so;
-            Handle(_right, 1, _right.Tick(frame, IsActive && !IsHandOccupied(HandSide.Right), _left));
+            Vector3 leftShoulder = camPos + yaw * new Vector3(-so.x, so.y, so.z);
+            Vector3 rightShoulder = camPos + yaw * so;
+            if (_sleeve != null) _sleeve.Place(rightShoulder, leftShoulder, yaw);
+            frame.shoulder = leftShoulder;
+            Handle(_left, 0, _left.Tick(frame, wantLeft, _right));
+            frame.shoulder = rightShoulder;
+            Handle(_right, 1, _right.Tick(frame, wantRight, _left));
+            if (_sleeve != null)
+            {
+                bool shown = _left.Visible || _right.Visible;
+                _sleeve.SetShown(shown);
+                if (shown) _sleeve.Bake();
+            }
             UpdateZones(dt);
+        }
+
+        float RaisedHands()
+        {
+            float raised = 1f;
+            int counted = 0;
+            if (!IsHandOccupied(HandSide.Left) && _left != null) { raised = Mathf.Min(raised, _left.Presence); counted++; }
+            if (!IsHandOccupied(HandSide.Right) && _right != null) { raised = Mathf.Min(raised, _right.Presence); counted++; }
+            return counted == 0 ? 1f : raised;
         }
 
         void Handle(HandController hand, int owner, HandEvent e)
@@ -327,8 +383,15 @@ namespace CarX.DarkOrientation
             var renderer = data.scriptableRenderer;
             if (renderer == null) return;
             HandDraws.Clear();
-            if (_left.Visible) _left.Rig.CollectRenderers(HandDraws);
-            if (_right.Visible) _right.Rig.CollectRenderers(HandDraws);
+            if (_sleeve != null)
+            {
+                if (_left.Visible || _right.Visible) _sleeve.CollectMasks(HandDraws);
+            }
+            else
+            {
+                if (_left.Visible) _left.Rig.CollectRenderers(HandDraws);
+                if (_right.Visible) _right.Rig.CollectRenderers(HandDraws);
+            }
             ExtraSilhouettes?.Invoke(HandDraws);
             _pass.Setup(_settings);
             renderer.EnqueuePass(_pass);

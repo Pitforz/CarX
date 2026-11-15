@@ -12,6 +12,60 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d0a7c3e1b5f94a2c8e6d1f3a9b7c5e21, type: 3}
   m_Name: DarkOrientationSettings
   m_EditorClassIdentifier: 
+  autoInstall: 1
+  toggleKey: 21
+  activateTime: 0.4
+  effectTime: 0.55
+  effectAfterHands: 0.88
+  deactivateTime: 0.35
+  shoulderOffset: {x: 0.19, y: -0.24, z: -0.04}
+  pitchFollow: 0.5
+  reach: 0.62
+  releaseDistance: 0.72
+  releaseAngle: 100
+  maxAnchorSpeed: 3
+  minCameraDistance: 0.28
+  palmOffset: 0.008
+  fingertipTilt: 0.42
+  slideHome: {x: 0.14, y: 0.02, z: 0.5}
+  slideDeadzone: 0.04
+  slideSmoothTime: 0.16
+  viewMargin: 0.1
+  minAnchorSeparation: 0.15
+  regrabDelay: 0.3
+  reachTime: 0.12
+  searchDistance: {x: 0.42, y: 0.58}
+  searchSideRange: {x: 0.04, y: 0.16}
+  searchHeightRange: {x: -0.02, y: 0.08}
+  retargetInterval: {x: 0.5, y: 1.3}
+  searchSmoothTime: 0.28
+  searchJitter: 0.025
+  probeRadius: 0.04
+  touchLayers:
+    serializedVersion: 2
+    m_Bits: 4294967291
+  sleeveArmsPrefab: {fileID: 7595069804240248157, guid: f26e2c9daa0d3e640bfb895ace654899, type: 3}
+  handScale: 1
+  handStyle: 0
+  handFill: {r: 0.006, g: 0.006, b: 0.008, a: 1}
+  outlineColor: {r: 0.92, g: 0.95, b: 1, a: 1}
+  outlineWidth: 3.5
+  innerLines: 0.35
+  zoneRadius: 0.15
+  zoneSoftness: 0.45
+  zoneFadeIn: 0.2
+  zoneFadeOut: 0.4
+  depthNear: {r: 0.72, g: 0.75, b: 0.8, a: 1}
+  depthFar: {r: 0.06, g: 0.07, b: 0.08, a: 1}
+  depthEdges: 0.8
+  depthRings: 0.2
+  ringSpacing: 0.03
+  dim: 0.15
+  desaturate: 0.7
+  blurIterations: 4
+  renderEvent: 600
+  npcProxies: 1
+  npcProxyRange: 8
   handShader: {fileID: 4800000, guid: d0a7c3e1b5f94a2c8e6d1f3a9b7c5e22, type: 3}
   blurShader: {fileID: 4800000, guid: d0a7c3e1b5f94a2c8e6d1f3a9b7c5e23, type: 3}
   compositeShader: {fileID: 4800000, guid: d0a7c3e1b5f94a2c8e6d1f3a9b7c5e24, type: 3}

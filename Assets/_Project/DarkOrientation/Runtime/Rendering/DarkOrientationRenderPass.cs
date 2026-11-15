@@ -121,7 +121,9 @@ namespace CarX.DarkOrientation
                     d.material.SetTexture(Ids.SceneDepth, (Texture)d.depth);
                     foreach (var r in d.renderers)
                     {
-                        if (r == null || !r.enabled || !r.gameObject.activeInHierarchy) continue;
+                        // Mask meshes stay disabled so the camera does not draw the baked copy.
+                        // DrawRenderer still submits them.
+                        if (r == null || !r.gameObject.activeInHierarchy) continue;
                         int submeshes = SubmeshCount(r);
                         for (int i = 0; i < submeshes; i++) ctx.cmd.DrawRenderer(r, d.material, i, 0);
                     }

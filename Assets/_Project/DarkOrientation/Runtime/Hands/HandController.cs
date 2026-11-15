@@ -9,6 +9,7 @@ namespace CarX.DarkOrientation
         public Quaternion aim;
         public Vector3 camPos;
         public Vector3 camFwd;
+        public Camera cam;
         public Vector3 bodyForward;
         public Vector3 bodyPosition;
         public float dt;
@@ -18,8 +19,9 @@ namespace CarX.DarkOrientation
     internal enum HandEvent { None, TouchBegan, TouchEnded }
 
     /// <summary>
-    /// One hand: wanders in front of the shoulder, sphere-casts towards where it is heading, and on contact
-    /// keeps the palm on the touched point (stored in the collider's space) until the player walks away.
+    /// One hand. While searching it wanders in front of the shoulder. On contact the fingertips
+    /// stay on the surface and the contact point slides with the player, staying inside the view.
+    /// A shared skeleton (sleeve model) is not deactivated: an unused arm is parked below the view.
     /// </summary>
     internal sealed class HandController
     {
@@ -49,11 +51,15 @@ namespace CarX.DarkOrientation
         TouchAnchor _anchor;
         Vector3 _lastAnchorPoint;
         float _regrabAt;
+        float _offSurface;
+        Vector3 _lastBody;
+        bool _haveBody;
 
         public HandRig Rig { get; }
         public bool HasContact => _state == State.Reaching || _state == State.Holding;
         public bool IsHolding => _state == State.Holding;
         public bool Visible => _visible && _presence > 0f;
+        public float Presence => _presence;
         public Vector3 AnchorPoint => _anchor.Point;
         public TouchInfo LastTouch { get; private set; }
         public string DebugState => _state + (HasContact && _anchor.collider != null ? " on " + _anchor.collider.name : "") + $" ({_presence:0.00})";
@@ -84,6 +90,7 @@ namespace CarX.DarkOrientation
                 SetVisible(false);
                 _state = State.Hidden;
                 _poseValid = false;
+                if (!_ownsRoot) Park(f, sign);
                 return result;
             }
             SetVisible(true);
@@ -103,41 +110,38 @@ namespace CarX.DarkOrientation
             _searchCurrent = Vector3.SmoothDamp(_searchCurrent, _searchGoal, ref _searchVelocity, _s.searchSmoothTime, Mathf.Infinity, dt);
 
             if (HasContact && !StillValid(f, shoulder)) result = Release(f.time);
+            if (HasContact && !SlideAnchor(f, shoulder))
+                result = HandEvent.TouchEnded;
 
             Vector3 desiredPalm;
             Vector3 palmNormal;
             float smoothTime;
             if (HasContact)
             {
-                Vector3 p = _anchor.Point;
-                Vector3 n = _anchor.Normal;
-                desiredPalm = p + n * _s.palmOffset;
-                palmNormal = -n;
-                Vector3 away = (desiredPalm - shoulder).normalized + Vector3.up * 0.5f;
-                _fingerDir = Vector3.ProjectOnPlane(away, n);
-                if (_fingerDir.sqrMagnitude < 1e-4f) _fingerDir = Vector3.ProjectOnPlane(f.yaw * Vector3.forward, n);
-                _fingerDir.Normalize();
-                smoothTime = _state == State.Reaching ? _s.reachTime : 0.03f;
+                PoseOnSurface(f, shoulder, out desiredPalm, out palmNormal);
+                smoothTime = _state == State.Reaching ? _s.reachTime : 0.08f;
             }
             else
             {
-                desiredPalm = shoulder + f.aim * _searchCurrent + Jitter(f.time) * _s.searchJitter;
+                desiredPalm = ViewPoint(f, _searchCurrent + Jitter(f.time) * _s.searchJitter, shoulder);
                 if (want && _presence > 0.6f && f.time >= _regrabAt && TryTouch(shoulder, ref desiredPalm, other, out var anchor))
                 {
                     _anchor = anchor;
                     _lastAnchorPoint = anchor.Point;
+                    _offSurface = 0f;
+                    _haveBody = false;
                     LastTouch = new TouchInfo(anchor.collider, anchor.Point, anchor.Normal);
                     SetState(State.Reaching);
                     result = HandEvent.TouchBegan;
                 }
-                Quaternion pose = f.aim * Quaternion.Euler(-50f + Wobble(f.time, 3.1f) * 8f, sign * 12f + Wobble(f.time, 7.7f) * 6f, 0f);
+                Quaternion pose = f.aim * Quaternion.Euler(-18f + Wobble(f.time, 3.1f) * 7f, sign * 8f + Wobble(f.time, 7.7f) * 5f, sign * 6f);
                 _fingerDir = pose * Vector3.forward;
                 palmNormal = pose * Vector3.down;
                 smoothTime = _s.searchSmoothTime * 0.4f;
             }
 
             // Hands rise from below the view when the mode starts and sink back when it ends.
-            Vector3 lowered = shoulder + f.yaw * new Vector3(-sign * 0.03f, -0.32f, 0.14f);
+            Vector3 lowered = shoulder + f.yaw * new Vector3(sign * 0.12f, -0.48f, -0.02f);
             desiredPalm = Vector3.Lerp(lowered, desiredPalm, Mathf.SmoothStep(0f, 1f, _presence));
 
             Quaternion targetRotation = Rig.HandRotationFor(_fingerDir, palmNormal);
@@ -175,6 +179,19 @@ namespace CarX.DarkOrientation
             SetVisible(false);
         }
 
+        void Park(in HandFrame f, float sign)
+        {
+            Vector3 shoulder = Rig.HasArm ? Rig.upperArm.position : f.shoulder;
+            Vector3 lowered = shoulder + f.yaw * new Vector3(sign * 0.2f, -0.7f, -0.16f);
+            Quaternion rot = Rig.HandRotationFor(f.yaw * Vector3.down, f.yaw * Vector3.forward);
+            Rig.ResetPose();
+            Vector3 wrist = lowered - rot * Rig.PalmPointLocal;
+            Vector3 pole = shoulder + f.yaw * new Vector3(sign * 0.4f, -0.9f, -0.2f);
+            Rig.SolvePose(wrist, pole, rot);
+            for (int i = 0; i < 5; i++)
+                if (Rig.HasFinger((Finger)i)) Rig.SetCurl((Finger)i, 0.45f);
+        }
+
         void SetState(State s)
         {
             _state = s;
@@ -193,6 +210,7 @@ namespace CarX.DarkOrientation
             if (_anchor.collider != null)
                 LastTouch = new TouchInfo(_anchor.collider, _anchor.Point, _anchor.Normal);
             _anchor = default;
+            _offSurface = 0f;
             SetState(State.Searching);
             _regrabAt = time + _s.regrabDelay;
             return HandEvent.TouchEnded;
@@ -201,15 +219,150 @@ namespace CarX.DarkOrientation
         void PickSearchGoal(float time, float sign)
         {
             _nextRetarget = time + Random.Range(_s.retargetInterval.x, _s.retargetInterval.y);
+            // Offsets are in camera space: outward, around the view centre, in front.
             _searchGoal = new Vector3(
                 Random.Range(_s.searchSideRange.x, _s.searchSideRange.y) * sign,
                 Random.Range(_s.searchHeightRange.x, _s.searchHeightRange.y),
                 Random.Range(_s.searchDistance.x, _s.searchDistance.y));
         }
 
+        /// <summary>A point in front of the camera, so the hand stays in view instead of hanging at shoulder height.</summary>
+        static Vector3 ViewPoint(in HandFrame f, Vector3 cameraLocal, Vector3 shoulderFallback)
+        {
+            if (f.cam == null) return shoulderFallback + f.aim * cameraLocal;
+            return f.cam.transform.position + f.cam.transform.rotation * cameraLocal;
+        }
+
         float Wobble(float time, float offset) => (Mathf.PerlinNoise(time * 1.3f + _seed, offset) - 0.5f) * 2f;
 
         Vector3 Jitter(float time) => new(Wobble(time * 2.1f, 11f), Wobble(time * 2.1f, 23f), Wobble(time * 2.1f, 37f));
+
+        /// <summary>Fingertips on the surface, palm lifted off it. Fingers point along the way the player is moving.</summary>
+        void PoseOnSurface(in HandFrame f, Vector3 shoulder, out Vector3 desiredPalm, out Vector3 palmNormal)
+        {
+            Vector3 p = _anchor.Point;
+            Vector3 n = _anchor.Normal;
+            if (n.sqrMagnitude < 1e-6f) n = Vector3.up;
+            n.Normalize();
+
+            Vector3 travel = f.bodyForward;
+            if (_haveBody && f.dt > 0f)
+            {
+                Vector3 step = (f.bodyPosition - _lastBody) / f.dt;
+                if (step.sqrMagnitude > 0.04f) travel = step;
+            }
+            _lastBody = f.bodyPosition;
+            _haveBody = true;
+
+            Vector3 along = Vector3.ProjectOnPlane(travel, n);
+            if (along.sqrMagnitude < 0.01f) along = Vector3.ProjectOnPlane(f.aim * Vector3.forward, n);
+            if (along.sqrMagnitude < 1e-6f) along = Vector3.Cross(n, Vector3.up);
+            along.Normalize();
+            Vector3 away = Vector3.ProjectOnPlane(p - shoulder, n);
+            if (away.sqrMagnitude > 0.01f && Vector3.Dot(along, away) < 0f)
+                along = -along;
+
+            float tilt = _s.fingertipTilt;
+            _fingerDir = (along * (1f - tilt) - n * tilt).normalized;
+            palmNormal = -n;
+            float tip = Mathf.Max(0.04f, Rig.TipReach * 0.92f);
+            desiredPalm = p - _fingerDir * tip + n * _s.palmOffset;
+        }
+
+        /// <summary>Moves the contact along the same surface toward where the hand naturally rests. False if the hand let go.</summary>
+        bool SlideAnchor(in HandFrame f, Vector3 shoulder)
+        {
+            if (!_anchor.IsValid) return false;
+            var col = _anchor.collider;
+            Vector3 n = _anchor.Normal;
+            if (n.sqrMagnitude < 1e-6f) n = Vector3.up;
+            n.Normalize();
+            float sign = side == HandSide.Right ? 1f : -1f;
+            Vector3 home = ViewPoint(f, new Vector3(_s.slideHome.x * sign, _s.slideHome.y, _s.slideHome.z), shoulder);
+
+            if (!Project(col, home, n, out var hit))
+            {
+                _offSurface += f.dt;
+                if (_offSurface > 0.12f)
+                {
+                    Release(f.time);
+                    return false;
+                }
+                _lastAnchorPoint = _anchor.Point;
+                return true;
+            }
+            _offSurface = 0f;
+
+            Vector3 target = hit.point;
+            Vector3 normal = hit.normal.sqrMagnitude > 1e-6f ? hit.normal.normalized : n;
+            if (f.cam != null && !InsideView(f.cam, target, _s.viewMargin))
+            {
+                Vector3 vp = f.cam.WorldToViewportPoint(target);
+                if (vp.z < 0.08f)
+                {
+                    Release(f.time);
+                    return false;
+                }
+                var clamped = f.cam.ViewportToWorldPoint(new Vector3(
+                    Mathf.Clamp(vp.x, _s.viewMargin, 1f - _s.viewMargin),
+                    Mathf.Clamp(vp.y, _s.viewMargin, 1f - _s.viewMargin),
+                    vp.z));
+                if (!Project(col, clamped, normal, out var pulled))
+                {
+                    Release(f.time);
+                    return false;
+                }
+                target = pulled.point;
+                if (pulled.normal.sqrMagnitude > 1e-6f) normal = pulled.normal.normalized;
+            }
+
+            Vector3 current = _anchor.Point;
+            Vector3 delta = Vector3.ProjectOnPlane(target - current, normal);
+            bool inView = f.cam == null || InsideView(f.cam, current, _s.viewMargin);
+            if (delta.magnitude >= _s.slideDeadzone || !inView)
+            {
+                float t = 1f - Mathf.Exp(-f.dt / Mathf.Max(0.01f, _s.slideSmoothTime));
+                Vector3 next = !inView ? Vector3.Lerp(current, target, t) : current + delta * t;
+                _anchor = TouchAnchor.Create(col, next, normal);
+            }
+            _lastAnchorPoint = _anchor.Point;
+            return true;
+        }
+
+        bool Project(Collider col, Vector3 near, Vector3 normal, out RaycastHit hit)
+        {
+            hit = default;
+            Vector3 origin = near + normal * 0.5f;
+            if (HitSame(col, origin, -normal, 1f, out hit)) return true;
+            Vector3 from = _anchor.Point + normal * 0.08f;
+            Vector3 dir = near - from;
+            float len = dir.magnitude;
+            if (len < 0.02f) return false;
+            return HitSame(col, from, dir / len, len + 0.2f, out hit);
+        }
+
+        bool HitSame(Collider col, Vector3 origin, Vector3 dir, float distance, out RaycastHit hit)
+        {
+            hit = default;
+            if (!col.isTrigger && col.Raycast(new Ray(origin, dir), out hit, distance)) return true;
+            int count = Physics.RaycastNonAlloc(origin, dir, _hits, distance, ~0, QueryTriggerInteraction.Collide);
+            float best = float.MaxValue;
+            bool found = false;
+            for (int i = 0; i < count; i++)
+            {
+                if (_hits[i].collider != col || _hits[i].distance >= best) continue;
+                hit = _hits[i];
+                best = hit.distance;
+                found = true;
+            }
+            return found;
+        }
+
+        static bool InsideView(Camera cam, Vector3 point, float margin)
+        {
+            Vector3 vp = cam.WorldToViewportPoint(point);
+            return vp.z > 0.08f && vp.x >= margin && vp.x <= 1f - margin && vp.y >= margin && vp.y <= 1f - margin;
+        }
 
         bool TryTouch(Vector3 shoulder, ref Vector3 desiredPalm, HandController other, out TouchAnchor anchor)
         {
@@ -270,10 +423,10 @@ namespace CarX.DarkOrientation
             if (flat.sqrMagnitude > 0.0025f && Vector3.Angle(f.bodyForward, flat) > _s.releaseAngle) return false;
 
             // The player's own walking is covered by the distance check; this catches objects that move away fast.
+            // Sliding updates the stored point afterwards, so this delta is the collider's motion, not the slide.
             if (f.dt > 0f)
             {
                 float speed = (p - _lastAnchorPoint).magnitude / f.dt;
-                _lastAnchorPoint = p;
                 if (speed > _s.maxAnchorSpeed) return false;
             }
 
@@ -301,26 +454,27 @@ namespace CarX.DarkOrientation
                 var finger = (Finger)i;
                 if (!Rig.HasFinger(finger)) continue;
                 float target;
-                if (HasContact) target = finger == Finger.Thumb ? 0.25f : ContactCurl(finger);
-                else if (_state == State.Searching) target = 0.14f + 0.12f * (Wobble(time * 0.6f, 50f + i * 9f) * 0.5f + 0.5f);
-                else target = 0.3f;
+                if (HasContact) target = finger == Finger.Thumb ? 0.2f : ContactCurl(finger);
+                else if (_state == State.Searching) target = 0.12f + 0.1f * (Wobble(time * 0.6f, 50f + i * 9f) * 0.5f + 0.5f);
+                else target = 0.25f;
                 _curl[i] = Mathf.Lerp(_curl[i], target, k);
                 Rig.SetCurl(finger, _curl[i]);
             }
         }
 
-        /// <summary>Curls a finger so its tip follows a surface that falls away under it (pipes, edges).</summary>
+        /// <summary>Fingers stay mostly straight. They curl only where the surface falls away under the tip.</summary>
         float ContactCurl(Finger finger)
         {
-            if (!_anchor.IsValid) return 0.2f;
+            if (!_anchor.IsValid) return 0.14f;
             Vector3 n = _anchor.Normal;
             float length = Rig.FingerLength(finger);
-            Vector3 probe = Rig.FingerBase(finger) + _fingerDir * (length * 0.7f) + n * 0.05f;
-            if (!_anchor.collider.Raycast(new Ray(probe, -n), out var hit, 0.05f + length)) return 0.55f;
+            if (length < 0.01f) return 0.14f;
+            Vector3 probe = Rig.FingerBase(finger) + _fingerDir * (length * 0.85f) + n * 0.04f;
+            if (!_anchor.collider.Raycast(new Ray(probe, -n), out var hit, 0.04f + length)) return 0.16f;
             float drop = Vector3.Dot(_anchor.Point - hit.point, n);
-            if (drop <= 0f) return 0.05f;
-            float angle = Mathf.Atan2(drop, length * 0.7f) * Mathf.Rad2Deg;
-            return Mathf.Clamp01(0.05f + angle / 110f);
+            if (drop <= 0.004f) return 0.12f;
+            float angle = Mathf.Atan2(drop, length * 0.85f) * Mathf.Rad2Deg;
+            return Mathf.Clamp(0.12f + angle / 200f, 0.12f, 0.42f);
         }
     }
 }

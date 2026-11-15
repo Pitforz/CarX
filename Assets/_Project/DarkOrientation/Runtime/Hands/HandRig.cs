@@ -63,6 +63,8 @@ namespace CarX.DarkOrientation
         public bool IsBound { get; private set; }
         public bool HasArm => upperArm != null && forearm != null;
         public float HandLength { get; private set; } = 0.19f;
+        /// <summary>Distance from the palm point to the middle fingertip along the finger direction, in the rest pose.</summary>
+        public float TipReach { get; private set; } = 0.12f;
         /// <summary>Hand-local vector from the wrist to the centre of the palm surface.</summary>
         public Vector3 PalmPointLocal { get; private set; }
         public float Reach => (HasArm ? _upperLength + _foreLength : 0f) + PalmPointLocal.magnitude;
@@ -126,6 +128,12 @@ namespace CarX.DarkOrientation
             float thickness = HandLength * 0.14f;
             // Rotation only: the offset stays in metres even on scaled skeletons.
             PalmPointLocal = Quaternion.Inverse(hand.rotation) * (palmCentre - wrist + palmNormal * (thickness * 0.5f));
+            Vector3 tipWorld = middle.tip != null ? middle.tip.position
+                : middle.IsValid ? middle.joints[middle.joints.Length - 1].position
+                : wrist + fingerDir * HandLength;
+            Vector3 palmWorld = wrist + hand.rotation * PalmPointLocal;
+            TipReach = Vector3.Dot(tipWorld - palmWorld, fingerDir);
+            if (TipReach < 0.03f) TipReach = HandLength * 0.62f;
 
             if (HasArm)
             {
