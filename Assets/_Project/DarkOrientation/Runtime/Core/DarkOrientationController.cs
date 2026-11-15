@@ -437,6 +437,7 @@ namespace CarX.DarkOrientation
                 ZoneCenters[i] = z.center;
                 ZoneCenters[i].w = z.person ? 1f : 0f;
                 ZoneNormals[i] = z.normal;
+                ZoneWeights[i] = z.weight;
             }
         }
 
