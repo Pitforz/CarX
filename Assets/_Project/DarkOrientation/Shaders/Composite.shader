@@ -75,29 +75,29 @@ Shader "Hidden/CarX/DarkOrientation/Composite"
                 float3 n = normalize(cross(ddy(ws), ddx(ws)));
                 float facing = abs(dot(n, normalize(ray)));
 
-                // Walls: full brightness for 15 cm along that wall only, gone by 40 cm.
-                // People: the old tight 15 cm ball. Nothing off the touched wall is lit.
+                // Bright for 15 cm, gone by 40 cm. A wall lights only where the surface faces the same way.
+                // People keep a tight 15 cm ball. The core always shows, even if the normal is noisy.
                 float core = 0.15;
                 float wallEnd = 0.40;
                 float w = 0.0;
                 float dist = wallEnd;
                 float3 centre = ws;
+                float3 faceN = dot(n, n) > 1e-6 ? normalize(n) : float3(0, 1, 0);
                 [unroll]
                 for (int i = 0; i < ZONE_COUNT; i++)
                 {
-                    float3 nrm = _DO_ZoneNormals[i].xyz;
-                    float3 to = ws - _DO_Zones[i].xyz;
-                    float d = length(to);
+                    float d = distance(ws, _DO_Zones[i].xyz);
+                    float fade = 1.0 - smoothstep(core, wallEnd, d);
                     float wi = 0.0;
                     if (_DO_Zones[i].w > 0.5)
                         wi = (1.0 - smoothstep(0.08, core, d)) * _DO_ZoneWeights[i];
-                    else if (dot(nrm, nrm) > 0.5)
+                    else
                     {
-                        float plane = abs(dot(to, nrm));
-                        float along = length(to - nrm * dot(to, nrm));
-                        if (plane < 0.07)
-                            wi = (1.0 - smoothstep(core, wallEnd, along)) * _DO_ZoneWeights[i];
-                        d = along;
+                        float3 nrm = _DO_ZoneNormals[i].xyz;
+                        float hasN = dot(nrm, nrm) > 0.5 ? 1.0 : 0.0;
+                        float agree = hasN > 0.5 ? abs(dot(faceN, normalize(nrm))) : 1.0;
+                        if (hasN < 0.5 || agree > 0.55 || d < core + 0.01)
+                            wi = fade * _DO_ZoneWeights[i];
                     }
                     if (wi > w)
                     {

@@ -297,10 +297,11 @@ namespace CarX.DarkOrientation
             bodyForward.Normalize();
             Quaternion yaw = Quaternion.LookRotation(bodyForward, Vector3.up);
             float pitch = Mathf.Asin(Mathf.Clamp(-camFwd.y, -1f, 1f)) * Mathf.Rad2Deg;
+            float handPitch = Mathf.Clamp(pitch, -_settings.handPitchLimit, _settings.handPitchLimit);
             var frame = new HandFrame
             {
                 yaw = yaw,
-                aim = yaw * Quaternion.Euler(pitch * _settings.pitchFollow, 0f, 0f),
+                aim = yaw * Quaternion.Euler(handPitch, 0f, 0f),
                 camPos = camPos,
                 camFwd = camFwd,
                 cam = _viewCamera,

@@ -55,7 +55,9 @@ namespace CarX.DarkOrientation
         Vector3 _lastBody;
         bool _haveBody;
         float _surfaceDistance;
+        float _wallFacing;
         float _settle;
+        Vector3 _prevBody;
         Vector3 _heldPalm;
         Vector3 _heldFingers;
         Vector3 _heldPalmNormal;
@@ -116,9 +118,11 @@ namespace CarX.DarkOrientation
 
             // The search wanders in camera space. The camera itself is not smoothed, so a turn does not leave the hand behind.
             _searchCurrent = SearchCircle(f.time, sign);
-            Vector3 viewUp = f.cam != null ? f.cam.transform.up : Vector3.up;
-            Vector3 viewFwd = f.camFwd.sqrMagnitude > 1e-6f ? f.camFwd : f.aim * Vector3.forward;
-            Vector3 searchPalm = ViewPoint(f, _searchCurrent, shoulder);
+            // Free hands follow the view only up to the pitch limit. Past that they stay put.
+            Vector3 viewUp = f.aim * Vector3.up;
+            Vector3 viewFwd = f.aim * Vector3.forward;
+            Vector3 searchPalm = f.camPos + f.aim * _searchCurrent;
+            searchPalm = KeepOffWalls(f, searchPalm);
             Vector3 searchNormal = viewFwd;
             Vector3 searchFingers = FingersUp(searchNormal, viewUp);
 
@@ -153,13 +157,35 @@ namespace CarX.DarkOrientation
             float rise = Mathf.SmoothStep(0f, 1f, _presence);
             desiredPalm = Vector3.Lerp(lowered, desiredPalm, rise);
             palmNormal = Vector3.Slerp(viewFwd, palmNormal, rise);
-            desiredPalm = StayInViewAndOffWalls(f, desiredPalm);
 
             Quaternion targetRotation = Rig.HandRotationFor(_fingerDir, palmNormal);
             if (_state == State.Reaching && _stateTime > _s.reachTime)
                 SetState(State.Holding);
-            _palm = desiredPalm;
-            _handRotation = targetRotation;
+            // Glued to a surface: the hand stays on that point and does not chase the camera.
+            // Everywhere else it cannot jump across the view faster than handMaxSpeed.
+            bool glued = HasContact && _settle > 0.92f;
+            if (!_poseValid)
+            {
+                _palm = desiredPalm;
+                _handRotation = targetRotation;
+                _prevBody = f.bodyPosition;
+                _poseValid = true;
+            }
+            else if (glued)
+            {
+                _palm = desiredPalm;
+                _handRotation = targetRotation;
+            }
+            else
+            {
+                _palm += f.bodyPosition - _prevBody;
+                Vector3 step = desiredPalm - _palm;
+                float maxStep = Mathf.Max(0.2f, _s.handMaxSpeed) * Mathf.Max(f.dt, 0.0001f);
+                if (step.magnitude > maxStep) desiredPalm = _palm + step.normalized * maxStep;
+                _palm = desiredPalm;
+                _handRotation = Quaternion.RotateTowards(_handRotation, targetRotation, 240f * Mathf.Max(f.dt, 0.0001f));
+            }
+            _prevBody = f.bodyPosition;
 
             // Keep the hand out of the camera's near plane; the touch point itself does not move.
             Vector3 drawnPalm = _palm;
@@ -256,12 +282,18 @@ namespace CarX.DarkOrientation
             Vector3 n = _anchor.Normal;
             if (n.sqrMagnitude < 1e-6f) n = Vector3.up;
             n.Normalize();
-            _lastBody = f.bodyPosition;
-            _haveBody = true;
             _surfaceDistance = Vector3.Distance(f.camPos, p);
-            Vector3 up = f.cam != null ? f.cam.transform.up : Vector3.up;
+            _wallFacing = Mathf.Clamp01(Vector3.Dot(f.bodyForward, -n));
             palmNormal = -n;
-            fingers = FingersUp(palmNormal, up);
+            Vector3 upOnWall = Vector3.ProjectOnPlane(Vector3.up, n);
+            Vector3 along = Vector3.ProjectOnPlane(f.bodyForward, n);
+            if (upOnWall.sqrMagnitude < 1e-6f) upOnWall = Vector3.up;
+            if (along.sqrMagnitude < 1e-6f) along = upOnWall;
+            Vector3 diagonal = (along.normalized + upOnWall.normalized).normalized;
+            // Along the wall the fingers sit about 45° between the walk and the vertical.
+            // Facing the wall, they stand up the surface and the palm lies flat.
+            fingers = Vector3.Slerp(diagonal, upOnWall.normalized, _wallFacing);
+            if (Vector3.Dot(fingers, Vector3.up) < 0f) fingers = -fingers;
             // Keep the mesh on the near side of the surface so the hand does not pass through it.
             float gap = _surfaceDistance <= _s.palmReach ? 0.06f : 0.045f;
             if (_surfaceDistance <= _s.palmReach)
@@ -334,34 +366,25 @@ namespace CarX.DarkOrientation
                 _lastAnchorPoint = _anchor.Point;
                 return true;
             }
-            var col = _anchor.collider;
             Vector3 n = _anchor.Normal;
             if (n.sqrMagnitude < 1e-6f) n = Vector3.up;
             n.Normalize();
-            float sign = side == HandSide.Right ? 1f : -1f;
-            Vector3 home = ViewPoint(f, new Vector3(_s.slideHome.x * sign, _s.slideHome.y, _s.slideHome.z), shoulder);
-
-            // The next tunnel section is the same wall when its normal matches, even if it is another collider.
-            if (!FindWall(home + n * 0.55f, -n, 2.2f, n, 22f, out var hit))
+            if (!_haveBody)
             {
+                _lastBody = f.bodyPosition;
+                _haveBody = true;
                 _lastAnchorPoint = _anchor.Point;
                 return true;
             }
-            _offSurface = 0f;
-            col = hit.collider;
-            Vector3 target = hit.point;
-            Vector3 normal = hit.normal.sqrMagnitude > 1e-6f ? hit.normal.normalized : n;
-            if (!FitsHand(f, target, normal))
+            // The contact rides with the player along the wall. Looking around does not move it.
+            Vector3 moved = f.bodyPosition - _lastBody;
+            _lastBody = f.bodyPosition;
+            Vector3 alongMove = Vector3.ProjectOnPlane(moved, n);
+            if (alongMove.sqrMagnitude > 1e-6f)
             {
-                _lastAnchorPoint = _anchor.Point;
-                return true;
-            }
-            Vector3 current = _anchor.Point;
-            Vector3 delta = Vector3.ProjectOnPlane(target - current, normal);
-            if (delta.magnitude >= _s.slideDeadzone)
-            {
-                float t = 1f - Mathf.Exp(-f.dt / Mathf.Max(0.01f, _s.slideSmoothTime));
-                _anchor = TouchAnchor.Create(col, current + delta * t, normal);
+                Vector3 dest = _anchor.Point + alongMove;
+                if (FindWall(dest + n * 0.35f, -n, 0.8f, n, 22f, out var hit))
+                    _anchor = TouchAnchor.Create(hit.collider, hit.point, hit.normal.sqrMagnitude > 1e-6f ? hit.normal.normalized : n);
             }
             _lastAnchorPoint = _anchor.Point;
             return true;
@@ -497,18 +520,9 @@ namespace CarX.DarkOrientation
 
         bool CanTouch(Collider c, Vector3 normal) => Touchable(c) && (IsPerson(c) || IsWall(c, normal));
 
-        /// <summary>The palm stays inside the picture and on the near side of whatever it meets.</summary>
-        Vector3 StayInViewAndOffWalls(in HandFrame f, Vector3 palm)
+        /// <summary>Stops a searching hand from swinging through a solid surface. It does not drag a held hand back into frame.</summary>
+        Vector3 KeepOffWalls(in HandFrame f, Vector3 palm)
         {
-            if (f.cam != null)
-            {
-                Vector3 vp = f.cam.WorldToViewportPoint(palm);
-                const float margin = 0.16f;
-                vp.x = Mathf.Clamp(vp.x, margin, 1f - margin);
-                vp.y = Mathf.Clamp(vp.y, margin, 1f - margin);
-                if (vp.z < 0.38f) vp.z = 0.46f;
-                palm = f.cam.ViewportToWorldPoint(vp);
-            }
             Vector3 to = palm - f.camPos;
             float len = to.magnitude;
             if (len > 0.08f && Physics.Raycast(f.camPos, to / len, out var hit, len - 0.02f, _s.touchLayers.value, QueryTriggerInteraction.Ignore)
@@ -541,12 +555,9 @@ namespace CarX.DarkOrientation
             if (!_anchor.IsValid) return false;
             Vector3 p = _anchor.Point;
             Vector3 toAnchor = p - shoulder;
+            // Looking around does not drop the hold. Only walking out of reach does.
             if (toAnchor.magnitude > _s.releaseDistance) return false;
-            if (!FitsHand(f, p, _anchor.Normal)) return false;
             if (!CanTouch(_anchor.collider, _anchor.Normal)) return false;
-
-            Vector3 flat = Vector3.ProjectOnPlane(toAnchor, Vector3.up);
-            if (flat.sqrMagnitude > 0.0025f && Vector3.Angle(f.bodyForward, flat) > _s.releaseAngle) return false;
 
             // The player's own walking is covered by the distance check; this catches objects that move away fast.
             // Sliding updates the stored point afterwards, so this delta is the collider's motion, not the slide.
@@ -566,9 +577,10 @@ namespace CarX.DarkOrientation
                 var finger = (Finger)i;
                 if (!Rig.HasFinger(finger)) continue;
                 float idle = 0.16f;
-                float held = FarContact()
-                    ? (finger == Finger.Thumb ? 0.1f : 0.04f)
-                    : (finger == Finger.Thumb ? 0.2f : 0.26f) + 0.12f * Feel(time, i);
+                // Facing the wall straight: fingers open and the palm lies flat. Along the wall: a light curl.
+                float held = finger == Finger.Thumb
+                    ? Mathf.Lerp(0.22f, 0.06f, _wallFacing)
+                    : Mathf.Lerp(0.2f, 0.0f, _wallFacing);
                 float target = Mathf.Lerp(idle, held, _settle);
                 _curl[i] = Mathf.Lerp(_curl[i], target, k);
                 Rig.SetCurl(finger, _curl[i]);
