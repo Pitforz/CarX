@@ -20,13 +20,16 @@ MonoBehaviour:
   deactivateTime: 0.35
   shoulderOffset: {x: 0.19, y: -0.24, z: -0.04}
   pitchFollow: 0.5
-  reach: 0.62
-  releaseDistance: 0.72
-  releaseAngle: 100
+  reach: 1.15
+  releaseDistance: 1.35
+  releaseAngle: 140
   maxAnchorSpeed: 3
   minCameraDistance: 0.28
   palmOffset: 0.008
-  fingertipTilt: 0.42
+  palmReach: 0.62
+  gripBreakSpeed: 4.8
+  gripStick: 0.8
+  cornerYawSpeed: 46
   slideHome: {x: 0.14, y: 0.02, z: 0.5}
   slideDeadzone: 0.04
   slideSmoothTime: 0.16
@@ -51,8 +54,8 @@ MonoBehaviour:
   outlineColor: {r: 0.92, g: 0.95, b: 1, a: 1}
   outlineWidth: 3.5
   innerLines: 0.35
-  zoneRadius: 0.15
-  zoneSoftness: 0.45
+  zoneRadius: 0.58
+  zoneSoftness: 0.78
   zoneFadeIn: 0.2
   zoneFadeOut: 0.4
   depthNear: {r: 0.72, g: 0.75, b: 0.8, a: 1}

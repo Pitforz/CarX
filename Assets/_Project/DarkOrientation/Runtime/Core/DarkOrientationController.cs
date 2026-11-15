@@ -71,6 +71,8 @@ namespace CarX.DarkOrientation
         readonly HumanoidTouchProxyBuilder _proxies = new();
         HandController _left;
         HandController _right;
+        float _leftAssist;
+        float _rightAssist;
         SleeveArms _sleeve;
         DarkOrientationRenderPass _pass;
         Transform _handRoot;
@@ -324,6 +326,55 @@ namespace CarX.DarkOrientation
                 if (shown) _sleeve.Bake();
             }
             UpdateZones(dt);
+            ApplyBodyGrip(dt, bodyForward);
+        }
+
+        /// <summary>
+        /// A held wall tugs the player back until they pull hard enough to break it.
+        /// At a corner, walking forward yaws the camera toward that hand.
+        /// </summary>
+        void ApplyBodyGrip(float dt, Vector3 bodyForward)
+        {
+            if (!IsActive || _body == null) return;
+            var cc = _body.GetComponentInParent<CharacterController>();
+            if (cc == null || !cc.enabled) return;
+            Vector3 velocity = cc.velocity;
+            float forward = Vector3.Dot(velocity, bodyForward);
+            float yaw = 0f;
+            Grip(_left, 0, velocity, forward, dt, cc, ref yaw);
+            Grip(_right, 1, velocity, forward, dt, cc, ref yaw);
+            if (Mathf.Abs(yaw) > 0.001f)
+                cc.transform.Rotate(Vector3.up, yaw, Space.World);
+        }
+
+        void Grip(HandController hand, int owner, Vector3 velocity, float forward, float dt, CharacterController cc, ref float yaw)
+        {
+            if (hand == null) return;
+            ref float assist = ref (hand.side == HandSide.Left ? ref _leftAssist : ref _rightAssist);
+            if (!hand.IsHolding)
+            {
+                assist = 0f;
+                return;
+            }
+            Vector3 n = Vector3.ProjectOnPlane(hand.ContactNormal, Vector3.up);
+            if (n.sqrMagnitude < 0.05f) return;
+            n.Normalize();
+            float leaving = Vector3.Dot(velocity, n);
+            if (leaving > _settings.gripBreakSpeed)
+            {
+                assist = 0f;
+                Handle(hand, owner, hand.BreakGrip(Time.time));
+                return;
+            }
+            if (leaving > 0.2f)
+                cc.Move(-n * (leaving * dt * _settings.gripStick));
+            // One corner turns the view by up to a right angle, then the player looks for themselves.
+            if (hand.AtCorner && forward > 0.35f && Mathf.Abs(assist) < 80f)
+            {
+                float step = (hand.side == HandSide.Left ? -1f : 1f) * _settings.cornerYawSpeed * dt;
+                assist += step;
+                yaw += step;
+            }
         }
 
         float RaisedHands()

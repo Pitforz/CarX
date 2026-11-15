@@ -31,20 +31,26 @@ namespace CarX.DarkOrientation
         public Vector3 shoulderOffset = new(0.19f, -0.24f, -0.04f);
         [Tooltip("Какую долю наклона взгляда вверх-вниз повторяют руки")]
         [Range(0f, 1f)] public float pitchFollow = 0.5f;
-        [Tooltip("Дальше этого от плеча рука не дотягивается, м")]
-        [Min(0.2f)] public float reach = 0.62f;
-        [Tooltip("Рука отпускает точку, когда плечо отошло от неё дальше, м")]
-        [Min(0.2f)] public float releaseDistance = 0.72f;
+        [Tooltip("Дальше этого от плеча рука не нащупывает новую опору, м")]
+        [Min(0.2f)] public float reach = 1.15f;
+        [Tooltip("Уже взятая стена держится до этого расстояния, даже если перед ней препятствие, м")]
+        [Min(0.2f)] public float releaseDistance = 1.35f;
         [Tooltip("Рука отпускает точку, когда она ушла за этот угол от направления тела, градусы")]
-        [Range(30f, 170f)] public float releaseAngle = 100f;
+        [Range(30f, 170f)] public float releaseAngle = 140f;
         [Tooltip("Рука срывается, если точка движется относительно игрока быстрее, м/с")]
         [Min(0.5f)] public float maxAnchorSpeed = 3f;
         [Tooltip("Кисть не подходит к камере ближе, м (ближняя плоскость камеры 0.2)")]
         [Min(0.1f)] public float minCameraDistance = 0.28f;
         [Tooltip("Зазор между кончиком пальца и поверхностью, м")]
         [Min(0f)] public float palmOffset = 0.008f;
-        [Tooltip("Насколько пальцы наклонены в стену: 0 вдоль стены, 1 прямо в стену")]
-        [Range(0f, 0.85f)] public float fingertipTilt = 0.42f;
+        [Tooltip("Ближе этого рука ложится ладонью. Дальше касается выпрямленными пальцами, м")]
+        [Min(0.2f)] public float palmReach = 0.62f;
+        [Tooltip("С какой скорости ухода от стены хват срывается, м/с. Медленнее рука тянет игрока обратно")]
+        [Min(0.2f)] public float gripBreakSpeed = 4.8f;
+        [Tooltip("Какую долю ухода от стены хват возвращает, пока его не сорвали")]
+        [Range(0f, 1f)] public float gripStick = 0.8f;
+        [Tooltip("Как быстро камера доворачивается вдоль угла, градусы в секунду")]
+        [Min(0f)] public float cornerYawSpeed = 46f;
         [Tooltip("Куда рука стремится скользить относительно камеры (вбок наружу, вверх, вперёд), м")]
         public Vector3 slideHome = new(0.14f, 0.02f, 0.5f);
         [Tooltip("Сдвиг меньше этого рука не повторяет: мелкие движения камеры её не двигают, м")]
@@ -92,9 +98,9 @@ namespace CarX.DarkOrientation
 
         [Header("Зона касания")]
         [Tooltip("Радиус сферы вокруг точки касания, м")]
-        [Range(0.05f, 0.3f)] public float zoneRadius = 0.15f;
+        [Range(0.05f, 1.2f)] public float zoneRadius = 0.58f;
         [Tooltip("Доля радиуса, на которой зона плавно гаснет к краю")]
-        [Range(0.05f, 0.95f)] public float zoneSoftness = 0.45f;
+        [Range(0.05f, 0.95f)] public float zoneSoftness = 0.78f;
         [Min(0.01f)] public float zoneFadeIn = 0.2f;
         [Min(0.01f)] public float zoneFadeOut = 0.4f;
         [Tooltip("Цвет ближних точек карты глубины")]
