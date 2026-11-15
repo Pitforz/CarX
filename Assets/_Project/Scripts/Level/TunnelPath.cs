@@ -131,7 +131,8 @@ namespace CarX.Level
         [NonSerialized] public readonly List<Vector3> shaftCentres = new List<Vector3>();
         [NonSerialized] public string warning;
         [NonSerialized] bool dirty = true;
-        [NonSerialized] Mesh mesh, waterMesh;
+        [NonSerialized] Mesh mesh, waterMesh, shellMesh;
+        [NonSerialized] int variants;
 
         // ------------------------------------------------------------------ lifecycle
 
@@ -162,6 +163,7 @@ namespace CarX.Level
         {
             if (mesh != null) DestroyImmediate(mesh);
             if (waterMesh != null) DestroyImmediate(waterMesh);
+            if (shellMesh != null) DestroyImmediate(shellMesh);
         }
 
         public void MarkDirty() { dirty = true; }
@@ -214,8 +216,9 @@ namespace CarX.Level
             var prof = section.Build(dirtLine);
             var holes = PlanShafts(prof);
 
-            // tunnel body
-            var kit = new MeshKit(5);
+            // tunnel body (sub-meshes 5+ = wall variants, one per slab, picked at random)
+            variants = mats != null ? mats.VariantCount : 0;
+            var kit = new MeshKit(5 + variants);
             BuildTunnel(kit, prof, holes);
             var gen = GetChild(GeneratedName, true).gameObject;
             if (mesh == null) mesh = new Mesh { name = name + "_Tunnel", hideFlags = HideFlags.DontSave };
@@ -225,7 +228,7 @@ namespace CarX.Level
             mf.sharedMesh = mesh;
             var mr = gen.GetComponent<MeshRenderer>();
             if (mr == null) mr = gen.AddComponent<MeshRenderer>();
-            if (mats != null) mr.sharedMaterials = mats.TunnelSet();
+            if (mats != null) mr.sharedMaterials = mats.TunnelSetWithVariants();
             mr.shadowCastingMode = ShadowCastingMode.TwoSided;
             mr.receiveShadows = true;
             mr.lightProbeUsage = LightProbeUsage.Off;
@@ -234,6 +237,7 @@ namespace CarX.Level
             if (mc == null) mc = gen.AddComponent<MeshCollider>();
             mc.sharedMesh = null;
             if (kit.VertexCount > 0) mc.sharedMesh = mesh;
+            BuildShadowShell(prof, holes, mats);
 
             BuildWater(mats);
             SyncShafts(holes, mats, forceShafts);
@@ -512,13 +516,30 @@ namespace CarX.Level
             return sl.MPoint(s, v.x, v.y);
         }
 
+        /// <summary>Sloping faces next to the floor (the lower bevels of an octagon): their joints are made like the floor's,
+        /// flat and filled, so they read as a faint line, not a shadowed groove.</summary>
+        static bool[] LowEdges(Profile prof)
+        {
+            int n = prof.Count;
+            var low = new bool[n];
+            for (int e = 0; e < n; e++)
+            {
+                if (prof.edgeSub[e] == 1) continue;
+                bool nextToFloor = prof.edgeSub[(e + n - 1) % n] == 1 || prof.edgeSub[(e + 1) % n] == 1;
+                low[e] = nextToFloor && prof.edgeOut[e].y < -0.3f;
+            }
+            return low;
+        }
+
         void BuildTunnel(MeshKit kit, Profile prof, Dictionary<int, Hole> holes)
         {
             if (slabs.Count == 0) return;
+            var low = LowEdges(prof);
             int n = prof.Count;
             int last = slabs.Count - 1;
             float thick = Mathf.Max(0.05f, slabThickness);
             var rnd = new System.Random(seed * 7919 + 13);
+            var vrnd = new System.Random(seed * 104729 + 71);   // separate stream: old tunnels keep their texture layout
             var cuts = PlanCuts();
             for (int k = 0; k <= last; k++)
             {
@@ -533,6 +554,10 @@ namespace CarX.Level
                 float bev = Mathf.Min(edgeBevel, (s1 - s0) * 0.2f);
                 bool flip = rnd.NextDouble() < 0.5;
                 float vOff = (float)rnd.NextDouble();
+                float uOff = vOff * 7.31f % 1f;
+                // wall material of this slab: the base concrete or one of its lighter/darker variants
+                int wallSub = 0;
+                if (variants > 0) { int pick = vrnd.Next(variants + 1); wallSub = pick == 0 ? 0 : 4 + pick; }
 
                 var ringS = new List<float>(4);
                 var ringE = new List<float>(4);
@@ -552,13 +577,14 @@ namespace CarX.Level
                     {
                         if (hasHole && r == mainPair && e == prof.ceilingEdge)
                         {
-                            CeilingWithHole(kit, sl, prof, hole, sa, sb, flip, vOff);
+                            CeilingWithHole(kit, sl, prof, hole, sa, sb, flip, vOff, wallSub, Mathf.Max(0.5f, segmentLength));
                             continue;
                         }
                         int j0 = e, j1 = (e + 1) % n;
                         int sub = prof.edgeSub[e];
+                        int matSub = sub == 0 ? wallSub : sub;
                         float eA = ea, eB = eb;
-                        if (sub == 1)
+                        if (sub == 1 || low[e])
                         {
                             if (flatS && r == 0) eA = 0f;
                             if (flatE && r + 2 == ringS.Count) eB = 0f;
@@ -573,9 +599,12 @@ namespace CarX.Level
                         }
                         else
                         {
-                            float ua = sa / sl.length, ub = sb / sl.length;
-                            if (seamless) { ua = (sl.startDistance + sa) / Mathf.Max(0.5f, segmentLength); ub = (sl.startDistance + sb) / Mathf.Max(0.5f, segmentLength); }
-                            else if (flip) { ua = 1f - ua; ub = 1f - ub; }
+                            // metres along the tunnel / nominal slab length: the same texture density on every slab,
+                            // short or long (slabs shortened to fit a tunnel no longer squeeze the texture)
+                            float tile = Mathf.Max(0.5f, segmentLength);
+                            float ua = sa / tile + uOff, ub = sb / tile + uOff;
+                            if (seamless) { ua = (sl.startDistance + sa) / tile; ub = (sl.startDistance + sb) / tile; }
+                            else if (flip) { ua = -ua; ub = -ub; }
                             float v0, v1;
                             if (sub == 4) { v0 = prof.points[j0].y * 0.5f; v1 = prof.points[j1].y * 0.5f; }
                             else { v0 = prof.perim[e] * 0.5f + vOff; v1 = prof.perim[e + 1] * 0.5f + vOff; }
@@ -589,25 +618,26 @@ namespace CarX.Level
                                 if (cut.side * inw.x < -0.05f) (hit ??= new List<List<Vector2>>()).Add(cut.poly);
                             if (hit != null)
                             {
-                                QuadCut(kit, sub, sl, A, B, C, D, uA, uB, uC, uD, sl.Dir(inw), hit);
+                                QuadCut(kit, matSub, sl, A, B, C, D, uA, uB, uC, uD, sl.Dir(inw), hit);
                                 continue;
                             }
                         }
                         if (prof.smooth && sub != 1)
                         {
                             Vector3 n0 = sl.Dir(prof.smoothNormal[j0]), n1 = sl.Dir(prof.smoothNormal[j1]);
-                            kit.QuadN(sub, A, B, C, D, uA, uB, uC, uD, n0, n1, n1, n0);
+                            kit.QuadN(matSub, A, B, C, D, uA, uB, uC, uD, n0, n1, n1, n0);
                         }
-                        else kit.Quad(sub, A, B, C, D, uA, uB, uC, uD, sl.Dir(prof.EdgeInward(e)));
+                        else kit.Quad(matSub, A, B, C, D, uA, uB, uC, uD, sl.Dir(prof.EdgeInward(e)));
                     }
                 }
-                if (!wallStart) Lip(kit, sl, prof, s0, bev, thick, -sl.fwd, vOff, flatS);
-                if (!wallEnd) Lip(kit, sl, prof, s1, bev, thick, sl.fwd, vOff, flatE);
+                if (!wallStart) Lip(kit, sl, prof, s0, bev, thick, -sl.fwd, vOff, flatS, wallSub, low);
+                if (!wallEnd) Lip(kit, sl, prof, s1, bev, thick, sl.fwd, vOff, flatE, wallSub, low);
                 // where a flat floor edge meets a chamfered wall edge: close the tiny corner between them
                 if ((flatS || flatE) && bev > 1e-4f)
                     for (int j = 0; j < n; j++)
                     {
-                        if ((prof.edgeSub[(j + n - 1) % n] == 1) == (prof.edgeSub[j] == 1)) continue;
+                        int jp = (j + n - 1) % n;
+                        if ((prof.edgeSub[jp] == 1 || low[jp]) == (prof.edgeSub[j] == 1 || low[j])) continue;
                         if (flatS) Tri2(kit, P(sl, prof, j, s0, 0f), P(sl, prof, j, s0 + bev, 0f), P(sl, prof, j, s0, bev));
                         if (flatE) Tri2(kit, P(sl, prof, j, s1, 0f), P(sl, prof, j, s1 - bev, 0f), P(sl, prof, j, s1, bev));
                     }
@@ -621,6 +651,55 @@ namespace CarX.Level
             }
             for (int k = 1; k <= last; k++)
                 if (slabs[k].mStart == Vector3.zero || slabs[k].gapStart) JointFill(kit, prof, slabs[k - 1], slabs[k], thick);
+        }
+
+        /// <summary>Invisible closed sleeve around the tunnel (inside the concrete) that only casts shadows:
+        /// no light gets in through the slab joints from a tunnel round the corner.
+        /// Left open where light has to come in: shaft holes and openings into other tunnels.</summary>
+        void BuildShadowShell(Profile prof, Dictionary<int, Hole> holes, TunnelMaterials mats)
+        {
+            var kit = new MeshKit(1);
+            int n = prof.Count;
+            float off = Mathf.Max(0.05f, slabThickness) * 0.5f;
+            var cuts = PlanCuts();
+            for (int k = 0; k < slabs.Count; k++)
+            {
+                var sl = slabs[k];
+                List<Cut> sc;
+                cuts.TryGetValue(k, out sc);
+                bool hasHole = holes.ContainsKey(k) && prof.ceilingEdge >= 0;
+                for (int e = 0; e < n; e++)
+                {
+                    if (hasHole && e == prof.ceilingEdge) continue;
+                    if (sc != null)
+                    {
+                        Vector2 inw = prof.EdgeInward(e);
+                        bool open = false;
+                        foreach (var cut in sc) if (cut.side * inw.x < -0.05f) open = true;
+                        if (open) continue;
+                    }
+                    int j1 = (e + 1) % n;
+                    Vector3 A = P(sl, prof, e, 0f, off), B = P(sl, prof, j1, 0f, off);
+                    Vector3 C = P(sl, prof, j1, sl.length, off), D = P(sl, prof, e, sl.length, off);
+                    var nrm = sl.Dir(prof.EdgeInward(e));
+                    // faces look into the tunnel: they stop light coming from inside it (its exit, its shafts) and the
+                    // shadow normal bias moves them outwards, away from the walls (never into the tunnel)
+                    kit.Quad(0, A, B, C, D, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, nrm);
+                }
+            }
+            var go = GetChild("_ShadowShell", true).gameObject;
+            if (shellMesh == null) shellMesh = new Mesh { name = name + "_Shell", hideFlags = HideFlags.DontSave };
+            kit.Fill(shellMesh);
+            var mf = go.GetComponent<MeshFilter>();
+            if (mf == null) mf = go.AddComponent<MeshFilter>();
+            mf.sharedMesh = shellMesh;
+            var mr = go.GetComponent<MeshRenderer>();
+            if (mr == null) mr = go.AddComponent<MeshRenderer>();
+            if (mats != null && mats.concrete != null) mr.sharedMaterial = mats.concrete;
+            mr.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
+            mr.receiveShadows = false;
+            mr.lightProbeUsage = LightProbeUsage.Off;
+            mr.reflectionProbeUsage = ReflectionProbeUsage.Off;
         }
 
         Vector2 FloorUV(Vector3 local)
@@ -638,7 +717,7 @@ namespace CarX.Level
             kit.Tri(0, a, b, c, u, v, w, -nrm);
         }
 
-        void CeilingWithHole(MeshKit kit, Slab sl, Profile prof, Hole hole, float sa, float sb, bool flip, float vOff)
+        void CeilingWithHole(MeshKit kit, Slab sl, Profile prof, Hole hole, float sa, float sb, bool flip, float vOff, int sub, float tile)
         {
             int e = prof.ceilingEdge;
             Vector2 pa = prof.points[e], pb = prof.points[(e + 1) % prof.Count];
@@ -649,8 +728,8 @@ namespace CarX.Level
             for (int t = 0; t + 2 < tris.Count; t += 3)
             {
                 Vector2 a = tris[t], b = tris[t + 1], d = tris[t + 2];
-                kit.Tri(0, CeilPoint(sl, a, y, sa, sb), CeilPoint(sl, b, y, sa, sb), CeilPoint(sl, d, y, sa, sb),
-                        CeilUV(a, sl, prof, pa, flip, vOff), CeilUV(b, sl, prof, pa, flip, vOff), CeilUV(d, sl, prof, pa, flip, vOff), -sl.up);
+                kit.Tri(sub, CeilPoint(sl, a, y, sa, sb), CeilPoint(sl, b, y, sa, sb), CeilPoint(sl, d, y, sa, sb),
+                        CeilUV(a, sl, prof, pa, flip, vOff, tile), CeilUV(b, sl, prof, pa, flip, vOff, tile), CeilUV(d, sl, prof, pa, flip, vOff, tile), -sl.up);
             }
         }
 
@@ -660,24 +739,26 @@ namespace CarX.Level
             return v.y <= sa + 1e-4f || v.y >= sb - 1e-4f ? sl.MPoint(v.y, v.x, y) : sl.Point(v.y, v.x, y);
         }
 
-        static Vector2 CeilUV(Vector2 v, Slab sl, Profile prof, Vector2 pa, bool flip, float vOff)
+        static Vector2 CeilUV(Vector2 v, Slab sl, Profile prof, Vector2 pa, bool flip, float vOff, float tile)
         {
-            float u = v.y / sl.length;
-            if (flip) u = 1f - u;
+            float u = v.y / tile + vOff * 7.31f % 1f;
+            if (flip) u = -u;
             return new Vector2(u, (prof.perim[prof.ceilingEdge] + Mathf.Abs(v.x - pa.x)) * 0.5f + vOff);
         }
 
-        static void Lip(MeshKit kit, Slab sl, Profile prof, float s, float bev, float thick, Vector3 facing, float vOff, bool flatFloor)
+        static void Lip(MeshKit kit, Slab sl, Profile prof, float s, float bev, float thick, Vector3 facing, float vOff, bool flatFloor, int sub, bool[] low)
         {
             int n = prof.Count;
             for (int e = 0; e < n; e++)
             {
                 int j0 = e, j1 = (e + 1) % n;
-                float e0 = flatFloor && prof.edgeSub[e] == 1 ? 0f : bev;
+                // floor and lower bevels: the end face starts a few cm under the surface (the seam fill covers it).
+                // Flush with the floor, its edge shadowed the next slab under the grazing exit light (a band at every joint)
+                float e0 = flatFloor && (prof.edgeSub[e] == 1 || low[e]) ? Mathf.Min(0.03f, thick * 0.5f) : bev;
                 Vector3 A = P(sl, prof, j0, s, e0), B = P(sl, prof, j1, s, e0);
                 Vector3 C = P(sl, prof, j1, s, thick), D = P(sl, prof, j0, s, thick);
                 float u0 = prof.perim[e] * 0.5f + vOff, u1 = prof.perim[e + 1] * 0.5f + vOff;
-                kit.Quad(0, A, B, C, D, new Vector2(u0, e0 * 0.5f), new Vector2(u1, e0 * 0.5f), new Vector2(u1, thick * 0.5f), new Vector2(u0, thick * 0.5f), facing);
+                kit.Quad(sub, A, B, C, D, new Vector2(u0, e0 * 0.5f), new Vector2(u1, e0 * 0.5f), new Vector2(u1, thick * 0.5f), new Vector2(u0, thick * 0.5f), facing);
             }
         }
 
@@ -763,6 +844,7 @@ namespace CarX.Level
         void JointFill(MeshKit kit, Profile prof, Slab A, Slab B, float thick)
         {
             int n = prof.Count;
+            var low = LowEdges(prof);
             float sEnd = A.length - A.tEnd, sStart = B.tStart;
             float gap = Vector3.Distance(A.Point(sEnd, 0f, 0f), B.Point(sStart, 0f, 0f));
             // grey soil just behind the seam: shallow, so the seam reads as a thin line, not a dark slot
@@ -771,7 +853,7 @@ namespace CarX.Level
             float va = (A.startDistance + sEnd - ia) / 1.5f, vb = (B.startDistance + sStart + ib) / 1.5f;
             for (int e = 0; e < n; e++)
             {
-                if (prof.edgeSub[e] == 1) continue;   // the floor seam is filled flush below
+                if (prof.edgeSub[e] == 1 || low[e]) continue;   // floor and lower bevel seams are filled flush below
                 int j0 = e, j1 = (e + 1) % n;
                 Vector3 a0 = P(A, prof, j0, sEnd - ia, depth), a1 = P(A, prof, j1, sEnd - ia, depth);
                 Vector3 b0 = P(B, prof, j0, sStart + ib, depth), b1 = P(B, prof, j1, sStart + ib, depth);
@@ -789,6 +871,21 @@ namespace CarX.Level
                 Vector3 a0 = A.MPoint(sEnd, q0.x, q0.y), a1 = A.MPoint(sEnd, q1.x, q1.y);
                 Vector3 b0 = B.MPoint(sStart, q0.x, q0.y), b1 = B.MPoint(sStart, q1.x, q1.y);
                 kit.Quad(1, a0, a1, b1, b0, FloorUV(a0), FloorUV(a1), FloorUV(b1), FloorUV(b0), A.Dir(-down));
+            }
+            // lower bevels: same as the floor, wall concrete a hair lower, a faint ring instead of a shadowed groove
+            float lowSink = Mathf.Clamp(jointSink * 2f, 0.0005f, 0.005f);
+            float tile = Mathf.Max(0.5f, segmentLength);
+            float uu = (A.startDistance + sEnd) / tile;
+            for (int e = 0; e < n; e++)
+            {
+                if (!low[e]) continue;
+                Vector2 p0 = prof.points[e], p1 = prof.points[(e + 1) % n];
+                Vector2 o = prof.edgeOut[e];
+                Vector2 q0 = p0 + o * lowSink, q1 = p1 + o * lowSink;
+                Vector3 a0 = A.MPoint(sEnd, q0.x, q0.y), a1 = A.MPoint(sEnd, q1.x, q1.y);
+                Vector3 b0 = B.MPoint(sStart, q0.x, q0.y), b1 = B.MPoint(sStart, q1.x, q1.y);
+                float v0 = prof.perim[e] * 0.5f, v1 = prof.perim[e + 1] * 0.5f;
+                kit.Quad(0, a0, a1, b1, b0, new Vector2(uu, v0), new Vector2(uu, v1), new Vector2(uu + 0.01f, v1), new Vector2(uu + 0.01f, v0), A.Dir(-o));
             }
         }
 
@@ -1012,6 +1109,7 @@ namespace CarX.Level
                     hash = hash * 31 + h.cx.GetHashCode();
                     hash = hash * 31 + section.Hash();
                     hash = hash * 31 + (mats != null ? mats.GetHashCode() : 0);
+                    hash = hash * 31 + TunnelTypeLibrary.Current.DaylightHash();
                 }
                 var go = shaftObjects[h.spec];
                 if (go == null || force || shaftHashes[h.spec] != hash)

@@ -243,7 +243,7 @@ namespace CarX.EditorTools
         {
             var fl = new GameObject("Flashlight");
             fl.transform.SetParent(parent, false);
-            fl.transform.localPosition = new Vector3(0.18f, -0.16f, 0.12f);
+            fl.transform.localPosition = new Vector3(0.28f, -0.3f, 0.1f);   // in the hand: light from the side keeps the wall relief
             var light = fl.AddComponent<Light>();
             light.type = LightType.Spot;
             light.range = 28f;

@@ -32,6 +32,13 @@ namespace CarX.Level
     {
         [NonSerialized] public Material beamMaterial;
         [NonSerialized] public Material dustMaterial;
+        [Tooltip("Насколько этот проём слепит глаз (для адаптации глаза)")]
+        public float glare;
+        [HideInInspector] public Vector3 openingLocal;
+        static readonly List<ShaftRuntime> all = new List<ShaftRuntime>();
+        public static List<ShaftRuntime> All { get { return all; } }
+        void OnEnable() { if (!all.Contains(this)) all.Add(this); TunnelEyeAdaptation.Hook(); }
+        void OnDisable() { all.Remove(this); }
 
         public void Sync()
         {
@@ -199,77 +206,78 @@ namespace CarX.Level
             AddMesh(Child(root.transform, "Sky"), skyKit.ToMesh(name + "_Sky"), new[] { mats ? mats.sky : null }, ShadowCastingMode.Off, false, false);
 
             // ---------- daylight ----------
+            var lib = TunnelTypeLibrary.Current;
+            float open = op.round ? lib.manholeOpenness : lib.grateOpenness;
+            float mult = spec.brightness / ShaftSpec.DefaultBrightness(spec.type);
+            // old scenes stored the former warm default per shaft: treat it as «no tint»
+            var tint = spec.lightColor;
+            if (Mathf.Abs(tint.r - 1f) < 0.01f && Mathf.Abs(tint.g - 0.93f) < 0.01f && Mathf.Abs(tint.b - 0.8f) < 0.01f) tint = Color.white;
+            var dayColor = lib.daylightColor * tint;
+            float E = lib.shaftFloorLight * open * mult;      // light on the floor right under the opening
+            float area = op.round ? Mathf.PI * op.radius * op.radius : 4f * op.halfW * op.halfL;
+            rt.glare = Mathf.Clamp01(E * Mathf.Sqrt(Mathf.Max(0.05f, area)) / 4f);
+            rt.openingLocal = new Vector3(0f, ceilY, 0f);
+            var skyGo = root.transform.Find("Sky");
+            if (skyGo != null)
+            {
+                var mpb = new MaterialPropertyBlock();
+                mpb.SetColor("_Color", lib.SkyColor * tint * mult);
+                skyGo.GetComponent<MeshRenderer>().SetPropertyBlock(mpb);
+            }
+            // virtual sun high above: only the shape of the beam in the air uses it
             float lightH = op.round ? 12f : 8f;
             var L = new Vector3(0, top + lightH, 0);
-            float dist = Mathf.Max(1f, L.y - floorY);
+            float hgt = Mathf.Max(0.5f, ceilY - floorY);
+            // the opening lights the tunnel like a soft lamp in the ceiling: floor and walls around it, fading with the reach.
+            // Light diffused by the grate and the lid holes: no bar stripes, no thin rays
             var spotGo = Child(root.transform, "Daylight");
-            spotGo.transform.localPosition = L;
+            spotGo.transform.localPosition = new Vector3(0f, ceilY - 0.03f, 0f);
             spotGo.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             var spot = spotGo.AddComponent<Light>();
             spot.type = LightType.Spot;
-            float reach = (op.round ? op.radius : Mathf.Sqrt(op.halfW * op.halfW + op.halfL * op.halfL)) + 0.25f;
-            spot.spotAngle = Mathf.Clamp(2f * Mathf.Atan(reach / lightH) * Mathf.Rad2Deg, 3f, 150f);
-            spot.innerSpotAngle = spot.spotAngle * 0.8f;
-            spot.range = dist * 2f;
-            spot.color = spec.lightColor;
-            spot.intensity = spec.brightness * dist * dist;
+            spot.spotAngle = 165f;
+            spot.innerSpotAngle = 60f;
+            spot.range = Mathf.Max(1f, lib.shaftReach);
+            spot.color = dayColor;
+            spot.intensity = E * hgt * hgt;
             spot.shadows = LightShadows.Soft;
             spot.shadowStrength = 1f;
-            spot.shadowNearPlane = 1f;
-            spot.shadowBias = 0.02f;
-            spot.shadowNormalBias = 0.2f;
+            spot.shadowNearPlane = 0.1f;
+            spot.shadowBias = 0.05f;
+            spot.shadowNormalBias = 0.4f;
             var ald = spot.GetUniversalAdditionalLightData();
             ald.usePipelineSettings = false;
-
-            // light bounced from the lit floor onto the walls (cheap, no shadows)
+            spot.enabled = E > 0.0001f;
+            // light bounced off the lit floor: the ceiling around the opening is not black
             var bounceGo = Child(root.transform, "Bounce");
-            bounceGo.transform.localPosition = new Vector3(0, floorY + 0.7f, 0);
+            bounceGo.transform.localPosition = new Vector3(0, floorY + 0.4f, 0);
             var bounce = bounceGo.AddComponent<Light>();
             bounce.type = LightType.Point;
-            bounce.range = op.round ? 4.5f : 6.5f;
-            bounce.color = spec.lightColor * new Color(0.95f, 0.85f, 0.72f);
-            bounce.intensity = spec.bounce * spec.brightness * (op.round ? 0.012f : 0.05f) * Mathf.Clamp(op.MaxHalf, 0.4f, 1.4f);
+            bounce.range = Mathf.Min(3.5f, Mathf.Max(1f, lib.shaftReach));
+            bounce.color = dayColor;
+            bounce.intensity = spec.bounce * E * 0.25f * Mathf.Clamp(area, 0.3f, 2f);
             bounce.shadows = LightShadows.None;
-
-            // ---------- visible light ----------
-            if (op.round)
-            {
-                var rays = new MeshKit(1);
-                foreach (var h in LidPattern.Holes)
-                {
-                    var hp = new Vector3((h.x - 0.5f) * 2f * lidR, top, (h.y - 0.5f) * 2f * lidR);
-                    var dir = (hp - L).normalized;
-                    float spreadAtCeil = new Vector2(hp.x, hp.z).magnitude * (L.y - ceilY) / (L.y - top);
-                    if (spreadAtCeil > op.radius - 0.015f) continue;
-                    float t = (floorY - hp.y) / dir.y;
-                    var bottom = hp + dir * t;
-                    float r0 = h.z * 2f * lidR;
-                    float r1 = r0 * (L.y - floorY) / (L.y - top);
-                    float len = Vector3.Distance(bottom, hp);
-                    rays.Tube(0, bottom, hp, r1, r0, 8, true, 1f / len);
-                }
-                if (mats != null && mats.ray != null)
-                    AddMesh(Child(root.transform, "Rays"), rays.ToMesh(name + "_Rays"), new[] { mats.ray }, ShadowCastingMode.Off, false, false);
-            }
-            else if (mats != null && mats.shaft != null && spec.beam > 0f)
+            bounce.enabled = bounce.intensity > 0.0001f;
+            if (mats != null && mats.shaft != null && spec.beam * lib.shaftBeam > 0f && E > 0.0001f)
             {
                 float k = (L.y - floorY) / (L.y - ceilY);
-                var bMin = new Vector3(-op.halfW * k - 0.05f, floorY - 0.05f, -op.halfL * k - 0.05f);
-                var bMax = new Vector3(op.halfW * k + 0.05f, top - BarHeight, op.halfL * k + 0.05f);
+                var bMin = new Vector3(-op.HalfX * k - 0.05f, floorY - 0.05f, -op.HalfZ * k - 0.05f);
+                var bMax = new Vector3(op.HalfX * k + 0.05f, op.round ? ceilY : top - BarHeight, op.HalfZ * k + 0.05f);
                 var box = new MeshKit(1);
                 box.Box(0, (bMin + bMax) * 0.5f, new Vector3((bMax.x - bMin.x) * 0.5f, 0, 0), new Vector3(0, (bMax.y - bMin.y) * 0.5f, 0), new Vector3(0, 0, (bMax.z - bMin.z) * 0.5f), 1f);
                 var m = new Material(mats.shaft) { name = name + "_Beam", hideFlags = HideFlags.DontSave };
                 SetShaftParams(m, L, op, ceilY, grateY, barOrigin);
                 m.SetVector("_BoxMin", bMin);
                 m.SetVector("_BoxMax", bMax);
-                m.SetColor("_Color", spec.lightColor);
-                m.SetFloat("_Density", 0.18f * spec.beam * Mathf.Sqrt(Mathf.Max(0.1f, spec.brightness / 30f)));
+                m.SetVector("_ShaftBars", Vector4.zero);   // diffused by the grate: an even column, no stripes
+                m.SetColor("_Color", dayColor);
+                m.SetFloat("_Density", 0.18f * lib.shaftBeam * spec.beam * Mathf.Sqrt(E / 4f));
                 rt.beamMaterial = m;
                 AddMesh(Child(root.transform, "Beam"), box.ToMesh(name + "_Beam"), new[] { m }, ShadowCastingMode.Off, false, false);
             }
 
             // ---------- dust motes ----------
-            if (spec.dust && mats != null && mats.dust != null)
+            if (spec.dust && lib.shaftDust && mats != null && mats.dust != null)
             {
                 var psGo = Child(root.transform, "Dust");
                 float hy = (ceilY - floorY);
@@ -309,7 +317,8 @@ namespace CarX.Level
                 var pr = psGo.GetComponent<ParticleSystemRenderer>();
                 var dm = new Material(mats.dust) { name = name + "_Dust", hideFlags = HideFlags.DontSave };
                 SetShaftParams(dm, L, op, ceilY, grateY, barOrigin);
-                dm.SetColor("_Color", spec.lightColor * 2.2f);
+                dm.SetColor("_Color", dayColor * 2.2f * Mathf.Sqrt(E / 4f));
+                dm.SetVector("_ShaftBars", Vector4.zero);
                 pr.sharedMaterial = dm;
                 pr.renderMode = ParticleSystemRenderMode.Billboard;
                 pr.shadowCastingMode = ShadowCastingMode.Off;

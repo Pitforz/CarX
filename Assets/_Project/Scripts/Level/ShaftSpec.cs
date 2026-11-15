@@ -28,17 +28,18 @@ namespace CarX.Level
         [Range(0.2f, 1.6f)] public float length = 0.55f;
         [Tooltip("Диаметр люка, м")]
         [Range(0.6f, 1.2f)] public float diameter = 0.9f;
-        [Tooltip("Цвет дневного света")]
-        public Color lightColor = new Color(1f, 0.93f, 0.8f);
-        [Tooltip("Яркость пятна света на полу")]
+        [Tooltip("Оттенок этого проёма. Белый = общий дневной цвет (TunnelTypes → Daylight Color)")]
+        public Color lightColor = Color.white;
+        [Tooltip("Яркость этого проёма. 30 у решётки, 26 у квадратной, 14 у люка = ×1 к общей настройке в TunnelTypes")]
         [Range(0f, 200f)] public float brightness = 30f;
-        [Tooltip("Плотность светового столба (пыль в воздухе)")]
+        [Tooltip("Множитель видимого столба света (общий: TunnelTypes → Shaft Beam). 0 = нет")]
         [Range(0f, 4f)] public float beam = 1f;
-        [Tooltip("Свет, отражённый от пола на стены")]
+        [Tooltip("Свет, отражённый от пола на потолок рядом с проёмом")]
         [Range(0f, 4f)] public float bounce = 1f;
-        [Tooltip("Летающие пылинки в луче (видны в Play)")]
+        [Tooltip("Пылинки в луче (только если включены в TunnelTypes → Shaft Dust)")]
         public bool dust = true;
 
+        public static float DefaultBrightness(ShaftType t) { return t == ShaftType.Manhole ? 14f : t == ShaftType.GrateSquare ? 26f : 30f; }
         public ShaftSpec Clone() { return (ShaftSpec)MemberwiseClone(); }
 
         public static ShaftSpec Preset(ShaftType t, float distance)

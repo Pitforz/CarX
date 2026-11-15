@@ -19,6 +19,9 @@ MonoBehaviour:
     width: 2.4
     height: 2.4
     chamfer: 0.3
+    chamferTop: 0
+    bevelWidth: 0
+    bevelHeight: 0
     curbWidth: 0.45
     curbHeight: 0.15
     diameter: 2.2
@@ -30,7 +33,8 @@ MonoBehaviour:
   minJointGap: 0.006
   jointSink: 0.001
   edgeBevel: 0.006
-  dirtLine: 0.9
+  dirtLine: 0
+  seamless: 0
   channelWater: 0
   waterDepth: 0.05
   materials: {fileID: 0}

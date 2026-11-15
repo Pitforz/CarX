@@ -22,8 +22,14 @@ namespace CarX.Level
         [Min(0.8f)] public float width = 3f;
         [Tooltip("Высота проёма внутри, м")]
         [Min(0.8f)] public float height = 2.4f;
-        [Tooltip("Фаска в углах восьмиугольника, м")]
+        [Tooltip("Фаска в углах восьмиугольника, м (во всех углах, если три поля ниже равны 0)")]
         [Min(0.02f)] public float chamfer = 0.3f;
+        [Tooltip("Верхние фаски (у потолка), м. 0 = как «Chamfer»")]
+        [Min(0f)] public float chamferTop;
+        [Tooltip("Нижние скосы вдоль стен (как низкая скамья): ширина по полу, м. 0 = как «Chamfer»")]
+        [Min(0f)] public float bevelWidth;
+        [Tooltip("Нижние скосы вдоль стен: высота по стене, м. 0 = как «Chamfer»")]
+        [Min(0f)] public float bevelHeight;
         [Tooltip("Ширина бордюра-дорожки с каждой стороны канала, м")]
         [Min(0.1f)] public float curbWidth = 0.45f;
         [Tooltip("Высота бордюра над дном канала, м")]
@@ -60,7 +66,7 @@ namespace CarX.Level
             {
                 switch (profile)
                 {
-                    case TunnelProfile.Octagon: return Mathf.Max(0.2f, W - Chamfer);
+                    case TunnelProfile.Octagon: return Mathf.Max(0.2f, W - BevelW);
                     case TunnelProfile.BoxWithCurbs: return Mathf.Max(0.2f, W - CurbW);
                     case TunnelProfile.Round: return SiltHalfChord;
                     default: return W;
@@ -75,6 +81,10 @@ namespace CarX.Level
         public float JoinFloor { get { return profile == TunnelProfile.BoxWithCurbs ? CurbH : 0f; } }
 
         float Chamfer { get { return Mathf.Clamp(chamfer, 0.02f, Mathf.Min(W, Height * 0.5f) * 0.9f); } }
+        // separate top chamfers and bottom bevels; 0 = the common chamfer (files saved before these fields existed)
+        float TopC { get { return chamferTop > 0.001f ? Mathf.Clamp(chamferTop, 0.02f, Mathf.Min(W, Height * 0.5f) * 0.9f) : Chamfer; } }
+        float BevelW { get { return bevelWidth > 0.001f ? Mathf.Clamp(bevelWidth, 0.02f, W * 0.9f) : Chamfer; } }
+        float BevelH { get { return bevelHeight > 0.001f ? Mathf.Clamp(bevelHeight, 0.02f, Mathf.Max(0.02f, Height * 0.9f - TopC)) : Chamfer; } }
         float CurbW { get { return Mathf.Clamp(curbWidth, 0.1f, W * 0.8f); } }
         float CurbH { get { return Mathf.Clamp(curbHeight, 0.03f, Height * 0.4f); } }
 
@@ -90,9 +100,9 @@ namespace CarX.Level
             {
                 case TunnelProfile.Octagon:
                 {
-                    float c = Chamfer;
-                    p.Add(new Vector2(-w + c, 0)); p.Add(new Vector2(w - c, 0)); p.Add(new Vector2(w, c)); p.Add(new Vector2(w, h - c));
-                    p.Add(new Vector2(w - c, h)); p.Add(new Vector2(-w + c, h)); p.Add(new Vector2(-w, h - c)); p.Add(new Vector2(-w, c));
+                    float c = TopC, bw = BevelW, bh = BevelH;
+                    p.Add(new Vector2(-w + bw, 0)); p.Add(new Vector2(w - bw, 0)); p.Add(new Vector2(w, bh)); p.Add(new Vector2(w, h - c));
+                    p.Add(new Vector2(w - c, h)); p.Add(new Vector2(-w + c, h)); p.Add(new Vector2(-w, h - c)); p.Add(new Vector2(-w, bh));
                     kind.AddRange(new[] { 1, 0, 0, 0, 0, 0, 0, 0 });
                     ceilingEdge = 4;
                     break;
@@ -260,6 +270,9 @@ namespace CarX.Level
                 h = h * 31 + width.GetHashCode();
                 h = h * 31 + height.GetHashCode();
                 h = h * 31 + chamfer.GetHashCode();
+                h = h * 31 + chamferTop.GetHashCode();
+                h = h * 31 + bevelWidth.GetHashCode();
+                h = h * 31 + bevelHeight.GetHashCode();
                 h = h * 31 + curbWidth.GetHashCode();
                 h = h * 31 + curbHeight.GetHashCode();
                 h = h * 31 + diameter.GetHashCode();

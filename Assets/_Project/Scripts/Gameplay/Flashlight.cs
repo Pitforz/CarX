@@ -11,6 +11,9 @@ namespace CarX.Gameplay
         public bool startOn = true;
         [Tooltip("Насколько фонарь запаздывает за взглядом (0 = жёстко)")]
         [Range(0f, 0.9f)] public float sway = 0.55f;
+        [Tooltip("Фонарь в руке, а не в глазу: смещение от камеры (вправо, вниз, вперёд), м. Свет чуть сбоку оставляет рельеф стен видимым")]
+        public bool useHandOffset = true;
+        public Vector3 handOffset = new Vector3(0.28f, -0.3f, 0.1f);
 
         Light _light;
         Quaternion _smoothed;
@@ -23,6 +26,7 @@ namespace CarX.Gameplay
 
         void OnEnable()
         {
+            if (useHandOffset && transform.parent != null) transform.localPosition = handOffset;
             _smoothed = transform.parent != null ? transform.parent.rotation : transform.rotation;
         }
 

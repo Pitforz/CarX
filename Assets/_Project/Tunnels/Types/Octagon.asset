@@ -12,25 +12,29 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 84a41c89dccf9c14f92d1690f088429f, type: 3}
   m_Name: Octagon
   m_EditorClassIdentifier: Assembly-CSharp::CarX.Level.TunnelType
-  displayName: "\u0412\u043E\u0441\u044C\u043C\u0438\u0443\u0433\u043E\u043B\u044C\u043D\u0438\u043A"
+  displayName: "\u0412\u0435\u0433\u0430\u0441 12\xD78 \u0444\u0442 (\u0432\u043E\u0441\u044C\u043C\u0438\u0443\u0433\u043E\u043B\u044C\u043D\u0438\u043A)"
   color: {r: 1, g: 0.55, b: 0.1, a: 1}
   section:
     profile: 0
-    width: 3
-    height: 2.4
-    chamfer: 0.3
+    width: 3.66
+    height: 2.44
+    chamfer: 0.35
+    chamferTop: 0.35
+    bevelWidth: 0.5
+    bevelHeight: 0.45
     curbWidth: 0.45
     curbHeight: 0.15
     diameter: 2.2
     silt: 0.2
     roundSides: 28
-  segmentLength: 2
+  segmentLength: 1.83
   maxJointAngle: 2
   slabThickness: 0.25
-  minJointGap: 0.006
+  minJointGap: 0.012
   jointSink: 0.001
-  edgeBevel: 0.006
-  dirtLine: 0.9
-  channelWater: 1
+  edgeBevel: 0.02
+  dirtLine: 0
+  seamless: 0
+  channelWater: 0
   waterDepth: 0.05
   materials: {fileID: 0}

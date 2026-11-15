@@ -8,7 +8,8 @@ namespace CarX.Level
     {
         [InspectorName("Авто")] Auto,
         [InspectorName("Камера")] Chamber,
-        [InspectorName("Комната")] Room
+        [InspectorName("Комната")] Room,
+        [InspectorName("Выход наружу")] Exit       // new kinds go to the end: Unity stores this as a number
     }
 
     [Serializable]
@@ -41,6 +42,10 @@ namespace CarX.Level
         [Tooltip("Бетонные колонны в комнате (позиция относительно узла)")]
         public List<ColumnSpec> columns = new List<ColumnSpec>();
         public int seed = 1;
+
+        [Header("Выход наружу (если узел - выход)")]
+        [Tooltip("Яркость дневного света в этом выходе (1 = как в настройках библиотеки типов)")]
+        [Range(0f, 4f)] public float exitBrightness = 1f;
 
         /// <summary>Default plan of a new room: an octagon about 10 m across.</summary>
         public static List<Vector2> DefaultRoom()
@@ -170,7 +175,11 @@ namespace CarX.Level
 
         // ------------------------------------------------------------------ lifecycle
 
-        void OnEnable() { MarkDirty(); }
+        void OnEnable()
+        {
+            MarkDirty();
+            if (library != null) { TunnelTypeLibrary.Active = library; library.ApplyAtmosphere(); }
+        }
 
         void OnValidate()
         {
@@ -530,7 +539,16 @@ namespace CarX.Level
                     if (J != null) joins[n.id] = J; else ch = true;
                 }
                 if (ch && (l.Count > 0 || n.kind == GraphNodeKind.Chamber)) chamberSet.Add(n.id);
+                if (n.kind == GraphNodeKind.Exit && (l.Count != 1 || ch))
+                    issues.Add(new GraphIssue { nodeId = n.id, position = n.position, message = "«Выход наружу» работает только на свободном конце тоннеля (узел с одной линией)" });
             }
+        }
+
+        /// <summary>Dead end that opens to the outside (no end wall, daylight and a light shining in).</summary>
+        bool IsExit(string id)
+        {
+            GraphNode n;
+            return nodeMap.TryGetValue(id, out n) && n.kind == GraphNodeKind.Exit && Degree(id) == 1 && !chamberSet.Contains(id);
         }
 
         Vector3 FlatDir(GraphNode n, GraphEdge e)
@@ -1588,6 +1606,7 @@ namespace CarX.Level
             var keep = new HashSet<Transform>();
             var pathOf = new Dictionary<Chain, TunnelPath>();
             var libMats = library != null ? library.materials : null;
+            if (library != null) { TunnelTypeLibrary.Active = library; library.ApplyAtmosphere(); }
 
             foreach (var c in chains)
             {
@@ -1602,7 +1621,13 @@ namespace CarX.Level
                 bool holeS = c.holeStart != null && c.holeStart.Count >= 3, holeE = c.holeEnd != null && c.holeEnd.Count >= 3;
                 bool capS = holeS || (c.startSide < 0 && c.startDoor == null && c.startJoin == null);
                 bool capE = holeE || (c.endSide < 0 && c.endDoor == null && c.endJoin == null);
-                int sig = Signature(c, shafts, capS, capE);
+                // an exit to the outside: an open end with the slab's rim, no wall
+                bool exitS = capS && !holeS && IsExit(c.nodes[0]);
+                bool exitE = capE && !holeE && IsExit(c.nodes[c.nodes.Count - 1]);
+                if (exitS) capS = false;
+                if (exitE) capE = false;
+                if (exitS || exitE) BuildExits(root, keep, c, exitS, exitE, libMats);
+                int sig = unchecked(Signature(c, shafts, capS, capE) * 31 + (exitS ? 13 : 0) + (exitE ? 29 : 0));
                 if (path.drivenSignature == sig && path.drivenSamples.Count == c.samples.Count) continue;
                 var T = c.type;
                 path.section = T.section.Clone();
@@ -1616,8 +1641,8 @@ namespace CarX.Level
                 path.waterDepth = T.waterDepth;
                 path.materials = T.materials != null ? T.materials : libMats;
                 path.seed = c.edges[0].seed;
-                path.startAtWall = !capS || holeS;   // no rim where it meets another tunnel or room
-                path.endAtWall = !capE || holeE;
+                path.startAtWall = !exitS && (!capS || holeS);   // no rim where it meets another tunnel or room
+                path.endAtWall = !exitE && (!capE || holeE);
                 path.capStart = capS;
                 path.capEnd = capE;
                 path.straightEnds = false;
@@ -1637,8 +1662,16 @@ namespace CarX.Level
                 path.drivenSignature = sig;
                 path.Rebuild(true);
                 builtPaths++;
-                if (puddles && DressingHook != null) DressingHook(path, c.edges[0].seed);
+                if (puddles && (library == null || library.puddles) && DressingHook != null) DressingHook(path, c.edges[0].seed);
             }
+            // the look says no puddles: take away the ones scattered earlier
+            if (library != null && !library.puddles)
+                foreach (var kv in pathOf)
+                {
+                    var d = kv.Value.transform.Find(TunnelPath.DressingName);
+                    if (d == null) continue;
+                    if (Application.isPlaying) Destroy(d.gameObject); else DestroyImmediate(d.gameObject);
+                }
 
             foreach (var kv in chambers)
             {
@@ -1733,6 +1766,43 @@ namespace CarX.Level
                 Debug.Log("CarX graph build: tunnels " + builtPaths + ", chambers " + builtChambers + ", removed " + dead.Count + ", " + watch.ElapsedMilliseconds + " ms");
         }
 
+        void BuildExits(Transform root, HashSet<Transform> keep, Chain c, bool atStart, bool atEnd, TunnelMaterials mats)
+        {
+            int n = c.samples.Count;
+            for (int end = 0; end < 2; end++)
+            {
+                if (end == 0 ? !atStart : !atEnd) continue;
+                string id = end == 0 ? c.nodes[0] : c.nodes[c.nodes.Count - 1];
+                Vector3 p = end == 0 ? c.samples[0] : c.samples[n - 1];
+                Vector3 q = end == 0 ? c.samples[1] : c.samples[n - 2];
+                Vector3 dir = p - q;
+                if (dir.sqrMagnitude < 1e-6f) continue;
+                var t = Child(root, "Exit_" + id);
+                keep.Add(t);
+                t.localPosition = p;
+                t.localRotation = Quaternion.LookRotation(dir.normalized, Vector3.up);
+                var ex = t.GetComponent<TunnelExit>();
+                if (ex == null) ex = t.gameObject.AddComponent<TunnelExit>();
+                var sec = c.type.section;
+                ex.width = sec.HalfSpan * 2f;
+                ex.height = sec.Height;
+                ex.brightness = nodeMap[id].exitBrightness;
+                ex.skyMaterial = mats != null ? mats.sky : null;
+                if (library != null)
+                {
+                    ex.lightIntensity = library.exitLightIntensity;
+                    ex.lightRange = library.exitLightRange;
+                    ex.lightBack = library.exitLightBack;
+                    ex.lightColor = library.daylightColor;
+                    ex.skyColor = library.SkyColor;
+                    ex.exposureProfile = library.exitExposure;
+                    ex.exposureDepth = library.exitExposureDepth;
+                    ex.shadows = library.exitShadows;
+                }
+                ex.Rebuild();
+            }
+        }
+
         static Transform Child(Transform root, string name)
         {
             var t = root.Find(name);
@@ -1788,7 +1858,7 @@ namespace CarX.Level
                     h = h * 31 + 19;
                     if (l != null) foreach (var v in l) h = h * 31 + Mathf.RoundToInt(v.x * 1000f) * 7 + Mathf.RoundToInt(v.y * 1000f);
                 }
-                h = h * 31 + 2;   // build version: bump when the mesh code changes
+                h = h * 31 + 3;   // build version: bump when the mesh code changes
                 h = h * 31 + c.edges[0].seed;
                 h = h * 31 + (capS ? 3 : 5) + (capE ? 7 : 11);
                 h = h * 31 + (library != null && library.materials != null ? Hash(library.materials.name) : 0);
