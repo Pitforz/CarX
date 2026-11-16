@@ -1,0 +1,38 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d287af4a78833014caec41c80f15ac4d, type: 3}
+  m_Name: TunnelAudioClips
+  m_EditorClassIdentifier: CarX.TunnelAudio::CarX.TunnelAudio.TunnelAudioClips
+  rumbleDryWide: {fileID: 0}
+  rumbleWetNarrow: {fileID: 0}
+  rumbleHall: {fileID: 0}
+  rumbleDeadEnd: {fileID: 0}
+  drip: {fileID: 0}
+  stone: {fileID: 0}
+  metal: {fileID: 0}
+  rats: {fileID: 0}
+  trash: {fileID: 0}
+  distantCity: {fileID: 0}
+  car: {fileID: 0}
+  carHorn: {fileID: 0}
+  dumpTruck: {fileID: 0}
+  machineryHorn: {fileID: 0}
+  casino: {fileID: 0}
+  cough: {fileID: 0}
+  groan: {fileID: 0}
+  cry: {fileID: 0}
+  moan: {fileID: 0}
+  mutter: {fileID: 0}
+  sob: {fileID: 0}
+  breath: {fileID: 0}
+  scream: {fileID: 0}
+  pipeHit: {fileID: 0}
