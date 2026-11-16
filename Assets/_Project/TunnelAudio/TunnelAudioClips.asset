@@ -27,12 +27,12 @@ MonoBehaviour:
   dumpTruck: {fileID: 0}
   machineryHorn: {fileID: 0}
   casino: {fileID: 0}
-  cough: {fileID: 0}
-  groan: {fileID: 0}
-  cry: {fileID: 0}
+  cough: {fileID: 8300000, guid: f76aed04f51407d4aaa9bbc9ac370012, type: 3}
+  groan: {fileID: 8300000, guid: 259a4a732efb7d8409f9c29f3665a1ec, type: 3}
+  cry: {fileID: 8300000, guid: 177e977bd8c0d7345bbe58cf22a505b8, type: 3}
   moan: {fileID: 0}
-  mutter: {fileID: 0}
-  sob: {fileID: 0}
-  breath: {fileID: 0}
-  scream: {fileID: 0}
-  pipeHit: {fileID: 0}
+  mutter: {fileID: 8300000, guid: ea62ab185669f9d4280243d6b720a6d1, type: 3}
+  sob: {fileID: 8300000, guid: 9fda3cc82d781c54d8d96d0f6a6718a6, type: 3}
+  breath: {fileID: 8300000, guid: f2429eab609ce7a4f8f203320a668db3, type: 3}
+  scream: {fileID: 8300000, guid: 3f4d529ca20620c4a808d43058b9f0ff, type: 3}
+  pipeHit: {fileID: 8300000, guid: 2e86e11be94166946b9dab81093ee1a9, type: 3}
