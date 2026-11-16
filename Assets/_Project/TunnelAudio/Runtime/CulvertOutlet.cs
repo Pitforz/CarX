@@ -25,12 +25,8 @@ namespace CarX.TunnelAudio
             var voice = _bed.GetComponent<TunnelVoice>();
             voice.BaseVolume = bedVolume;
             voice.Casino = profile == CulvertProfile.Casino;
-            if (profile == CulvertProfile.Casino && director.clips != null && director.clips.casino != null)
-            {
-                _bed.clip = director.clips.casino;
-                _bed.loop = true;
-                _bed.Play();
-            }
+            if (profile == CulvertProfile.Casino && director.clips != null)
+                StartCasino(director);
             else
                 _bed.loop = false;
             ArmTraffic();
@@ -44,10 +40,11 @@ namespace CarX.TunnelAudio
             switch (profile)
             {
                 case CulvertProfile.Cars:
-                    traffic.Arm(clips.car, clips.carHorn, 0.16f, new Vector2(5f, 14f), 0.7f);
+                    // Horn is rare, quiet and only layered on top of a pass, never instead of it.
+                    traffic.Arm(clips.car, clips.carHorn, 0.07f, new Vector2(8f, 20f), 0.7f, 0.18f);
                     break;
                 case CulvertProfile.Heavy:
-                    traffic.Arm(clips.dumpTruck, clips.machineryHorn, 0.35f, new Vector2(16f, 38f), 0.85f);
+                    traffic.Arm(clips.dumpTruck, clips.machineryHorn, 0.2f, new Vector2(16f, 38f), 0.85f, 0.28f);
                     break;
             }
         }
@@ -61,6 +58,26 @@ namespace CarX.TunnelAudio
             if (_wait > 0f) return;
             _wait = Random.Range(14f, 36f);
             TunnelAudioDirector.Play(_bed, clips.distantCity, 0.45f, Random.Range(0.92f, 1.05f));
+        }
+
+        void StartCasino(TunnelAudioDirector director)
+        {
+            var clips = director.clips;
+            if (clips.casino != null)
+            {
+                _bed.clip = clips.casino;
+                _bed.loop = true;
+                _bed.Play();
+            }
+            if (clips.casinoAmbience == null) return;
+            var room = director.MakeSource("Culvert Casino Room", TunnelBus.Street, 1f, true, hearDistance);
+            room.transform.SetParent(transform, false);
+            room.minDistance = 0.3f;
+            var voice = room.GetComponent<TunnelVoice>();
+            voice.BaseVolume = bedVolume * 0.85f;
+            voice.Casino = true;
+            room.clip = clips.casinoAmbience;
+            room.Play();
         }
     }
 }

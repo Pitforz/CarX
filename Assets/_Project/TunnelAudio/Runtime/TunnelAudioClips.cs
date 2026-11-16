@@ -36,7 +36,10 @@ namespace CarX.TunnelAudio
         public AudioClip carHorn;
         public AudioClip dumpTruck;
         public AudioClip machineryHorn;
+        [Tooltip("Игровой зал. Играет вместе с фоном казино")]
         public AudioClip casino;
+        [Tooltip("Фон казино. Играет вместе с игровым залом")]
+        public AudioClip casinoAmbience;
 
         [Header("Живые звуки, без слов")]
         public AudioClip cough;

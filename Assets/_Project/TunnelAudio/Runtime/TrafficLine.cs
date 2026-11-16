@@ -15,29 +15,41 @@ namespace CarX.TunnelAudio
         AudioClip _pass;
         AudioClip _blare;
         float _blareChance;
+        float _blareVolume;
         Vector2 _gap;
         float _volume;
         AudioSource _source;
+        AudioSource _horn;
+        float _hornIn;
         float _wait;
         int _leg;
         float _along;
         bool _armed;
 
-        public void Arm(AudioClip pass, AudioClip blare, float blareChance, Vector2 gap, float volume)
+        public void Arm(AudioClip pass, AudioClip blare, float blareChance, Vector2 gap, float volume, float blareVolume = 0.22f)
         {
             _pass = pass;
             _blare = blare;
             _blareChance = blareChance;
+            _blareVolume = blareVolume;
             _gap = gap;
             _volume = volume;
             _armed = _pass != null || _blare != null;
+            _hornIn = -1f;
             _wait = Random.Range(gap.x, Mathf.Max(gap.x, gap.y));
-            if (TunnelAudioDirector.Current != null && _source == null)
+            if (TunnelAudioDirector.Current == null) return;
+            if (_source == null)
             {
                 _source = TunnelAudioDirector.Current.MakeSource("Traffic", TunnelBus.Street, 1f, false, 18f);
                 _source.minDistance = 2f;
-                var voice = _source.GetComponent<TunnelVoice>();
-                voice.BaseVolume = volume;
+                _source.GetComponent<TunnelVoice>().BaseVolume = volume;
+            }
+            if (_horn == null && blare != null)
+            {
+                _horn = TunnelAudioDirector.Current.MakeSource("Traffic Horn", TunnelBus.Street, 1f, false, 26f);
+                _horn.minDistance = 8f;
+                var hornVoice = _horn.GetComponent<TunnelVoice>();
+                hornVoice.BaseVolume = volume * blareVolume;
             }
         }
 
@@ -68,23 +80,39 @@ namespace CarX.TunnelAudio
                 to = points[_leg + 1].position;
                 length = Mathf.Max(0.05f, Vector3.Distance(from, to));
             }
-            _source.transform.position = Vector3.Lerp(from, to, length < 0.05f ? 0f : _along / length);
+            var place = Vector3.Lerp(from, to, length < 0.05f ? 0f : _along / length);
+            _source.transform.position = place;
+            if (_horn != null) _horn.transform.position = place;
+            if (_hornIn > 0f)
+            {
+                _hornIn -= Time.deltaTime;
+                if (_hornIn <= 0f && _blare != null)
+                {
+                    _hornIn = -1f;
+                    TunnelAudioDirector.Play(_horn, _blare, 1f, Random.Range(0.92f, 1.02f));
+                }
+            }
         }
 
         void Begin()
         {
             _leg = 0;
             _along = 0f;
-            bool blare = _blare != null && (_pass == null || Random.value < _blareChance);
-            var clip = blare ? _blare : _pass;
-            if (clip == null) { _wait = Random.Range(_gap.x, Mathf.Max(_gap.x, _gap.y)); return; }
-            _source.clip = clip;
-            _source.loop = !blare;
+            _hornIn = -1f;
+            if (_pass == null)
+            {
+                _wait = Random.Range(_gap.x, Mathf.Max(_gap.x, _gap.y));
+                return;
+            }
+            _source.clip = _pass;
+            _source.loop = true;
             _source.pitch = Random.Range(0.94f, 1.04f);
             var voice = _source.GetComponent<TunnelVoice>();
-            if (voice != null) voice.BaseVolume = _volume * (blare ? 0.55f : 1f);
+            if (voice != null) voice.BaseVolume = _volume;
             _source.transform.position = points[0].position;
             _source.Play();
+            if (_horn != null && _blare != null && Random.value < _blareChance)
+                _hornIn = Random.Range(0.8f, 2.4f);
         }
     }
 }
