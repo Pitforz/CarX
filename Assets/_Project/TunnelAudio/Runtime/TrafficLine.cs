@@ -11,6 +11,10 @@ namespace CarX.TunnelAudio
     {
         public Transform[] points = new Transform[0];
         public float speed = 9f;
+        [Tooltip("Тяжёлый проезд берёт свои интервал и шанс сигнала")]
+        public bool heavy;
+        [Tooltip("Интервал и шанс сигнала читаются с общих настроек и с зоны, где стоит ухо")]
+        public bool followDirector = true;
 
         AudioClip _pass;
         AudioClip _blare;
@@ -36,7 +40,7 @@ namespace CarX.TunnelAudio
             _volume = volume;
             _armed = _pass != null || _blare != null;
             _hornIn = -1f;
-            _wait = Random.Range(gap.x, Mathf.Max(gap.x, gap.y));
+            _wait = NextGap();
             if (TunnelAudioDirector.Current == null) return;
             if (_source == null)
             {
@@ -72,7 +76,7 @@ namespace CarX.TunnelAudio
                 _along = 0f;
                 if (_leg >= points.Length - 1)
                 {
-                    _wait = Random.Range(_gap.x, Mathf.Max(_gap.x, _gap.y));
+                    _wait = NextGap();
                     _source.Stop();
                     return;
                 }
@@ -101,7 +105,7 @@ namespace CarX.TunnelAudio
             _hornIn = -1f;
             if (_pass == null)
             {
-                _wait = Random.Range(_gap.x, Mathf.Max(_gap.x, _gap.y));
+                _wait = NextGap();
                 return;
             }
             _source.clip = _pass;
@@ -111,8 +115,36 @@ namespace CarX.TunnelAudio
             if (voice != null) voice.BaseVolume = _volume;
             _source.transform.position = points[0].position;
             _source.Play();
-            if (_horn != null && _blare != null && Random.value < _blareChance)
+            if (_horn != null && _blare != null && Random.value < HornChance())
                 _hornIn = Random.Range(0.8f, 2.4f);
+        }
+
+        float NextGap()
+        {
+            var director = TunnelAudioDirector.Current;
+            if (!followDirector || director == null)
+                return Random.Range(_gap.x, Mathf.Max(_gap.x, _gap.y));
+            var rates = director.Active;
+            return heavy ? director.Wait(rates.heavyGap, rates.heavyRate) : director.Wait(rates.carGap, rates.carRate);
+        }
+
+        float HornChance()
+        {
+            var director = TunnelAudioDirector.Current;
+            if (!followDirector || director == null) return _blareChance;
+            return heavy ? director.Active.heavyHornChance : director.Active.carHornChance;
+        }
+
+        void OnDrawGizmos()
+        {
+            if (points == null || points.Length < 2) return;
+            Gizmos.color = heavy ? new Color(1f, 0.45f, 0.15f, 0.9f) : new Color(0.3f, 0.8f, 1f, 0.9f);
+            for (int i = 0; i < points.Length - 1; i++)
+            {
+                if (points[i] == null || points[i + 1] == null) continue;
+                Gizmos.DrawLine(points[i].position, points[i + 1].position);
+                Gizmos.DrawWireSphere(points[i].position, 0.15f);
+            }
         }
     }
 }

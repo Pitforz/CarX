@@ -15,7 +15,7 @@ namespace CarX.TunnelAudio
         [Tooltip("Куда встать, если режим — следовать. Чужой префаб не меняется")]
         public Transform follow;
         [Range(0f, 1f)] public float chance = 0.65f;
-        [Tooltip("Минимальная пауза между звуками, секунды")]
+        [Tooltip("Пауза этого источника относительно общей частоты голосов. 6 — как в общих настройках, больше — реже")]
         public float minPause = 6f;
         [Range(0f, 1f)] public float volumeScale = 0.8f;
         [Tooltip("Как часто вместо обычного звука берутся крик или удар по трубе")]
@@ -27,11 +27,12 @@ namespace CarX.TunnelAudio
         void Start()
         {
             if (volume == null) volume = GetComponent<BoxCollider>();
-            if (TunnelAudioDirector.Current == null) return;
-            _source = TunnelAudioDirector.Current.MakeSource("Living", TunnelBus.Pipe, 1f, false, 7f);
+            var director = TunnelAudioDirector.Current;
+            if (director == null) return;
+            _source = director.MakeSource("Living", TunnelBus.Pipe, 1f, false, 7f);
             _source.transform.SetParent(transform, false);
             _source.GetComponent<TunnelVoice>().BaseVolume = volumeScale;
-            _wait = Random.Range(1f, minPause);
+            _wait = Random.Range(1f, Mathf.Max(1.2f, NextWait(director)));
         }
 
         void Update()
@@ -60,7 +61,15 @@ namespace CarX.TunnelAudio
             _source.maxDistance = reach;
             if (TunnelAudioDirector.Play(_source, clip, 1f, Random.Range(0.92f, 1.08f)) && rare && director != null)
                 director.MarkLoud();
-            _wait = Random.Range(minPause, minPause * 2.4f);
+            _wait = NextWait(director);
+        }
+
+        float NextWait(TunnelAudioDirector director)
+        {
+            if (director == null) return Random.Range(minPause, minPause * 2.4f);
+            var rates = director.Active;
+            float local = 6f / Mathf.Max(0.05f, minPause);
+            return director.Wait(rates.voiceGap, rates.voiceRate * local);
         }
 
         static Vector3 RandomIn(BoxCollider box)

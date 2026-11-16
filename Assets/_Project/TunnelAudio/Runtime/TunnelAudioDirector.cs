@@ -47,32 +47,130 @@ namespace CarX.TunnelAudio
         [Tooltip("Пауза после громкого события, секунды")]
         public float loudPause = 4.5f;
 
+        [Header("Частота событий")]
+        [Tooltip("Общие интервалы. Зона на карте подменяет их, пока ухо внутри")]
+        public TunnelAudioRates rates = new TunnelAudioRates();
+
+        [Header("Гул из улицы, если слоты гула пустые")]
+        [Tooltip("Доля зацикленного проезда в гуле. 0 — только город")]
+        [Range(0f, 1f)] public float carBedMix = 0.3f;
+        [Range(0.4f, 1f)] public float rumblePitch = 0.82f;
+        [Range(0.4f, 1f)] public float carBedPitch = 0.55f;
+        [Tooltip("Срез сверху у проезда, Гц")]
+        public float carBedLowHz = 130f;
+        [Tooltip("Срез снизу у проезда, Гц")]
+        public float carBedHighHz = 35f;
+        [Tooltip("Срез сверху гула, Гц: сухой, мокрый, зал, тупик")]
+        public Vector4 rumbleLowHz = new Vector4(520f, 260f, 360f, 190f);
+        [Tooltip("Срез снизу гула, Гц: сухой, мокрый, зал, тупик")]
+        public Vector4 rumbleHighHz = new Vector4(45f, 30f, 36f, 24f);
+        [Tooltip("Задержка эха, мс: сухой, мокрый, зал, тупик")]
+        public Vector4 echoDelayMs = new Vector4(80f, 140f, 220f, 180f);
+        [Tooltip("Затухание эха: сухой, мокрый, зал, тупик")]
+        public Vector4 echoDecay = new Vector4(0.25f, 0.42f, 0.58f, 0.66f);
+        [Tooltip("Доля эха: сухой, мокрый, зал, тупик")]
+        public Vector4 echoWet = new Vector4(0.2f, 0.34f, 0.46f, 0.4f);
+
+        [HideInInspector] public bool synthReady;
+
         readonly List<TunnelVoice> _voices = new();
         AudioSource[] _rumbles;
+        AudioSource _carBed;
         AudioReverbZone _reverb;
         Transform _ear;
+        TunnelAudioZone _zone;
         TunnelPipeKind _kind = TunnelPipeKind.DryWide;
         bool _inside;
         float _decay = 1.2f;
         float _loudUntil;
         readonly AudioClip[] _boundRumble = new AudioClip[4];
+        readonly bool[] _synth = new bool[4];
 
         public bool LoudBlocked => Time.time < _loudUntil;
         public Transform Ear => _ear;
+        public TunnelAudioZone ActiveZone => _zone;
+        public TunnelAudioRates Active
+        {
+            get
+            {
+                Repair();
+                var zone = _zone;
+                if (zone != null && zone.replaceRates && zone.rates != null)
+                {
+                    zone.rates.Repair();
+                    return zone.rates;
+                }
+                return rates;
+            }
+        }
 
         void Awake()
         {
             Current = this;
+            Repair();
             _rumbles = new AudioSource[4];
             for (int i = 0; i < 4; i++)
+            {
                 _rumbles[i] = MakeSource("Rumble " + (TunnelPipeKind)i, TunnelBus.Pipe, 0f, true, 0f, false);
+                var echo = _rumbles[i].gameObject.AddComponent<AudioEchoFilter>();
+                echo.dryMix = 1f;
+                echo.wetMix = 0f;
+                echo.delay = 80f;
+                echo.decayRatio = 0.3f;
+            }
+            _carBed = MakeSource("Rumble Traffic", TunnelBus.Pipe, 0f, true, 0f, false);
+            var carEcho = _carBed.gameObject.AddComponent<AudioEchoFilter>();
+            carEcho.dryMix = 1f;
+            carEcho.wetMix = 0.28f;
+            carEcho.delay = 110f;
+            carEcho.decayRatio = 0.45f;
             var zone = new GameObject("Pipe Reverb");
             zone.transform.SetParent(transform, false);
             _reverb = zone.AddComponent<AudioReverbZone>();
             _reverb.reverbPreset = AudioReverbPreset.User;
             _reverb.minDistance = 1f;
-            _reverb.maxDistance = 40f;
+            _reverb.maxDistance = 50f;
             ApplyReverb(reverbDry, 1f);
+            FindEar();
+        }
+
+        void OnValidate() => Repair();
+
+        bool _repairing;
+
+        public void Repair()
+        {
+            if (_repairing) return;
+            _repairing = true;
+            if (rates == null) rates = new TunnelAudioRates();
+            rates.Repair();
+            if (synthReady)
+            {
+                _repairing = false;
+                return;
+            }
+            rumbleLowHz = new Vector4(520f, 260f, 360f, 190f);
+            rumbleHighHz = new Vector4(45f, 30f, 36f, 24f);
+            echoDelayMs = new Vector4(80f, 140f, 220f, 180f);
+            echoDecay = new Vector4(0.25f, 0.42f, 0.58f, 0.66f);
+            echoWet = new Vector4(0.2f, 0.34f, 0.46f, 0.4f);
+            rumblePitch = 0.82f;
+            carBedPitch = 0.55f;
+            carBedLowHz = 130f;
+            carBedHighHz = 35f;
+            carBedMix = 0.3f;
+            synthReady = true;
+            _repairing = false;
+        }
+
+        /// <summary>Seconds until the next event. Rate multiplies how often it happens.</summary>
+        public float Wait(Vector2 gap, float eventRate)
+        {
+            var active = Active;
+            float scale = Mathf.Max(0.05f, active.master * Mathf.Max(0.05f, eventRate));
+            float lo = Mathf.Max(0.05f, gap.x);
+            float hi = Mathf.Max(lo, gap.y);
+            return Random.Range(lo, hi) / scale;
         }
 
         void OnDestroy()
@@ -84,7 +182,9 @@ namespace CarX.TunnelAudio
         {
             FindEar();
             if (_ear == null) return;
+            _zone = TunnelAudioZone.Pick(_ear.position);
             _reverb.transform.position = _ear.position;
+            FollowEar();
             FadeRumble();
             FadeReverb();
             for (int i = _voices.Count - 1; i >= 0; i--)
@@ -96,15 +196,21 @@ namespace CarX.TunnelAudio
 
         public void MarkLoud() => _loudUntil = Time.time + loudPause;
 
+        readonly List<TunnelPipeKind> _sections = new();
+
         public void EnterSection(TunnelPipeKind kind)
         {
+            _sections.Add(kind);
             _kind = kind;
             _inside = true;
         }
 
         public void ExitSection(TunnelPipeKind kind)
         {
-            if (_kind == kind) _inside = false;
+            int at = _sections.LastIndexOf(kind);
+            if (at >= 0) _sections.RemoveAt(at);
+            if (_sections.Count == 0) _inside = false;
+            else _kind = _sections[_sections.Count - 1];
         }
 
         public void Register(TunnelVoice voice)
@@ -154,25 +260,86 @@ namespace CarX.TunnelAudio
             if (listener != null) _ear = listener.transform;
         }
 
+        void FollowEar()
+        {
+            for (int i = 0; i < 4; i++)
+                if (_rumbles[i] != null) _rumbles[i].transform.position = _ear.position;
+            if (_carBed != null) _carBed.transform.position = _ear.position;
+        }
+
         void FadeRumble()
         {
-            if (clips == null) return;
-            for (int i = 0; i < 4; i++)
-            {
-                var clip = clips.Rumble((TunnelPipeKind)i);
-                if (_boundRumble[i] == clip) continue;
-                _boundRumble[i] = clip;
-                _rumbles[i].clip = clip;
-                if (clip != null && !_rumbles[i].isPlaying) _rumbles[i].Play();
-                if (clip == null) _rumbles[i].Stop();
-            }
+            if (clips == null || _rumbles == null) return;
+            AudioClip bed = clips.distantCity != null ? clips.distantCity : clips.car;
             float step = Time.deltaTime / Mathf.Max(0.01f, transitionSeconds);
             for (int i = 0; i < 4; i++)
             {
-                bool on = _inside && (int)_kind == i && _rumbles[i].clip != null;
+                var dedicated = clips.Rumble((TunnelPipeKind)i);
+                var clip = dedicated != null ? dedicated : bed;
+                bool synth = dedicated == null && clip != null;
+                if (_boundRumble[i] != clip)
+                {
+                    _boundRumble[i] = clip;
+                    _rumbles[i].clip = clip;
+                    if (_rumbles[i].isPlaying) _rumbles[i].Stop();
+                }
+                _synth[i] = synth;
+                _rumbles[i].pitch = synth ? rumblePitch : 1f;
+                PaintRumble(i, synth);
+                bool on = _inside && (int)_kind == i && clip != null;
                 float target = on ? rumbleVolume : 0f;
-                _rumbles[i].volume = Mathf.MoveTowards(_rumbles[i].volume, target, step * rumbleVolume);
+                _rumbles[i].volume = Mathf.MoveTowards(_rumbles[i].volume, target, step * Mathf.Max(0.05f, rumbleVolume));
+                Hold(_rumbles[i], clip);
             }
+            FadeCarBed(step, bed);
+        }
+
+        void FadeCarBed(float step, AudioClip cityBed)
+        {
+            if (_carBed == null) return;
+            bool cityIsCar = cityBed != null && clips != null && cityBed == clips.car && clips.distantCity == null;
+            var clip = cityIsCar ? clips.dumpTruck : (clips != null ? clips.car : null);
+            if (clip == null && clips != null) clip = clips.dumpTruck;
+            if (_carBed.clip != clip)
+            {
+                _carBed.clip = clip;
+                if (_carBed.isPlaying) _carBed.Stop();
+            }
+            bool synthOn = _inside && _synth[(int)_kind] && clip != null && carBedMix > 0.001f;
+            float target = synthOn ? rumbleVolume * carBedMix : 0f;
+            _carBed.volume = Mathf.MoveTowards(_carBed.volume, target, step * Mathf.Max(0.05f, rumbleVolume));
+            _carBed.pitch = carBedPitch;
+            var low = _carBed.GetComponent<AudioLowPassFilter>();
+            var high = _carBed.GetComponent<AudioHighPassFilter>();
+            if (low != null) low.cutoffFrequency = Mathf.Clamp(carBedLowHz, 40f, 2000f);
+            if (high != null) high.cutoffFrequency = Mathf.Clamp(carBedHighHz, 10f, 400f);
+            Hold(_carBed, clip);
+        }
+
+        static void Hold(AudioSource source, AudioClip clip)
+        {
+            if (source == null) return;
+            if (source.volume <= 0.001f || clip == null)
+            {
+                if (source.isPlaying) source.Stop();
+                return;
+            }
+            if (!source.isPlaying) source.Play();
+        }
+
+        void PaintRumble(int index, bool synth)
+        {
+            var source = _rumbles[index];
+            var low = source.GetComponent<AudioLowPassFilter>();
+            var high = source.GetComponent<AudioHighPassFilter>();
+            var echo = source.GetComponent<AudioEchoFilter>();
+            if (low != null) low.cutoffFrequency = synth ? Mathf.Max(40f, rumbleLowHz[index]) : openCutoff;
+            if (high != null) high.cutoffFrequency = synth ? Mathf.Clamp(rumbleHighHz[index], 10f, 200f) : 12f;
+            if (echo == null) return;
+            echo.delay = synth ? Mathf.Clamp(echoDelayMs[index], 10f, 1800f) : 80f;
+            echo.decayRatio = synth ? Mathf.Clamp01(echoDecay[index]) : 0.2f;
+            echo.wetMix = synth ? Mathf.Clamp01(echoWet[index]) : 0f;
+            echo.dryMix = 1f;
         }
 
         void FadeReverb()

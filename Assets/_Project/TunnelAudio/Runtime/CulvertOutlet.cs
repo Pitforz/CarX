@@ -37,13 +37,16 @@ namespace CarX.TunnelAudio
         {
             if (traffic == null || TunnelAudioDirector.Current == null || TunnelAudioDirector.Current.clips == null) return;
             var clips = TunnelAudioDirector.Current.clips;
+            traffic.followDirector = true;
             switch (profile)
             {
                 case CulvertProfile.Cars:
                     // Horn is rare, quiet and only layered on top of a pass, never instead of it.
+                    traffic.heavy = false;
                     traffic.Arm(clips.car, clips.carHorn, 0.07f, new Vector2(8f, 20f), 0.7f, 0.18f);
                     break;
                 case CulvertProfile.Heavy:
+                    traffic.heavy = true;
                     traffic.Arm(clips.dumpTruck, clips.machineryHorn, 0.2f, new Vector2(16f, 38f), 0.85f, 0.28f);
                     break;
             }
@@ -56,7 +59,8 @@ namespace CarX.TunnelAudio
             if (clips == null || clips.distantCity == null) return;
             _wait -= Time.deltaTime;
             if (_wait > 0f) return;
-            _wait = Random.Range(14f, 36f);
+            var director = TunnelAudioDirector.Current;
+            _wait = director != null ? director.Wait(director.Active.cityGap, director.Active.cityRate) : Random.Range(14f, 36f);
             TunnelAudioDirector.Play(_bed, clips.distantCity, 0.45f, Random.Range(0.92f, 1.05f));
         }
 
