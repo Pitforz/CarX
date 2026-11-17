@@ -28,7 +28,7 @@ namespace CarX.TunnelAudio
         [Range(0f, 1f)] public float voiceCut = 0.92f;
         [Tooltip("За сколько секунд гул и эхо переходят к другому участку")]
         [Range(3f, 6f)] public float transitionSeconds = 4.5f;
-        [Tooltip("Громкость гула трубы")]
+        [Tooltip("Громкость гула трубы. Слышна сразу. Смена участка по-прежнему перетекает плавно")]
         [Range(0f, 1f)] public float rumbleVolume = 0.45f;
 
         [Header("Эхо трубы")]
@@ -83,6 +83,9 @@ namespace CarX.TunnelAudio
         float _loudUntil;
         readonly AudioClip[] _boundRumble = new AudioClip[4];
         readonly bool[] _synth = new bool[4];
+        readonly float[] _level = new float[4];
+        float _carLevel;
+        bool _heard;
 
         public bool LoudBlocked => Time.time < _loudUntil;
         public Transform Ear => _ear;
@@ -276,6 +279,11 @@ namespace CarX.TunnelAudio
             if (clips == null || _rumbles == null) return;
             AudioClip bed = clips.distantCity != null ? clips.distantCity : clips.car;
             float step = Time.deltaTime / Mathf.Max(0.01f, transitionSeconds);
+            if (_inside && !_heard)
+            {
+                _level[(int)_kind] = 1f;
+                _heard = true;
+            }
             for (int i = 0; i < 4; i++)
             {
                 var dedicated = clips.Rumble((TunnelPipeKind)i);
@@ -291,8 +299,8 @@ namespace CarX.TunnelAudio
                 _rumbles[i].pitch = synth ? rumblePitch : 1f;
                 PaintRumble(i, synth);
                 bool on = _inside && (int)_kind == i && clip != null;
-                float target = on ? rumbleVolume : 0f;
-                _rumbles[i].volume = Mathf.MoveTowards(_rumbles[i].volume, target, step * Mathf.Max(0.05f, rumbleVolume));
+                _level[i] = Mathf.MoveTowards(_level[i], on ? 1f : 0f, step);
+                _rumbles[i].volume = _level[i] * rumbleVolume;
                 Hold(_rumbles[i], clip);
             }
             FadeCarBed(step, bed);
@@ -310,8 +318,8 @@ namespace CarX.TunnelAudio
                 if (_carBed.isPlaying) _carBed.Stop();
             }
             bool synthOn = _inside && _synth[(int)_kind] && clip != null && carBedMix > 0.001f;
-            float target = synthOn ? rumbleVolume * carBedMix : 0f;
-            _carBed.volume = Mathf.MoveTowards(_carBed.volume, target, step * Mathf.Max(0.05f, rumbleVolume));
+            _carLevel = Mathf.MoveTowards(_carLevel, synthOn ? 1f : 0f, step);
+            _carBed.volume = _carLevel * rumbleVolume * carBedMix;
             _carBed.pitch = carBedPitch;
             var low = _carBed.GetComponent<AudioLowPassFilter>();
             var high = _carBed.GetComponent<AudioHighPassFilter>();

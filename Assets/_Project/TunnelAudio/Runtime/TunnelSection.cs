@@ -26,6 +26,8 @@ namespace CarX.TunnelAudio
         float _drip;
         float _fall;
         float _life;
+        float _burst = 1f;
+        int _burstKind;
 
         void Awake()
         {
@@ -70,6 +72,7 @@ namespace CarX.TunnelAudio
             if (!_inside || _oneShots == null) return;
             var clips = director != null ? director.clips : null;
             if (clips == null) return;
+            RefreshBurst();
             float dt = Time.deltaTime;
             if (drips)
             {
@@ -78,7 +81,10 @@ namespace CarX.TunnelAudio
                 {
                     _drip = Gap(director, d => d.dripGap, 0.35f, 2.4f);
                     _oneShots.transform.position = RandomPoint();
-                    TunnelAudioDirector.Play(_oneShots, clips.drip, Random.Range(0.35f, 0.8f) * director.Active.dripVolume, Random.Range(0.75f, 1.35f));
+                    _burstKind = 1;
+                    _burst = Random.Range(0.35f, 0.8f);
+                    RefreshBurst();
+                    TunnelAudioDirector.Play(_oneShots, clips.drip, 1f, Random.Range(0.75f, 1.35f));
                 }
             }
             if (falls)
@@ -91,7 +97,10 @@ namespace CarX.TunnelAudio
                     {
                         var clip = Random.value < 0.5f ? clips.stone : clips.metal;
                         _oneShots.transform.position = RandomPoint();
-                        if (TunnelAudioDirector.Play(_oneShots, clip, director.Active.fallVolume, Random.Range(0.9f, 1.1f)))
+                        _burstKind = 2;
+                        _burst = 1f;
+                        RefreshBurst();
+                        if (TunnelAudioDirector.Play(_oneShots, clip, 1f, Random.Range(0.9f, 1.1f)))
                             director.MarkLoud();
                     }
                 }
@@ -106,7 +115,10 @@ namespace CarX.TunnelAudio
                         ? (Random.value < 0.5f ? clips.rats : clips.trash)
                         : (rats ? clips.rats : clips.trash);
                     _oneShots.transform.position = RandomPoint();
-                    TunnelAudioDirector.Play(_oneShots, clip, Random.Range(0.4f, 0.75f) * director.Active.lifeVolume, Random.Range(0.85f, 1.2f));
+                    _burstKind = 3;
+                    _burst = Random.Range(0.4f, 0.75f);
+                    RefreshBurst();
+                    TunnelAudioDirector.Play(_oneShots, clip, 1f, Random.Range(0.85f, 1.2f));
                 }
             }
         }
@@ -128,6 +140,22 @@ namespace CarX.TunnelAudio
             Vector3 local = transform.InverseTransformPoint(world) - box.center;
             Vector3 half = box.size * 0.5f;
             return Mathf.Abs(local.x) <= half.x && Mathf.Abs(local.y) <= half.y && Mathf.Abs(local.z) <= half.z;
+        }
+
+        void RefreshBurst()
+        {
+            if (_oneShots == null || _burstKind == 0) return;
+            var director = TunnelAudioDirector.Current;
+            float group = 1f;
+            if (director != null)
+            {
+                var rates = director.Active;
+                group = _burstKind == 1 ? rates.dripVolume : _burstKind == 2 ? rates.fallVolume : rates.lifeVolume;
+            }
+            var voice = _oneShots.GetComponent<TunnelVoice>();
+            if (voice == null) return;
+            voice.BaseVolume = eventVolume * _burst * group;
+            _oneShots.volume = voice.BaseVolume;
         }
 
         static float Gap(TunnelAudioDirector director, System.Func<TunnelAudioRates, Vector2> gap, float lo, float hi)
