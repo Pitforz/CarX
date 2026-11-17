@@ -479,25 +479,25 @@ namespace CarX.TunnelAudio
                 new Color(0.45f, 0.65f, 1f, 0.9f), rates =>
                 {
                     rates.master = 0.4f;
-                    rates.voiceRate = 0.45f;
-                    rates.carRate = 0.4f;
-                    rates.heavyRate = 0.4f;
+                    rates.voiceVolume = 0.55f;
+                    rates.carVolume = 0.5f;
+                    rates.heavyVolume = 0.5f;
+                    rates.volumesReady = true;
                 });
             SpawnZone("Зона оживлённее", new Vector3(_max.x - vx * 0.5f, midY, _max.z - vz * 0.5f), size, 0,
                 new Color(1f, 0.62f, 0.25f, 0.9f), rates =>
                 {
                     rates.master = 1.8f;
-                    rates.carRate = 1.7f;
-                    rates.voiceRate = 1.6f;
-                    rates.ratRate = 1.5f;
-                    rates.trashRate = 1.4f;
+                    rates.lifeVolume = 1f;
+                    rates.volumesReady = true;
                 });
             SpawnZone("Зона сырости", new Vector3((_min.x + _max.x) * 0.5f, midY, (_min.z + _max.z) * 0.5f),
                 new Vector3(18f, vy, 18f), 2, new Color(0.4f, 0.85f, 0.7f, 0.9f), rates =>
                 {
-                    rates.dripRate = 3.2f;
                     rates.dripGap = new Vector2(0.22f, 1.1f);
-                    rates.fallRate = 1.8f;
+                    rates.fallGap = new Vector2(25f, 60f);
+                    rates.dripVolume = 1f;
+                    rates.volumesReady = true;
                 });
         }
 

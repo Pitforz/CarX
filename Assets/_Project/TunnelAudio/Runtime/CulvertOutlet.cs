@@ -13,6 +13,7 @@ namespace CarX.TunnelAudio
         [Range(0f, 1f)] public float bedVolume = 0.35f;
 
         AudioSource _bed;
+        AudioSource _ambience;
         float _wait;
 
         void Start()
@@ -60,7 +61,7 @@ namespace CarX.TunnelAudio
             _wait -= Time.deltaTime;
             if (_wait > 0f) return;
             var director = TunnelAudioDirector.Current;
-            _wait = director != null ? director.Wait(director.Active.cityGap, director.Active.cityRate) : Random.Range(14f, 36f);
+            _wait = director != null ? director.Wait(director.Active.cityGap) : Random.Range(14f, 36f);
             TunnelAudioDirector.Play(_bed, clips.distantCity, 0.45f, Random.Range(0.92f, 1.05f));
         }
 
@@ -82,6 +83,19 @@ namespace CarX.TunnelAudio
             voice.Casino = true;
             room.clip = clips.casinoAmbience;
             room.Play();
+            _ambience = room;
+        }
+
+        void LateUpdate()
+        {
+            var director = TunnelAudioDirector.Current;
+            if (director == null || _bed == null) return;
+            float group = profile == CulvertProfile.Casino ? director.Active.casinoVolume : director.Active.cityVolume;
+            var voice = _bed.GetComponent<TunnelVoice>();
+            if (voice != null) voice.BaseVolume = bedVolume * group;
+            if (_ambience == null) return;
+            var room = _ambience.GetComponent<TunnelVoice>();
+            if (room != null) room.BaseVolume = bedVolume * 0.85f * group;
         }
     }
 }

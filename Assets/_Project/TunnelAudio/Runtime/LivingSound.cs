@@ -15,8 +15,9 @@ namespace CarX.TunnelAudio
         [Tooltip("Куда встать, если режим — следовать. Чужой префаб не меняется")]
         public Transform follow;
         [Range(0f, 1f)] public float chance = 0.65f;
-        [Tooltip("Пауза этого источника относительно общей частоты голосов. 6 — как в общих настройках, больше — реже")]
+        [Tooltip("Личная пауза. 6 — как общий интервал голосов, 12 — вдвое реже. Общая частота ещё укорачивает паузу")]
         public float minPause = 6f;
+        [Tooltip("Личная громкость. Умножается на общую громкость голосов")]
         [Range(0f, 1f)] public float volumeScale = 0.8f;
         [Tooltip("Как часто вместо обычного звука берутся крик или удар по трубе")]
         [Range(0f, 1f)] public float rareChance = 0.08f;
@@ -31,13 +32,15 @@ namespace CarX.TunnelAudio
             if (director == null) return;
             _source = director.MakeSource("Living", TunnelBus.Pipe, 1f, false, 7f);
             _source.transform.SetParent(transform, false);
-            _source.GetComponent<TunnelVoice>().BaseVolume = volumeScale;
+            ApplyVolume(director);
             _wait = Random.Range(1f, Mathf.Max(1.2f, NextWait(director)));
         }
 
         void Update()
         {
             if (_source == null) return;
+            var directorNow = TunnelAudioDirector.Current;
+            if (directorNow != null) ApplyVolume(directorNow);
             if (placement == LivingPlacement.FollowTransform && follow != null)
                 transform.position = follow.position;
             _wait -= Time.deltaTime;
@@ -64,12 +67,19 @@ namespace CarX.TunnelAudio
             _wait = NextWait(director);
         }
 
+        void ApplyVolume(TunnelAudioDirector director)
+        {
+            var voice = _source.GetComponent<TunnelVoice>();
+            if (voice == null) return;
+            float group = director != null ? director.Active.voiceVolume : 1f;
+            voice.BaseVolume = volumeScale * group;
+        }
+
         float NextWait(TunnelAudioDirector director)
         {
+            float personal = Mathf.Max(0.05f, minPause) / 6f;
             if (director == null) return Random.Range(minPause, minPause * 2.4f);
-            var rates = director.Active;
-            float local = 6f / Mathf.Max(0.05f, minPause);
-            return director.Wait(rates.voiceGap, rates.voiceRate * local);
+            return director.Wait(director.Active.voiceGap) * personal;
         }
 
         static Vector3 RandomIn(BoxCollider box)

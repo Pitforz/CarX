@@ -13,8 +13,11 @@ namespace CarX.TunnelAudio
         public TunnelPipeKind kind = TunnelPipeKind.WetNarrow;
         public bool drips = true;
         public bool falls;
+        [Tooltip("Крысы. Пауза и громкость общие с мусором")]
         public bool rats;
+        [Tooltip("Мусор. Пауза и громкость общие с крысами")]
         public bool trash;
+        [Tooltip("Местная громкость событий этого участка. Умножается на громкость группы")]
         [Range(0f, 1f)] public float eventVolume = 0.7f;
 
         BoxCollider _box;
@@ -22,18 +25,16 @@ namespace CarX.TunnelAudio
         bool _inside;
         float _drip;
         float _fall;
-        float _rat;
-        float _trashWait;
+        float _life;
 
         void Awake()
         {
             _box = GetComponent<BoxCollider>();
             _box.isTrigger = true;
             var director = TunnelAudioDirector.Current;
-            _drip = Gap(director, d => d.dripGap, d => d.dripRate, 0.3f, 1.4f);
-            _fall = Gap(director, d => d.fallGap, d => d.fallRate, 40f, 90f);
-            _rat = Gap(director, d => d.ratGap, d => d.ratRate, 8f, 18f);
-            _trashWait = Gap(director, d => d.trashGap, d => d.trashRate, 10f, 24f);
+            _drip = Gap(director, d => d.dripGap, 0.3f, 1.4f);
+            _fall = Gap(director, d => d.fallGap, 40f, 90f);
+            _life = Gap(director, d => d.lifeGap, 8f, 18f);
         }
 
         void Start()
@@ -75,9 +76,9 @@ namespace CarX.TunnelAudio
                 _drip -= dt;
                 if (_drip <= 0f)
                 {
-                    _drip = Gap(director, d => d.dripGap, d => d.dripRate, 0.35f, 2.4f);
+                    _drip = Gap(director, d => d.dripGap, 0.35f, 2.4f);
                     _oneShots.transform.position = RandomPoint();
-                    TunnelAudioDirector.Play(_oneShots, clips.drip, Random.Range(0.35f, 0.8f), Random.Range(0.75f, 1.35f));
+                    TunnelAudioDirector.Play(_oneShots, clips.drip, Random.Range(0.35f, 0.8f) * director.Active.dripVolume, Random.Range(0.75f, 1.35f));
                 }
             }
             if (falls)
@@ -85,34 +86,27 @@ namespace CarX.TunnelAudio
                 _fall -= dt;
                 if (_fall <= 0f)
                 {
-                    _fall = Gap(director, d => d.fallGap, d => d.fallRate, 45f, 110f);
+                    _fall = Gap(director, d => d.fallGap, 45f, 110f);
                     if (director != null && !director.LoudBlocked)
                     {
                         var clip = Random.value < 0.5f ? clips.stone : clips.metal;
                         _oneShots.transform.position = RandomPoint();
-                        if (TunnelAudioDirector.Play(_oneShots, clip, 1f, Random.Range(0.9f, 1.1f)))
+                        if (TunnelAudioDirector.Play(_oneShots, clip, director.Active.fallVolume, Random.Range(0.9f, 1.1f)))
                             director.MarkLoud();
                     }
                 }
             }
-            if (rats)
+            if (rats || trash)
             {
-                _rat -= dt;
-                if (_rat <= 0f)
+                _life -= dt;
+                if (_life <= 0f)
                 {
-                    _rat = Gap(director, d => d.ratGap, d => d.ratRate, 7f, 20f);
+                    _life = Gap(director, d => d.lifeGap, 8f, 22f);
+                    AudioClip clip = rats && trash
+                        ? (Random.value < 0.5f ? clips.rats : clips.trash)
+                        : (rats ? clips.rats : clips.trash);
                     _oneShots.transform.position = RandomPoint();
-                    TunnelAudioDirector.Play(_oneShots, clips.rats, Random.Range(0.4f, 0.75f), Random.Range(0.85f, 1.2f));
-                }
-            }
-            if (trash)
-            {
-                _trashWait -= dt;
-                if (_trashWait <= 0f)
-                {
-                    _trashWait = Gap(director, d => d.trashGap, d => d.trashRate, 9f, 26f);
-                    _oneShots.transform.position = RandomPoint();
-                    TunnelAudioDirector.Play(_oneShots, clips.trash, Random.Range(0.35f, 0.7f), Random.Range(0.9f, 1.15f));
+                    TunnelAudioDirector.Play(_oneShots, clip, Random.Range(0.4f, 0.75f) * director.Active.lifeVolume, Random.Range(0.85f, 1.2f));
                 }
             }
         }
@@ -136,11 +130,10 @@ namespace CarX.TunnelAudio
             return Mathf.Abs(local.x) <= half.x && Mathf.Abs(local.y) <= half.y && Mathf.Abs(local.z) <= half.z;
         }
 
-        static float Gap(TunnelAudioDirector director, System.Func<TunnelAudioRates, Vector2> gap, System.Func<TunnelAudioRates, float> rate, float lo, float hi)
+        static float Gap(TunnelAudioDirector director, System.Func<TunnelAudioRates, Vector2> gap, float lo, float hi)
         {
             if (director == null) return Random.Range(lo, hi);
-            var rates = director.Active;
-            return director.Wait(gap(rates), rate(rates));
+            return director.Wait(gap(director.Active));
         }
 
         void OnDrawGizmos()

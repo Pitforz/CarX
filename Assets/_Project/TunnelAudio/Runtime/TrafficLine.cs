@@ -60,6 +60,7 @@ namespace CarX.TunnelAudio
         void Update()
         {
             if (!_armed || points == null || points.Length < 2 || _source == null) return;
+            ApplyVolumes();
             if (_wait > 0f)
             {
                 _wait -= Time.deltaTime;
@@ -111,8 +112,7 @@ namespace CarX.TunnelAudio
             _source.clip = _pass;
             _source.loop = true;
             _source.pitch = Random.Range(0.94f, 1.04f);
-            var voice = _source.GetComponent<TunnelVoice>();
-            if (voice != null) voice.BaseVolume = _volume;
+            ApplyVolumes();
             _source.transform.position = points[0].position;
             _source.Play();
             if (_horn != null && _blare != null && Random.value < HornChance())
@@ -125,7 +125,32 @@ namespace CarX.TunnelAudio
             if (!followDirector || director == null)
                 return Random.Range(_gap.x, Mathf.Max(_gap.x, _gap.y));
             var rates = director.Active;
-            return heavy ? director.Wait(rates.heavyGap, rates.heavyRate) : director.Wait(rates.carGap, rates.carRate);
+            return director.Wait(heavy ? rates.heavyGap : rates.carGap);
+        }
+
+        void ApplyVolumes()
+        {
+            float pass = PassVolume();
+            var voice = _source != null ? _source.GetComponent<TunnelVoice>() : null;
+            if (voice != null) voice.BaseVolume = pass;
+            if (_horn == null) return;
+            var horn = _horn.GetComponent<TunnelVoice>();
+            if (horn != null) horn.BaseVolume = pass * HornScale();
+        }
+
+        float PassVolume()
+        {
+            var director = TunnelAudioDirector.Current;
+            if (!followDirector || director == null) return _volume;
+            float group = heavy ? director.Active.heavyVolume : director.Active.carVolume;
+            return _volume * group;
+        }
+
+        float HornScale()
+        {
+            var director = TunnelAudioDirector.Current;
+            if (!followDirector || director == null) return _blareVolume;
+            return director.Active.hornVolume;
         }
 
         float HornChance()

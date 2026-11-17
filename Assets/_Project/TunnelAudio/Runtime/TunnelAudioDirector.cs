@@ -31,11 +31,9 @@ namespace CarX.TunnelAudio
         [Tooltip("Громкость гула трубы")]
         [Range(0f, 1f)] public float rumbleVolume = 0.45f;
 
-        [Header("Эхо по типу трубы, секунды хвоста")]
-        public float reverbDry = 0.85f;
-        public float reverbWet = 1.6f;
-        public float reverbHall = 2.8f;
-        public float reverbDead = 2.15f;
+        [Header("Эхо трубы")]
+        [Tooltip("Хвост сухого участка, секунды. Мокрый длиннее примерно в 1,9, зал в 3,3, тупик в 2,5. Снаружи берётся половина сухого")]
+        public float reverbSeconds = 0.85f;
 
         [Header("Стена между ухом и источником")]
         [Tooltip("Частота среза, когда путь свободен, Гц")]
@@ -60,18 +58,18 @@ namespace CarX.TunnelAudio
         public float carBedLowHz = 130f;
         [Tooltip("Срез снизу у проезда, Гц")]
         public float carBedHighHz = 35f;
-        [Tooltip("Срез сверху гула, Гц: сухой, мокрый, зал, тупик")]
-        public Vector4 rumbleLowHz = new Vector4(520f, 260f, 360f, 190f);
-        [Tooltip("Срез снизу гула, Гц: сухой, мокрый, зал, тупик")]
-        public Vector4 rumbleHighHz = new Vector4(45f, 30f, 36f, 24f);
-        [Tooltip("Задержка эха, мс: сухой, мокрый, зал, тупик")]
-        public Vector4 echoDelayMs = new Vector4(80f, 140f, 220f, 180f);
-        [Tooltip("Затухание эха: сухой, мокрый, зал, тупик")]
-        public Vector4 echoDecay = new Vector4(0.25f, 0.42f, 0.58f, 0.66f);
-        [Tooltip("Доля эха: сухой, мокрый, зал, тупик")]
-        public Vector4 echoWet = new Vector4(0.2f, 0.34f, 0.46f, 0.4f);
+        [Tooltip("Срез сверху гула из улицы, Гц. Это сухой участок. Мокрый и тупик сами темнее, зал между ними")]
+        public float rumbleLowHz = 520f;
+        [Tooltip("Срез снизу гула, Гц. Держи ниже среза сверху")]
+        public float rumbleHighHz = 40f;
+        [Tooltip("Задержка эха гула, мс. Зал и тупик сами длиннее. Хвост трубы звучит поверх")]
+        public float echoDelayMs = 110f;
+        [Tooltip("Сколько эхо гула повторяется. Тип участка чуть сдвигает")]
+        [Range(0f, 1f)] public float echoDecay = 0.42f;
+        [Tooltip("Доля эха гула. 0 — без этого эха, хвост трубы остаётся")]
+        [Range(0f, 1f)] public float echoWet = 0.34f;
 
-        [HideInInspector] public bool synthReady;
+        [HideInInspector] public int mixVersion;
 
         readonly List<TunnelVoice> _voices = new();
         AudioSource[] _rumbles;
@@ -130,7 +128,7 @@ namespace CarX.TunnelAudio
             _reverb.reverbPreset = AudioReverbPreset.User;
             _reverb.minDistance = 1f;
             _reverb.maxDistance = 50f;
-            ApplyReverb(reverbDry, 1f);
+            ApplyReverb(ReverbOf(TunnelPipeKind.DryWide), 1f);
             FindEar();
         }
 
@@ -144,34 +142,40 @@ namespace CarX.TunnelAudio
             _repairing = true;
             if (rates == null) rates = new TunnelAudioRates();
             rates.Repair();
-            if (synthReady)
+            if (mixVersion < 2)
             {
-                _repairing = false;
-                return;
+                reverbSeconds = 0.85f;
+                rumbleLowHz = 520f;
+                rumbleHighHz = 40f;
+                echoDelayMs = 110f;
+                echoDecay = 0.42f;
+                echoWet = 0.34f;
+                if (rumblePitch <= 0f) rumblePitch = 0.82f;
+                if (carBedPitch <= 0f) carBedPitch = 0.55f;
+                if (carBedLowHz < 20f) carBedLowHz = 130f;
+                if (carBedHighHz < 10f) carBedHighHz = 35f;
+                if (carBedMix <= 0f) carBedMix = 0.3f;
+                mixVersion = 2;
             }
-            rumbleLowHz = new Vector4(520f, 260f, 360f, 190f);
-            rumbleHighHz = new Vector4(45f, 30f, 36f, 24f);
-            echoDelayMs = new Vector4(80f, 140f, 220f, 180f);
-            echoDecay = new Vector4(0.25f, 0.42f, 0.58f, 0.66f);
-            echoWet = new Vector4(0.2f, 0.34f, 0.46f, 0.4f);
-            rumblePitch = 0.82f;
-            carBedPitch = 0.55f;
-            carBedLowHz = 130f;
-            carBedHighHz = 35f;
-            carBedMix = 0.3f;
-            synthReady = true;
             _repairing = false;
         }
 
-        /// <summary>Seconds until the next event. Rate multiplies how often it happens.</summary>
-        public float Wait(Vector2 gap, float eventRate)
+        /// <summary>Seconds until the next event. Master shortens every gap in the active block.</summary>
+        public float Wait(Vector2 gap)
         {
-            var active = Active;
-            float scale = Mathf.Max(0.05f, active.master * Mathf.Max(0.05f, eventRate));
+            float scale = Mathf.Max(0.05f, Active.master);
             float lo = Mathf.Max(0.05f, gap.x);
             float hi = Mathf.Max(lo, gap.y);
             return Random.Range(lo, hi) / scale;
         }
+
+        float ReverbOf(TunnelPipeKind kind) => reverbSeconds * kind switch
+        {
+            TunnelPipeKind.WetNarrow => 1.9f,
+            TunnelPipeKind.Hall => 3.3f,
+            TunnelPipeKind.DeadEnd => 2.5f,
+            _ => 1f,
+        };
 
         void OnDestroy()
         {
@@ -333,25 +337,48 @@ namespace CarX.TunnelAudio
             var low = source.GetComponent<AudioLowPassFilter>();
             var high = source.GetComponent<AudioHighPassFilter>();
             var echo = source.GetComponent<AudioEchoFilter>();
-            if (low != null) low.cutoffFrequency = synth ? Mathf.Max(40f, rumbleLowHz[index]) : openCutoff;
-            if (high != null) high.cutoffFrequency = synth ? Mathf.Clamp(rumbleHighHz[index], 10f, 200f) : 12f;
+            if (low != null) low.cutoffFrequency = synth ? LowOf(index) : openCutoff;
+            if (high != null) high.cutoffFrequency = synth ? HighOf(index) : 12f;
             if (echo == null) return;
-            echo.delay = synth ? Mathf.Clamp(echoDelayMs[index], 10f, 1800f) : 80f;
-            echo.decayRatio = synth ? Mathf.Clamp01(echoDecay[index]) : 0.2f;
-            echo.wetMix = synth ? Mathf.Clamp01(echoWet[index]) : 0f;
+            echo.delay = synth ? DelayOf(index) : 80f;
+            echo.decayRatio = synth ? DecayOf(index) : 0.2f;
+            echo.wetMix = synth ? WetOf(index) : 0f;
             echo.dryMix = 1f;
+        }
+
+        float LowOf(int index)
+        {
+            float scale = index switch { 1 => 0.5f, 2 => 0.69f, 3 => 0.37f, _ => 1f };
+            return Mathf.Max(40f, rumbleLowHz * scale);
+        }
+
+        float HighOf(int index)
+        {
+            float scale = index switch { 1 => 0.75f, 2 => 0.9f, 3 => 0.6f, _ => 1f };
+            return Mathf.Clamp(rumbleHighHz * scale, 10f, 200f);
+        }
+
+        float DelayOf(int index)
+        {
+            float scale = index switch { 0 => 0.75f, 1 => 1.25f, 2 => 2f, _ => 1.6f };
+            return Mathf.Clamp(echoDelayMs * scale, 10f, 1800f);
+        }
+
+        float DecayOf(int index)
+        {
+            float scale = index switch { 0 => 0.65f, 1 => 1f, 2 => 1.35f, _ => 1.55f };
+            return Mathf.Clamp01(echoDecay * scale);
+        }
+
+        float WetOf(int index)
+        {
+            float scale = index switch { 0 => 0.6f, 1 => 1f, 2 => 1.35f, _ => 1.2f };
+            return Mathf.Clamp01(echoWet * scale);
         }
 
         void FadeReverb()
         {
-            float target = _kind switch
-            {
-                TunnelPipeKind.DryWide => reverbDry,
-                TunnelPipeKind.WetNarrow => reverbWet,
-                TunnelPipeKind.Hall => reverbHall,
-                _ => reverbDead,
-            };
-            if (!_inside) target = reverbDry * 0.5f;
+            float target = _inside ? ReverbOf(_kind) : reverbSeconds * 0.5f;
             float step = Time.deltaTime * 2f / Mathf.Max(0.01f, transitionSeconds);
             _decay = Mathf.MoveTowards(_decay, target, step);
             ApplyReverb(_decay, Mathf.InverseLerp(0.4f, 3f, _decay));
