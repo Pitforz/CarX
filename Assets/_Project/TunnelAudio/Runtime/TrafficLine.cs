@@ -29,6 +29,23 @@ namespace CarX.TunnelAudio
         int _leg;
         float _along;
         bool _armed;
+        Transform _opening;
+
+        public void BindOpening(Transform opening, float far)
+        {
+            _opening = opening;
+            Tune(_source, far);
+            Tune(_horn, far);
+        }
+
+        void Tune(AudioSource source, float far)
+        {
+            if (source == null) return;
+            source.minDistance = 1.2f;
+            source.maxDistance = Mathf.Max(source.maxDistance, far);
+            var voice = source.GetComponent<TunnelVoice>();
+            if (voice != null && _opening != null) voice.Opening = _opening;
+        }
 
         public void Arm(AudioClip pass, AudioClip blare, float blareChance, Vector2 gap, float volume, float blareVolume = 0.22f)
         {

@@ -7051,7 +7051,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a3b832c2492df9448a6b18ec339ae0e3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: CarX.TunnelAudio::CarX.TunnelAudio.CulvertOutlet
-  profile: 3
+  profile: 2
   traffic: {fileID: 1705031106}
   hearDistance: 2.4
   bedVolume: 0.7

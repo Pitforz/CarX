@@ -22,9 +22,9 @@ namespace CarX.TunnelAudio
         public AudioMixerGroup streetGroup;
 
         [Header("Общие ползунки")]
-        [Tooltip("Насколько глушить улицу у решётки. 0 — сухо и громко, 1 — почти замуровано")]
+        [Tooltip("Насколько глубоко в тоннеле глушить улицу. 0 — везде ясно, 1 — вдали как из-под земли. У самой решётки глушение не включается")]
         [Range(0f, 1f)] public float streetMuffle = 0.72f;
-        [Tooltip("Насколько резать голоса сверху. 1 — на грани слышимости")]
+        [Tooltip("Насколько резать казино в глубине. У решётки голоса почти не режутся")]
         [Range(0f, 1f)] public float voiceCut = 0.92f;
         [Tooltip("За сколько секунд гул и эхо переходят к другому участку")]
         [Range(3f, 6f)] public float transitionSeconds = 4.5f;
@@ -38,8 +38,12 @@ namespace CarX.TunnelAudio
         [Header("Стена между ухом и источником")]
         [Tooltip("Частота среза, когда путь свободен, Гц")]
         public float openCutoff = 18000f;
-        [Tooltip("Частота среза улицы у решётки, Гц")]
-        public float streetCutoff = 1300f;
+        [Tooltip("Ближе этого, м, звук решётки ясный и громкий")]
+        public float grateClear = 3.5f;
+        [Tooltip("Дальше этого, м, уличный звук уже как из-под земли и пропадает")]
+        public float soilFar = 26f;
+        [Tooltip("Срез сверху глубоко в тоннеле, Гц. Бетон тут ни при чём: только дистанция до своей решётки")]
+        public float soilCutoff = 380f;
         [Tooltip("Частота среза, когда между ухом и звуком стена, Гц")]
         public float occlusionCutoff = 700f;
         [Tooltip("Пауза после громкого события, секунды")]
@@ -303,15 +307,13 @@ namespace CarX.TunnelAudio
                 _rumbles[i].volume = _level[i] * rumbleVolume;
                 Hold(_rumbles[i], clip);
             }
-            FadeCarBed(step, bed);
+            FadeCarBed(step);
         }
 
-        void FadeCarBed(float step, AudioClip cityBed)
+        void FadeCarBed(float step)
         {
             if (_carBed == null) return;
-            bool cityIsCar = cityBed != null && clips != null && cityBed == clips.car && clips.distantCity == null;
-            var clip = cityIsCar ? clips.dumpTruck : (clips != null ? clips.car : null);
-            if (clip == null && clips != null) clip = clips.dumpTruck;
+            var clip = clips != null ? clips.car : null;
             if (_carBed.clip != clip)
             {
                 _carBed.clip = clip;
@@ -413,22 +415,34 @@ namespace CarX.TunnelAudio
             float volume = voice.BaseVolume;
             float cutoff = openCutoff;
             float high = 12f;
+            float bury = 0f;
             if (voice.Bus == TunnelBus.Street)
             {
-                volume *= Mathf.Lerp(1f, 0.18f, streetMuffle);
-                cutoff = Mathf.Lerp(openCutoff, streetCutoff, streetMuffle);
+                bury = OpeningDepth(voice);
+                float mud = bury * streetMuffle;
+                volume *= Mathf.Lerp(1f, 0.16f, mud);
+                cutoff = Mathf.Lerp(openCutoff, soilCutoff, mud);
+                source.reverbZoneMix = Mathf.Lerp(0.08f, 0.85f, mud);
             }
             if (voice.Casino)
             {
-                volume *= Mathf.Lerp(1f, 0.08f, voiceCut);
-                cutoff = Mathf.Min(cutoff, Mathf.Lerp(4000f, 900f, voiceCut));
-                high = Mathf.Lerp(80f, 420f, voiceCut);
+                float cut = voiceCut * bury;
+                volume *= Mathf.Lerp(1f, 0.4f, cut);
+                cutoff = Mathf.Min(cutoff, Mathf.Lerp(openCutoff, 1600f, cut));
+                high = Mathf.Lerp(50f, 260f, cut);
             }
-            if (Blocked(source.transform.position))
+            if (voice.Bus != TunnelBus.Street && Blocked(source.transform.position))
                 cutoff = Mathf.Min(cutoff, occlusionCutoff);
             source.volume = volume;
             voice.Low.cutoffFrequency = cutoff;
             voice.High.cutoffFrequency = high;
+        }
+
+        float OpeningDepth(TunnelVoice voice)
+        {
+            var place = voice.Opening != null ? voice.Opening : voice.Source.transform;
+            float distance = Vector3.Distance(_ear.position, place.position);
+            return Mathf.InverseLerp(grateClear, Mathf.Max(grateClear + 1f, soilFar), distance);
         }
 
         bool Blocked(Vector3 world)
@@ -454,6 +468,7 @@ namespace CarX.TunnelAudio
         public AudioHighPassFilter High;
         public TunnelBus Bus;
         public bool Casino;
+        public Transform Opening;
         public float BaseVolume = 1f;
     }
 }

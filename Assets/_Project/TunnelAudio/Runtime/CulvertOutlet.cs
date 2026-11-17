@@ -8,7 +8,7 @@ namespace CarX.TunnelAudio
     {
         public CulvertProfile profile = CulvertProfile.Silence;
         public TrafficLine traffic;
-        [Tooltip("Дальше пары метров решётку почти не слышно")]
+        [Tooltip("Запасная дальность, м. Настоящая слышимость улицы задаётся на Tunnel Audio: ясно до grate Clear, почва до soil Far")]
         public float hearDistance = 2.3f;
         [Range(0f, 1f)] public float bedVolume = 0.35f;
 
@@ -22,15 +22,18 @@ namespace CarX.TunnelAudio
             if (director == null) return;
             _bed = director.MakeSource("Culvert " + profile, TunnelBus.Street, 1f, profile == CulvertProfile.Casino, hearDistance);
             _bed.transform.SetParent(transform, false);
-            _bed.minDistance = 0.3f;
+            _bed.maxDistance = Mathf.Max(hearDistance, director.soilFar);
+            _bed.minDistance = 1.2f;
             var voice = _bed.GetComponent<TunnelVoice>();
             voice.BaseVolume = bedVolume;
             voice.Casino = profile == CulvertProfile.Casino;
+            voice.Opening = transform;
             if (profile == CulvertProfile.Casino && director.clips != null)
                 StartCasino(director);
             else
                 _bed.loop = false;
             ArmTraffic();
+            if (traffic != null) traffic.BindOpening(transform, director.soilFar);
             _wait = Random.Range(4f, 12f);
         }
 
@@ -77,10 +80,12 @@ namespace CarX.TunnelAudio
             if (clips.casinoAmbience == null) return;
             var room = director.MakeSource("Culvert Casino Room", TunnelBus.Street, 1f, true, hearDistance);
             room.transform.SetParent(transform, false);
-            room.minDistance = 0.3f;
+            room.minDistance = 1.2f;
+            room.maxDistance = Mathf.Max(hearDistance, director.soilFar);
             var voice = room.GetComponent<TunnelVoice>();
             voice.BaseVolume = bedVolume * 0.85f;
             voice.Casino = true;
+            voice.Opening = transform;
             room.clip = clips.casinoAmbience;
             room.Play();
             _ambience = room;

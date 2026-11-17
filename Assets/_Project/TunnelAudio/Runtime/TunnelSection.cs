@@ -26,6 +26,7 @@ namespace CarX.TunnelAudio
         float _drip;
         float _fall;
         float _life;
+        float _trashWait;
         float _burst = 1f;
         int _burstKind;
 
@@ -37,6 +38,7 @@ namespace CarX.TunnelAudio
             _drip = Gap(director, d => d.dripGap, 0.3f, 1.4f);
             _fall = Gap(director, d => d.fallGap, 40f, 90f);
             _life = Gap(director, d => d.lifeGap, 8f, 18f);
+            _trashWait = Gap(director, d => d.lifeGap, 5f, 12f);
         }
 
         void Start()
@@ -105,22 +107,42 @@ namespace CarX.TunnelAudio
                     }
                 }
             }
-            if (rats || trash)
+            if (rats)
             {
                 _life -= dt;
                 if (_life <= 0f)
                 {
                     _life = Gap(director, d => d.lifeGap, 8f, 22f);
-                    AudioClip clip = rats && trash
-                        ? (Random.value < 0.5f ? clips.rats : clips.trash)
-                        : (rats ? clips.rats : clips.trash);
-                    _oneShots.transform.position = RandomPoint();
+                    _oneShots.transform.position = NearEar(RandomPoint());
                     _burstKind = 3;
                     _burst = Random.Range(0.4f, 0.75f);
                     RefreshBurst();
-                    TunnelAudioDirector.Play(_oneShots, clip, 1f, Random.Range(0.85f, 1.2f));
+                    TunnelAudioDirector.Play(_oneShots, clips.rats, 1f, Random.Range(0.85f, 1.2f));
                 }
             }
+            if (trash)
+            {
+                _trashWait -= dt;
+                if (_trashWait <= 0f)
+                {
+                    _trashWait = Gap(director, d => d.lifeGap, 8f, 22f);
+                    _oneShots.transform.position = NearEar(RandomPoint());
+                    _burstKind = 3;
+                    _burst = Random.Range(0.55f, 0.9f);
+                    RefreshBurst();
+                    TunnelAudioDirector.Play(_oneShots, clips.trash, 1f, Random.Range(0.9f, 1.15f));
+                }
+            }
+        }
+
+        Vector3 NearEar(Vector3 point)
+        {
+            var director = TunnelAudioDirector.Current;
+            if (director == null || director.Ear == null) return point;
+            Vector3 ear = director.Ear.position;
+            float distance = Vector3.Distance(point, ear);
+            if (distance <= 4f) return point;
+            return Vector3.Lerp(ear, point, 4f / distance);
         }
 
         Vector3 RandomPoint()
