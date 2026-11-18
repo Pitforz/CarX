@@ -80,5 +80,18 @@ namespace CarX.TunnelAudio
         public AudioClip CommonVoice() => Any(cough, groan, cry, moan, mutter, sob, breath);
 
         public AudioClip RareVoice() => Any(scream, pipeHit);
+
+        public AudioClip ByVoice(LivingVoice voice) => voice switch
+        {
+            LivingVoice.Cough => cough,
+            LivingVoice.Groan => groan,
+            LivingVoice.Cry => cry,
+            LivingVoice.Moan => moan,
+            LivingVoice.Mutter => mutter,
+            LivingVoice.Sob => sob,
+            LivingVoice.Breath => breath,
+            LivingVoice.Scream => scream,
+            _ => pipeHit,
+        };
     }
 }

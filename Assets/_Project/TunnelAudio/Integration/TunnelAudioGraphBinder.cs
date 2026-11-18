@@ -27,6 +27,7 @@ namespace CarX.TunnelAudio
 
         [Header("Расстановка")]
         public int seed = 4181;
+        [Tooltip("Пустышки для проверки слышимости. Настоящий голос — Living Sound с полем Follow на уже существующем NPC. Полная расстановка создаёт пустышки. Кнопка пустых решёток их не трогает")]
         [Min(0)] public int mannequins = 18;
         [Tooltip("Примерный шаг между манекенами, метры вдоль хода")]
         [Min(6f)] public float mannequinSpacing = 16f;
@@ -116,6 +117,74 @@ namespace CarX.TunnelAudio
             return _log.ToString().TrimEnd();
         }
 
+        [ContextMenu("Добавить звук на пустые решётки")]
+        public void FillEmptyFromMenu()
+        {
+            Debug.Log(FillEmpty(), this);
+        }
+
+        /// <summary>Adds culverts only where none is already nearby. Does not touch sections, zones, or existing grates.</summary>
+        public string FillEmpty()
+        {
+            if (Application.isPlaying)
+                return "Остановите Play. Точки пишутся в сцену, чтобы их можно было править.";
+            _log.Clear();
+            if (network == null) network = GetComponentInParent<TunnelNetwork>();
+            if (network == null) network = UnityEngine.Object.FindFirstObjectByType<TunnelNetwork>();
+            if (network == null) return "В сцене нет TunnelNetwork.";
+
+            ResolveAssets();
+            EnsureDirector();
+            network.EnsureLayout();
+            _points = KeepPoints();
+            _grates.Clear();
+            _rng = new System.Random(seed);
+            CollectGrates();
+            AssignProfiles();
+
+            var taken = new List<CulvertOutlet>();
+            var found = UnityEngine.Object.FindObjectsByType<CulvertOutlet>(FindObjectsInactive.Exclude);
+            bool casinoTaken = false;
+            for (int i = 0; i < found.Length; i++)
+            {
+                if (found[i] == null) continue;
+                taken.Add(found[i]);
+                if (found[i].profile == CulvertProfile.Casino) casinoTaken = true;
+            }
+
+            int added = 0, skipped = 0;
+            for (int i = 0; i < _grates.Count; i++)
+            {
+                if (Occupied(_grates[i].ceiling, taken))
+                {
+                    skipped++;
+                    continue;
+                }
+                if (casinoTaken && _grates[i].profile == CulvertProfile.Casino)
+                    _grates[i].profile = CulvertProfile.Cars;
+                if (_grates[i].profile == CulvertProfile.Casino) casinoTaken = true;
+                SpawnGrate(_grates[i], i + 1);
+                added++;
+            }
+            MarkEdited();
+            _log.Insert(0, "На пустые решётки добавлено " + added + ". Пропущено " + skipped
+                + ": у них уже есть звук. Участки, зоны и пустышки не менялись.\n");
+            return _log.ToString().TrimEnd();
+        }
+
+        static bool Occupied(Vector3 ceiling, List<CulvertOutlet> taken)
+        {
+            for (int i = 0; i < taken.Count; i++)
+            {
+                var outlet = taken[i];
+                if (outlet == null) continue;
+                var flat = outlet.transform.position - ceiling;
+                flat.y = 0f;
+                if (flat.sqrMagnitude < 6.25f) return true;
+            }
+            return false;
+        }
+
         void ResolveAssets()
         {
 #if UNITY_EDITOR
@@ -149,6 +218,13 @@ namespace CarX.TunnelAudio
         {
             var existing = transform.Find(PointsName);
             if (existing != null) Kill(existing.gameObject);
+            return KeepPoints();
+        }
+
+        Transform KeepPoints()
+        {
+            var existing = transform.Find(PointsName);
+            if (existing != null) return existing;
             var root = new GameObject(PointsName);
             root.transform.SetParent(transform, false);
             return root.transform;
@@ -795,12 +871,24 @@ namespace CarX.TunnelAudio
         public override void OnInspectorGUI()
         {
             DrawDefaultInspector();
-            if (!GUILayout.Button("Расставить звук по графу")) return;
+            UnityEditor.EditorGUILayout.HelpBox(
+                "«Пустые решётки» добавляет звук только туда, где своей ливнёвки ещё нет, и не трогает уже настроенные. «Везде» удаляет «Точки звука» и собирает заново, вместе с пустышками.",
+                UnityEditor.MessageType.Info);
             var binder = (TunnelAudioGraphBinder)target;
-            UnityEditor.EditorApplication.delayCall += () =>
+            if (GUILayout.Button("Добавить звук на пустые решётки"))
             {
-                if (binder != null) Debug.Log(binder.Rebuild(), binder);
-            };
+                UnityEditor.EditorApplication.delayCall += () =>
+                {
+                    if (binder != null) Debug.Log(binder.FillEmpty(), binder);
+                };
+            }
+            if (GUILayout.Button("Расставить звук везде"))
+            {
+                UnityEditor.EditorApplication.delayCall += () =>
+                {
+                    if (binder != null) Debug.Log(binder.Rebuild(), binder);
+                };
+            }
         }
     }
 }
