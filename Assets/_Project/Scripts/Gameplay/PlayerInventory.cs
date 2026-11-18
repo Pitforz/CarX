@@ -16,19 +16,23 @@ namespace CarX.Gameplay
         internal const int MagazineSlot = 1;
         const float PointerResumeDistance = 3f;
         const float PickupDistance = 3f;
+        const float PickupAimRadius = 0.085f;
         const float DropDistance = 1f;
         const float DropRadius = 0.15f;
         const int WorldLayers = Physics.DefaultRaycastLayers;
         const string PistolDropSubtitle = "Эта вещь мне ещё понадобится";
+        internal const string HandsFullSubtitle = "Сначала поставь ящик на Q";
 
         [SerializeField] Sprite _wheelBase;
         [SerializeField] Sprite _occupiedSector;
         [SerializeField] Sprite _selectedSector;
         [SerializeField] Sprite _pistolIcon;
         [SerializeField] Sprite _magazineIcon;
+        [SerializeField] DroppedMagazine _droppedMagazinePrefab;
         [SerializeField] Shader _pickupShader;
 
         readonly RaycastHit[] _hits = new RaycastHit[16];
+        readonly RaycastHit[] _pickupSightHits = new RaycastHit[8];
         readonly Collider[] _overlaps = new Collider[16];
         int? _spareRounds = PlayerPistol.MagazineSize;
         FirstPersonController _controller;
@@ -37,7 +41,8 @@ namespace CarX.Gameplay
         PlayerStatusHud _hud;
         PlayerMenus _menus;
         InventoryWheelView _wheel;
-        DroppedMagazine _focusedMagazine;
+        MonoBehaviour _focusedPickup;
+        ToolboxPickup _carriedToolbox;
         GameObject _heldMagazine;
         Material _heldMagazineMaterial;
         bool _open;
@@ -50,6 +55,8 @@ namespace CarX.Gameplay
 
         internal int ReserveRounds => _spareRounds ?? 0;
         internal bool IsOpen => _open;
+        internal bool IsCarryingTools => _carriedToolbox != null;
+        internal bool IsCarryingToolbox(ToolboxPickup toolbox) => toolbox != null && _carriedToolbox == toolbox;
         internal bool BlocksWeaponInput =>
             _open || _closedFrame == Time.frameCount || (_menus != null && _menus.BlocksGameplayInput);
         bool IsHoldingMagazine => _heldMagazine != null && _heldMagazine.activeSelf;
@@ -103,7 +110,9 @@ namespace CarX.Gameplay
 
                 if (drop)
                 {
-                    if (_selectedSlot == PistolSlot)
+                    if (IsCarryingTools)
+                        PutDownToolbox();
+                    else if (_selectedSlot == PistolSlot)
                         _hud.ShowSubtitle(PistolDropSubtitle);
                     else if (_selectedSlot == MagazineSlot)
                         DropMagazine();
@@ -116,7 +125,9 @@ namespace CarX.Gameplay
 
             if (drop)
             {
-                if (_pistol.IsEquipped)
+                if (IsCarryingTools)
+                    PutDownToolbox();
+                else if (_pistol.IsEquipped)
                     _hud.ShowSubtitle(PistolDropSubtitle);
                 else if (IsHoldingMagazine)
                     DropMagazine();
@@ -220,7 +231,7 @@ namespace CarX.Gameplay
             _wheel?.SetVisible(open);
             if (open)
             {
-                SetFocusedMagazine(null);
+                SetFocusedPickup(null);
                 RefreshWheel();
             }
         }
@@ -265,6 +276,12 @@ namespace CarX.Gameplay
 
         void ConfirmSelectedItem()
         {
+            if (IsCarryingTools)
+            {
+                _hud.ShowSubtitle(HandsFullSubtitle);
+                return;
+            }
+
             if (_selectedSlot == PistolSlot)
                 _pistol.SetEquipped(!_pistol.IsEquipped);
             else if (_selectedSlot == MagazineSlot && _spareRounds.HasValue)
@@ -319,40 +336,40 @@ namespace CarX.Gameplay
 
         void DropMagazine()
         {
-            if (!_spareRounds.HasValue || _pickupShader == null || !TryGetDropPosition(out var position))
+            if (!_spareRounds.HasValue || _droppedMagazinePrefab == null || !TryGetDropPosition(out var position))
                 return;
 
-            DroppedMagazine.Spawn(position, _spareRounds.Value, _pickupShader, gameObject.scene,
+            DroppedMagazine.Spawn(_droppedMagazinePrefab, position, _spareRounds.Value, gameObject.scene,
                 GetComponentsInChildren<Collider>());
             _spareRounds = null;
             StowMagazine();
             RefreshWheel();
         }
 
-        bool TryGetDropPosition(out Vector3 position)
+        bool TryGetDropPosition(out Vector3 position, float radius = DropRadius)
         {
             var camera = _pistol.ViewCamera.transform;
             var origin = camera.position;
             var direction = camera.forward;
             position = origin;
             // A sphere cast does not detect geometry that already overlaps its starting sphere.
-            if (!HasDropClearance(origin))
+            if (!HasDropClearance(origin, radius))
                 return false;
 
-            int count = Physics.SphereCastNonAlloc(origin, DropRadius, direction, _hits,
+            int count = Physics.SphereCastNonAlloc(origin, radius, direction, _hits,
                 DropDistance, WorldLayers, QueryTriggerInteraction.Ignore);
             var nearest = count < _hits.Length
                 ? FindNearestWorldHit(_hits, count)
-                : FindNearestWorldHit(Physics.SphereCastAll(origin, DropRadius, direction, DropDistance,
+                : FindNearestWorldHit(Physics.SphereCastAll(origin, radius, direction, DropDistance,
                     WorldLayers, QueryTriggerInteraction.Ignore));
             float distance = nearest.collider != null ? Mathf.Max(0f, nearest.distance - 0.03f) : DropDistance;
             position = origin + direction * distance;
-            return HasDropClearance(position);
+            return HasDropClearance(position, radius);
         }
 
-        bool HasDropClearance(Vector3 position)
+        bool HasDropClearance(Vector3 position, float radius)
         {
-            int overlaps = Physics.OverlapSphereNonAlloc(position, DropRadius, _overlaps,
+            int overlaps = Physics.OverlapSphereNonAlloc(position, radius, _overlaps,
                 WorldLayers, QueryTriggerInteraction.Ignore);
             if (overlaps == _overlaps.Length)
                 return false;
@@ -366,25 +383,122 @@ namespace CarX.Gameplay
 
         void UpdatePickup(bool pickupPressed)
         {
-            var ray = _pistol.ViewCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
-            int count = Physics.RaycastNonAlloc(ray, _hits, PickupDistance, WorldLayers,
-                QueryTriggerInteraction.Ignore);
-            var nearest = count < _hits.Length
-                ? FindNearestWorldHit(_hits, count)
-                : FindNearestWorldHit(Physics.RaycastAll(ray, PickupDistance, WorldLayers,
-                    QueryTriggerInteraction.Ignore));
-            var magazine = nearest.collider != null
-                ? nearest.collider.GetComponentInParent<DroppedMagazine>()
-                : null;
-            SetFocusedMagazine(magazine);
+            if (IsCarryingTools || (_menus != null && _menus.HasTalkTarget))
+            {
+                SetFocusedPickup(null);
+                return;
+            }
 
-            if (pickupPressed && magazine != null && !_spareRounds.HasValue)
+            var pickup = FindPickupInView();
+            SetFocusedPickup(pickup);
+            if (!pickupPressed)
+                return;
+
+            if (pickup is ToolboxPickup toolbox)
+                CarryToolbox(toolbox);
+            else if (pickup is DroppedMagazine magazine && !_spareRounds.HasValue)
             {
                 _spareRounds = magazine.Rounds;
-                SetFocusedMagazine(null);
+                SetFocusedPickup(null);
                 magazine.gameObject.SetActive(false);
                 Destroy(magazine.gameObject);
             }
+        }
+
+        void CarryToolbox(ToolboxPickup toolbox)
+        {
+            SetFocusedPickup(null);
+            _pistol.SetEquipped(false);
+            StowMagazine();
+            _carriedToolbox = toolbox;
+            toolbox.Carry(_pistol.ViewCamera.transform);
+            _menus?.RefreshQuestDisplay();
+            _hud.ShowSubtitle("Q — поставить ящик");
+        }
+
+        void PutDownToolbox()
+        {
+            if (!TryGetDropPosition(out var position, ToolboxPickup.DropClearanceRadius))
+            {
+                _hud.ShowSubtitle("Здесь нет места для ящика");
+                return;
+            }
+
+            var toolbox = _carriedToolbox;
+            _carriedToolbox = null;
+            toolbox.PutDown(position, transform.eulerAngles.y, GetComponentsInChildren<Collider>());
+            _menus?.RefreshQuestDisplay();
+        }
+
+        internal bool DeliverTools()
+        {
+            if (!IsCarryingTools)
+                return false;
+
+            var toolbox = _carriedToolbox;
+            _carriedToolbox = null;
+            toolbox.gameObject.SetActive(false);
+            Destroy(toolbox.gameObject);
+            return true;
+        }
+
+        MonoBehaviour FindPickupInView()
+        {
+            var camera = _pistol.ViewCamera;
+            var centerRay = camera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+            var ray = new Ray(camera.transform.position, centerRay.direction);
+            var hits = _hits;
+            int count = Physics.SphereCastNonAlloc(ray, PickupAimRadius, hits, PickupDistance, WorldLayers,
+                QueryTriggerInteraction.Ignore);
+            if (count == hits.Length)
+            {
+                hits = Physics.SphereCastAll(ray, PickupAimRadius, PickupDistance, WorldLayers,
+                    QueryTriggerInteraction.Ignore);
+                count = hits.Length;
+            }
+
+            MonoBehaviour nearest = null;
+            float distance = float.PositiveInfinity;
+            for (int i = 0; i < count; i++)
+            {
+                var hit = hits[i];
+                if (hit.distance >= distance)
+                    continue;
+
+                var pickup = FindPickup(hit.collider);
+                if (pickup == null || !pickup.isActiveAndEnabled || pickup.gameObject.scene != gameObject.scene ||
+                    !HasPickupLineOfSight(ray.origin, hit.point, pickup.transform))
+                    continue;
+
+                nearest = pickup;
+                distance = hit.distance;
+            }
+            return nearest;
+        }
+
+        static MonoBehaviour FindPickup(Collider collider)
+        {
+            var toolbox = collider.GetComponentInParent<ToolboxPickup>();
+            if (toolbox != null)
+                return toolbox.PickupAllowed ? toolbox : null;
+            return collider.GetComponentInParent<DroppedMagazine>();
+        }
+
+        bool HasPickupLineOfSight(Vector3 origin, Vector3 point, Transform pickup)
+        {
+            // The aim tolerance may reach around a corner; confirm the actual surface is visible.
+            Vector3 offset = point - origin;
+            float distance = offset.magnitude;
+            if (distance < 0.001f || distance > PickupDistance)
+                return false;
+
+            var ray = new Ray(origin, offset / distance);
+            int count = Physics.RaycastNonAlloc(ray, _pickupSightHits, distance, WorldLayers,
+                QueryTriggerInteraction.Ignore);
+            var nearest = count < _pickupSightHits.Length
+                ? FindNearestWorldHit(_pickupSightHits, count)
+                : FindNearestWorldHit(Physics.RaycastAll(ray, distance, WorldLayers, QueryTriggerInteraction.Ignore));
+            return nearest.collider == null || nearest.collider.transform.IsChildOf(pickup);
         }
 
         RaycastHit FindNearestWorldHit(RaycastHit[] hits, int count = -1)
@@ -404,24 +518,33 @@ namespace CarX.Gameplay
             return nearest;
         }
 
-        void SetFocusedMagazine(DroppedMagazine magazine)
+        void SetFocusedPickup(MonoBehaviour pickup)
         {
-            if (ReferenceEquals(_focusedMagazine, magazine))
+            if (ReferenceEquals(_focusedPickup, pickup))
                 return;
 
-            if (_focusedMagazine != null)
-                _focusedMagazine.SetHighlighted(false);
-            _focusedMagazine = magazine;
-            if (magazine == null)
+            if (_focusedPickup != null)
             {
-                if (_hud != null)
-                    _hud.ShowPickupHint(null);
-                return;
+                if (_focusedPickup is ToolboxPickup previousToolbox)
+                    previousToolbox.SetHighlighted(false);
+                else if (_focusedPickup is DroppedMagazine previousMagazine)
+                    previousMagazine.SetHighlighted(false);
             }
+            _focusedPickup = pickup;
 
-            magazine.SetHighlighted(true);
-            string action = _spareRounds.HasValue ? "Слот магазина занят" : "E — подобрать";
-            _hud.ShowPickupHint($"Магазин · {magazine.Rounds}/{PlayerPistol.MagazineSize}\n{action}");
+            if (pickup is ToolboxPickup toolbox)
+            {
+                toolbox.SetHighlighted(true);
+                _hud.ShowPickupHint("Ящик с инструментами\nE — подобрать");
+            }
+            else if (pickup is DroppedMagazine magazine)
+            {
+                magazine.SetHighlighted(true);
+                string action = _spareRounds.HasValue ? "Слот обоймы занят" : "E — подобрать";
+                _hud.ShowPickupHint($"Обойма · {magazine.Rounds}/{PlayerPistol.MagazineSize}\n{action}");
+            }
+            else if (_hud != null)
+                _hud.ShowPickupHint(null);
         }
 
         void OnDisable()
@@ -433,7 +556,7 @@ namespace CarX.Gameplay
         internal void CloseForMenu()
         {
             SetOpen(false);
-            SetFocusedMagazine(null);
+            SetFocusedPickup(null);
         }
 
         void OnDestroy()

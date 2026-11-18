@@ -30,6 +30,7 @@ namespace CarX.Gameplay
         readonly RaycastHit[] _wallHits = new RaycastHit[16];
         readonly Collider[] _overlaps = new Collider[16];
         Camera _camera;
+        Transform _weaponView;
         Transform _muzzle;
         Light _light;
         MeshRenderer _glow;
@@ -42,15 +43,17 @@ namespace CarX.Gameplay
         float _shotGlowSize;
         float _shotRoll;
 
-        public void Initialize(Transform weaponView, Camera viewCamera)
+        public void Initialize(Transform weaponView, Camera viewCamera, Transform muzzleAnchor = null)
         {
             if (_muzzle != null)
                 return;
 
             _camera = viewCamera;
+            _weaponView = weaponView;
             _muzzle = new GameObject("Muzzle Flash").transform;
-            _muzzle.SetParent(weaponView, false);
-            _muzzle.localPosition = new Vector3(0f, 0.016f, 0.16f);
+            _muzzle.SetParent(muzzleAnchor != null ? muzzleAnchor : weaponView, false);
+            if (muzzleAnchor == null)
+                _muzzle.localPosition = new Vector3(0f, 0.016f, 0.16f);
 
             var lightObject = new GameObject("Shot Environment Light");
             lightObject.transform.SetParent(_muzzle, false);
@@ -210,7 +213,7 @@ namespace CarX.Gameplay
 
         bool IsPlayerCollider(Collider collider)
         {
-            return collider.transform.IsChildOf(transform) || collider.transform.IsChildOf(_muzzle.parent);
+            return collider.transform.IsChildOf(transform) || collider.transform.IsChildOf(_weaponView);
         }
 
         public void Stop()

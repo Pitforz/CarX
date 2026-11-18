@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.Serialization;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -15,6 +16,9 @@ namespace CarX.Gameplay
         const float ToggleInterval = 1f;
         const float DimmedCharge = 0.1f;
         const float MinChargeBrightness = 0.5f;
+        const float WeaponSpillMinDistance = 0.24f;
+
+        internal const uint WeaponSpillRenderingLayer = 1u << 2;
 
         [Header("Light")]
         [SerializeField, Min(1f)] float _beamRange = 60f;
@@ -24,6 +28,7 @@ namespace CarX.Gameplay
         [SerializeField, Min(1f)] float _spillRange = 16f;
         [SerializeField, Min(0f)] float _spillIntensity = 11.34f;
         [SerializeField, Range(30f, 120f)] float _spillAngle = 76f;
+        [SerializeField, Min(0f)] float _weaponSpillIntensity = 1.1f;
 
         [Header("Motion")]
         [SerializeField, Min(0.01f)] float _followTime = 0.075f;
@@ -45,6 +50,7 @@ namespace CarX.Gameplay
 
         Light _beam;
         Light _spill;
+        Light _weaponSpill;
         AudioSource _switchAudio;
         PlayerPistol _pistol;
         PlayerInventory _inventory;
@@ -56,17 +62,26 @@ namespace CarX.Gameplay
         bool _isOn;
         bool _toggleQueued;
         float _nextToggleAt;
+        float _switchAt;
         float _switchBlend;
         float _mountFraction = 1f;
         float _beamPower;
         float _spillPower;
 
-        public static float ChargeForHealth(int health)
-        {
-            return Mathf.InverseLerp(PlayerHealth.MaxHealth / 2f, PlayerHealth.MaxHealth, health);
-        }
+        float Charge => _health != null ? _health.FlashlightCharge : 1f;
+        internal bool IsOn => isActiveAndEnabled && _isOn && Charge > 0f;
 
-        float Charge => _health != null ? ChargeForHealth(_health.CurrentHealth) : 1f;
+        internal bool IsPointInMainBeam(Vector3 point)
+        {
+            if (!IsOn || _beam == null || !_beam.enabled || _beam.intensity <= 0f)
+                return false;
+
+            Vector3 offset = point - _beam.transform.position;
+            float distance = offset.magnitude;
+            float coneCosine = Mathf.Cos(_beam.spotAngle * 0.5f * Mathf.Deg2Rad);
+            return distance <= _beam.range &&
+                Vector3.Dot(_beam.transform.forward, offset) >= distance * coneCosine;
+        }
 
         void Awake()
         {
@@ -128,6 +143,25 @@ namespace CarX.Gameplay
             _spill.bounceIntensity = 0f;
             _spill.shadows = LightShadows.None;
             _spill.renderingLayerMask = 1;
+
+            if (_pistol != null && _weaponSpillIntensity > 0f &&
+                UniversalRenderPipeline.asset != null && UniversalRenderPipeline.asset.useRenderingLayers)
+            {
+                // The wide, soft edge of the chest light reaches the forearms and lower frame.
+                var weaponSpill = new GameObject("Flashlight Weapon Spill");
+                weaponSpill.transform.SetParent(transform, false);
+                _weaponSpill = weaponSpill.AddComponent<Light>();
+                _weaponSpill.enabled = false;
+                _weaponSpill.type = LightType.Spot;
+                _weaponSpill.spotAngle = 112f;
+                _weaponSpill.innerSpotAngle = 48f;
+                _weaponSpill.color = _beamColor;
+                _weaponSpill.intensity = 0f;
+                _weaponSpill.range = 0.8f;
+                _weaponSpill.bounceIntensity = 0f;
+                _weaponSpill.shadows = LightShadows.None;
+                _weaponSpill.GetUniversalAdditionalLightData().renderingLayers = WeaponSpillRenderingLayer;
+            }
         }
 
         void OnEnable()
@@ -145,9 +179,9 @@ namespace CarX.Gameplay
             TurnOff();
         }
 
-        void OnHealthChanged(int health)
+        void OnHealthChanged(int _)
         {
-            if (ChargeForHealth(health) <= 0f)
+            if (Charge <= 0f)
                 TurnOff();
         }
 
@@ -158,8 +192,17 @@ namespace CarX.Gameplay
                 TurnOff();
                 return;
             }
-            if (Time.timeScale == 0f ||
-                (_inventory != null && _inventory.BlocksWeaponInput))
+            if (Time.timeScale == 0f)
+                return;
+
+            float now = Time.time;
+            if (_switchAt > 0f && now >= _switchAt)
+            {
+                _switchAt = 0f;
+                SwitchLight();
+            }
+
+            if (_inventory != null && _inventory.BlocksWeaponInput)
                 return;
 
 #if ENABLE_INPUT_SYSTEM
@@ -169,25 +212,34 @@ namespace CarX.Gameplay
 #endif
             if (toggle)
                 _toggleQueued = true;
-            if (!_toggleQueued || Time.time < _nextToggleAt)
+            if (!_toggleQueued || _switchAt > 0f || now < _nextToggleAt)
                 return;
 
+            float switchDelay = 0f;
+            if (_pistol != null && !_pistol.TryLowerForFlashlight(ToggleInterval, out switchDelay))
+                return;
             _toggleQueued = false;
-            _nextToggleAt = Time.time + ToggleInterval;
+            _nextToggleAt = now + ToggleInterval;
+            if (switchDelay > 0f)
+                _switchAt = now + switchDelay;
+            else
+                SwitchLight();
+        }
+
+        void SwitchLight()
+        {
             if (_switchAudio != null)
                 _switchAudio.PlayOneShot(_switchClip, _switchVolume);
+            SetLightEnabled(!_isOn);
+        }
 
-            if (_isOn)
-            {
-                TurnOff();
-                return;
-            }
-
-            _isOn = true;
-            _beam.enabled = true;
-            _spill.enabled = true;
-            if (_pistol != null)
-                _pistol.LowerForFlashlight(ToggleInterval);
+        void SetLightEnabled(bool enabled)
+        {
+            _isOn = enabled;
+            _switchBlend = 0f;
+            if (_beam != null) _beam.enabled = enabled;
+            if (_spill != null) _spill.enabled = enabled;
+            if (_weaponSpill != null && !enabled) _weaponSpill.enabled = false;
         }
 
         void LateUpdate()
@@ -237,15 +289,30 @@ namespace CarX.Gameplay
             float fade = Mathf.SmoothStep(0f, 1f, _switchBlend);
             _beam.intensity = _beamPower * fade;
             _spill.intensity = _spillPower * fade;
+            UpdateWeaponSpill(chargeBrightness * fade);
+        }
+
+        void UpdateWeaponSpill(float power)
+        {
+            if (_weaponSpill == null)
+                return;
+
+            float proximity = 0f;
+            if (_pistol != null && _pistol.IsEquipped)
+            {
+                // Limit the inverse-square hotspot when the grip moves close to the flashlight.
+                float distanceSquared = (_pistol.GripLightPosition - transform.position).sqrMagnitude;
+                proximity = Mathf.Clamp01(distanceSquared / (WeaponSpillMinDistance * WeaponSpillMinDistance));
+            }
+            _weaponSpill.intensity = _weaponSpillIntensity * power * proximity;
+            _weaponSpill.enabled = _weaponSpill.intensity > 0f;
         }
 
         void TurnOff()
         {
-            _isOn = false;
             _toggleQueued = false;
-            _switchBlend = 0f;
-            if (_beam != null) _beam.enabled = false;
-            if (_spill != null) _spill.enabled = false;
+            _switchAt = 0f;
+            SetLightEnabled(false);
         }
 
         void OnDestroy()
@@ -254,6 +321,8 @@ namespace CarX.Gameplay
                 Destroy(_switchAudio);
             if (_spill != null)
                 Destroy(_spill.gameObject);
+            if (_weaponSpill != null)
+                Destroy(_weaponSpill.gameObject);
         }
     }
 }

@@ -1,5 +1,6 @@
 ﻿using Unity.Cinemachine;
 using UnityEngine;
+using UnityEngine.Serialization;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -15,8 +16,7 @@ namespace StarterAssets
 		[Header("Player")]
 		[Tooltip("Move speed of the character in m/s")]
 		public float MoveSpeed = 4.0f;
-		[Tooltip("Sprint speed of the character in m/s")]
-		public float SprintSpeed = 6.0f;
+		[SerializeField, Range(0.1f, 1f)] private float _backwardSpeedMultiplier = 0.65f;
 		[Tooltip("Rotation speed of the character")]
 		public float RotationSpeed = 1.0f;
 		[Tooltip("Mouse smoothing time in seconds; keeps the full input angle")]
@@ -38,6 +38,8 @@ namespace StarterAssets
 		[Space(10)]
 		[Tooltip("The character uses its own gravity value. The engine default is -9.81f")]
 		public float Gravity = -15.0f;
+		[SerializeField, Min(0f)] private float _jumpHeight = 0.8f;
+		[SerializeField, Min(0f)] private float _crouchJumpHeight = 0.35f;
 
 		[Header("Crouch")]
 		[SerializeField, Min(0f)] private float _crouchHeight = 1.2f;
@@ -69,10 +71,14 @@ namespace StarterAssets
 		[Tooltip("The follow target set in the Cinemachine Virtual Camera that the camera will follow")]
 		public GameObject CinemachineCameraTarget;
 		[SerializeField, Min(0.01f)] private float _verticalCameraSmoothTime = 0.08f;
-		[Tooltip("How far in degrees can you move the camera up")]
-		public float TopClamp = 90.0f;
-		[Tooltip("How far in degrees can you move the camera down")]
-		public float BottomClamp = -90.0f;
+
+		[Header("Vertical Look Limits")]
+		[FormerlySerializedAs("BottomClamp")]
+		[Tooltip("Upper pitch limit in degrees. Move toward zero to restrict looking up.")]
+		[SerializeField, Range(-90f, 0f)] private float _lookUpLimit = -90f;
+		[FormerlySerializedAs("TopClamp")]
+		[Tooltip("Lower pitch limit in degrees. Move toward zero to restrict looking down.")]
+		[SerializeField, Range(0f, 90f)] private float _lookDownLimit = 90f;
 
 		// cinemachine
 		private float _cinemachineTargetPitch;
@@ -112,9 +118,13 @@ namespace StarterAssets
 		private float _cameraWallCorrection;
 		private float _cameraWallCorrectionVelocity;
 		private float _leanDirection;
+		public CapsuleCollider BulletHitbox { get; private set; }
 		public float LeanAmount { get; private set; }
 		public float MouseSensitivityScale { get; set; } = 1f;
 		public float LookSensitivityMultiplier { get; set; } = 1f;
+		public float MovementSpeedMultiplier { get; set; } = 1f;
+		public bool IsAiming { get; set; }
+		public bool IsWalkingQuietly { get; private set; }
 		public bool LookInputBlocked { get; set; }
 
 		private bool IsCurrentDeviceMouse
@@ -151,6 +161,14 @@ namespace StarterAssets
 
 			_standingHeight = _controller.height;
 			_standingCenter = _controller.center;
+			var hitboxObject = new GameObject("Player Bullet Hitbox");
+			hitboxObject.layer = LayerMask.NameToLayer("Ignore Raycast");
+			hitboxObject.transform.SetParent(transform, false);
+			hitboxObject.transform.localPosition = _standingCenter;
+			BulletHitbox = hitboxObject.AddComponent<CapsuleCollider>();
+			BulletHitbox.isTrigger = true;
+			BulletHitbox.radius = _controller.radius;
+			BulletHitbox.height = _standingHeight;
 			_smoothedCameraFollowY = transform.position.y;
 			if (CinemachineCameraTarget != null)
 				_standingCameraPosition = CinemachineCameraTarget.transform.localPosition;
@@ -167,11 +185,15 @@ namespace StarterAssets
 		private void OnEnable()
 		{
 			CinemachineCore.CameraUpdatedEvent.AddListener(KeepCameraOutsideWalls);
+			if (BulletHitbox != null)
+				BulletHitbox.enabled = true;
 		}
 
 		private void OnDisable()
 		{
 			CinemachineCore.CameraUpdatedEvent.RemoveListener(KeepCameraOutsideWalls);
+			if (BulletHitbox != null)
+				BulletHitbox.enabled = false;
 			_pendingLookRotation = _lookVelocity = Vector2.zero;
 			_planarVelocity = _planarAcceleration = Vector2.zero;
 		}
@@ -185,14 +207,16 @@ namespace StarterAssets
 			var keyboard = Keyboard.current;
 			bool leanRight = IsKeyHeld(keyboard, _leanRightKey);
 			bool leanLeft = IsKeyHeld(keyboard, _leanLeftKey);
+			bool jumpPressed = keyboard?.spaceKey.wasPressedThisFrame == true;
 #else
 			bool leanRight = Input.GetKey(KeyCode.C);
 			bool leanLeft = Input.GetKey(KeyCode.Z);
+			bool jumpPressed = Input.GetKeyDown(KeyCode.Space);
 #endif
 			float desiredLean = (leanRight ? 1f : 0f) - (leanLeft ? 1f : 0f);
 			UpdateCrouch();
 			GroundedCheck();
-			ApplyGravity();
+			UpdateVerticalVelocity(jumpPressed && !LookInputBlocked);
 			CameraRotation();
 			Move(leanRight || leanLeft || Mathf.Abs(_leanProgress) > 0.01f);
 			UpdateCameraPose(desiredLean);
@@ -222,13 +246,17 @@ namespace StarterAssets
 			// Position must respect walls immediately; rolling the view can still ease into the safe pose.
 			_leanRoll = Mathf.SmoothDamp(_leanRoll, lean, ref _leanRollVelocity, _leanRollSmoothTime);
 			LeanAmount = Mathf.Abs(_leanRoll);
-			target.position += transform.right * (_leanDistance * lean);
-			target.localRotation = Quaternion.Euler(_cinemachineTargetPitch, 0f, 0f)
-				* Quaternion.AngleAxis(-_leanAngle * _leanRoll, Vector3.forward);
+			Vector3 leanOffset = transform.right * (_leanDistance * lean);
+			Quaternion bodyRoll = Quaternion.AngleAxis(-_leanAngle * _leanRoll, Vector3.forward);
+			target.position += leanOffset;
+			target.localRotation = Quaternion.Euler(_cinemachineTargetPitch, 0f, 0f) * bodyRoll;
+
+			// The torso moves with the lean while the lower end stays closer to the feet.
+			BulletHitbox.transform.SetLocalPositionAndRotation(
+				_controller.center + transform.InverseTransformVector(leanOffset) * 0.5f, bodyRoll);
 
 			if (_capsuleModel != null)
-				_capsuleModel.localRotation = Quaternion.AngleAxis(-_leanAngle * _leanRoll, Vector3.forward)
-					* _standingModelRotation;
+				_capsuleModel.localRotation = bodyRoll * _standingModelRotation;
 		}
 
 		private float UpdateLean(float desiredLean)
@@ -363,6 +391,9 @@ namespace StarterAssets
 			float heightDifference = _standingHeight - height;
 			_controller.height = height;
 			_controller.center = _standingCenter - Vector3.up * (heightDifference * 0.5f);
+			BulletHitbox.height = height;
+			if (CinemachineCameraTarget == null)
+				BulletHitbox.transform.localPosition = _controller.center;
 
 			if (_capsuleModel != null)
 			{
@@ -423,7 +454,7 @@ namespace StarterAssets
 				inputScale *= MouseSensitivityScale;
 			_pendingLookRotation += _input.look * inputScale;
 			_pendingLookRotation.y = Mathf.Clamp(_cinemachineTargetPitch + _pendingLookRotation.y,
-				BottomClamp, TopClamp) - _cinemachineTargetPitch;
+				_lookUpLimit, _lookDownLimit) - _cinemachineTargetPitch;
 
 			Vector2 rotation;
 			if (_lookSmoothingTime > 0f)
@@ -441,7 +472,7 @@ namespace StarterAssets
 			}
 			_pendingLookRotation -= rotation;
 			float pitch = _cinemachineTargetPitch + rotation.y;
-			_cinemachineTargetPitch = Mathf.Clamp(pitch, BottomClamp, TopClamp);
+			_cinemachineTargetPitch = Mathf.Clamp(pitch, _lookUpLimit, _lookDownLimit);
 			if (pitch != _cinemachineTargetPitch)
 			{
 				_pendingLookRotation.y = 0f;
@@ -458,14 +489,16 @@ namespace StarterAssets
 #else
 			bool slowWalk = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
 #endif
-			float targetSpeed = _input.sprint ? SprintSpeed : MoveSpeed;
-			targetSpeed = Mathf.Lerp(targetSpeed, _crouchSpeed, _crouchProgress);
-			if (slowWalk || leaning) targetSpeed = Mathf.Min(targetSpeed, _slowWalkSpeed);
+			IsWalkingQuietly = slowWalk;
+			float targetSpeed = Mathf.Lerp(MoveSpeed, _crouchSpeed, _crouchProgress);
+			if (slowWalk || leaning || IsAiming) targetSpeed = Mathf.Min(targetSpeed, _slowWalkSpeed);
 
 			Vector2 moveInput = _input.analogMovement
 				? Vector2.ClampMagnitude(_input.move, 1f)
 				: _input.move.normalized;
-			Vector2 targetVelocity = moveInput * targetSpeed;
+			if (moveInput.y < 0f)
+				targetSpeed *= _backwardSpeedMultiplier;
+			Vector2 targetVelocity = moveInput * (targetSpeed * MovementSpeedMultiplier);
 			// Smooth the whole local velocity, including a release to zero and changes of direction.
 			// Collision-reduced controller.velocity must not restart acceleration every frame at a wall.
 			_planarVelocity = Vector2.SmoothDamp(_planarVelocity, targetVelocity,
@@ -478,14 +511,21 @@ namespace StarterAssets
 
 			Vector3 velocity = transform.right * _planarVelocity.x + transform.forward * _planarVelocity.y
 				+ Vector3.up * _verticalVelocity;
-			_controller.Move(velocity * Time.deltaTime);
+			CollisionFlags collisions = _controller.Move(velocity * Time.deltaTime);
+			if ((collisions & CollisionFlags.Above) != 0 && _verticalVelocity > 0f)
+				_verticalVelocity = 0f;
 		}
 
-		private void ApplyGravity()
+		private void UpdateVerticalVelocity(bool jumpPressed)
 		{
-			_verticalVelocity = Grounded
-				? -2f
-				: Mathf.Max(TerminalVelocity, _verticalVelocity + Gravity * Time.deltaTime);
+			if (_controller.isGrounded && _verticalVelocity <= 0f)
+			{
+				float height = Mathf.Lerp(_jumpHeight, _crouchJumpHeight, _crouchProgress);
+				_verticalVelocity = jumpPressed ? Mathf.Sqrt(2f * Mathf.Max(0f, -Gravity) * height) : -2f;
+				return;
+			}
+
+			_verticalVelocity = Mathf.Max(TerminalVelocity, _verticalVelocity + Gravity * Time.deltaTime);
 		}
 
 #if ENABLE_INPUT_SYSTEM
