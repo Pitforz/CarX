@@ -4,36 +4,35 @@ using UnityEngine.SceneManagement;
 namespace CarX.Gameplay
 {
     [DisallowMultipleComponent]
+    [RequireComponent(typeof(BoxCollider), typeof(Rigidbody))]
     public sealed class DroppedMagazine : MonoBehaviour
     {
-        static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
         internal static readonly Color RestingColor = new Color32(151, 125, 89, 255);
-        static readonly Color HighlightColor = new Color32(255, 209, 113, 255);
-        Material _material;
+
+        [SerializeField] Material _restingMaterial;
+        [SerializeField] Material _highlightMaterial;
+        [SerializeField] GameObject[] _visibleRounds;
+
+        Renderer[] _renderers;
 
         internal int Rounds { get; private set; }
 
-        internal static void Spawn(Vector3 position, int rounds, Shader shader, Scene scene,
+        void Awake()
+        {
+            _renderers = GetComponentsInChildren<Renderer>(true);
+        }
+
+        internal static void Spawn(DroppedMagazine prefab, Vector3 position, int rounds, Scene scene,
             Collider[] playerColliders)
         {
-            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            cube.name = "Dropped Pistol Magazine";
-            if (cube.scene != scene)
-                SceneManager.MoveGameObjectToScene(cube, scene);
-            cube.transform.SetPositionAndRotation(position, Quaternion.identity);
-            cube.transform.localScale = Vector3.one * 0.16f;
-
-            var pickup = cube.AddComponent<DroppedMagazine>();
+            var pickup = Instantiate(prefab, position, Quaternion.Euler(24f, 0f, 18f));
+            if (pickup.gameObject.scene != scene)
+                SceneManager.MoveGameObjectToScene(pickup.gameObject, scene);
             pickup.Rounds = rounds;
-            pickup._material = new Material(shader) { name = "Dropped Magazine (Runtime)" };
-            cube.GetComponent<Renderer>().sharedMaterial = pickup._material;
-            pickup.SetHighlighted(false);
+            for (int i = 0; i < pickup._visibleRounds.Length; i++)
+                pickup._visibleRounds[i].SetActive(i < rounds);
 
-            var body = cube.AddComponent<Rigidbody>();
-            body.mass = 0.15f;
-            body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-            body.interpolation = RigidbodyInterpolation.Interpolate;
-            var collider = cube.GetComponent<Collider>();
+            var collider = pickup.GetComponent<BoxCollider>();
             foreach (var playerCollider in playerColliders)
             {
                 if (playerCollider.enabled && playerCollider.gameObject.activeInHierarchy)
@@ -43,13 +42,9 @@ namespace CarX.Gameplay
 
         internal void SetHighlighted(bool highlighted)
         {
-            _material.SetColor(BaseColor, highlighted ? HighlightColor : RestingColor);
-        }
-
-        void OnDestroy()
-        {
-            if (_material != null)
-                Destroy(_material);
+            var material = highlighted ? _highlightMaterial : _restingMaterial;
+            foreach (var renderer in _renderers)
+                renderer.sharedMaterial = material;
         }
     }
 }

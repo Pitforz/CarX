@@ -76,13 +76,21 @@ namespace CarX.EditorTools
                     // and the end wall itself must be there next to the opening
                     var ms = J.mainType.section;
                     float wy = ms.Height * 0.5f, wx = ms.WallXAt(wy) - 0.1f;
-                    if (!Inside(J.hole, new Vector2(wx, wy))) wy = ms.Height - 0.1f;
+                    // mid-height next to the side wall; if the opening reaches there, try just under the ceiling (x recomputed: chamfers)
+                    if (Inside(J.hole, new Vector2(wx, wy))) { wy = ms.Height - 0.1f; wx = ms.WallXAt(wy) - 0.1f; }
                     if (!Inside(J.hole, new Vector2(wx, wy)))
                     {
                         var side = Vector3.Cross(Vector3.up, J.tangent).normalized * wx;
                         Vector3 c0 = net.World(node.position - J.tangent * 1.5f + side + Vector3.up * wy);
                         Vector3 c1 = net.World(node.position + J.tangent * 1.5f + side + Vector3.up * wy);
-                        if (Blocked(net, c0, c1, out rh)) wallsOk++; else { wallsBad++; Debug.Log("CarX probe: no end wall at transition " + node.id); }
+                        if (Blocked(net, c0, c1, out rh)) wallsOk++;
+                        else
+                        {
+                            wallsBad++;
+                            Vector2 lo = new Vector2(1e9f, 1e9f), hi = -lo;
+                            foreach (var v in J.hole) { lo = Vector2.Min(lo, v); hi = Vector2.Max(hi, v); }
+                            Debug.Log("CarX probe: no end wall at transition " + node.id + " main " + J.mainType.name + " (" + ms.Width + "x" + ms.Height + ") test point x " + wx.ToString("0.00") + " y " + wy.ToString("0.00") + ", hole " + lo + ".." + hi + ", fits " + J.fits);
+                        }
                     }
                     continue;
                 }

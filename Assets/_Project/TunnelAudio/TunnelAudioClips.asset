@@ -1,0 +1,39 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d287af4a78833014caec41c80f15ac4d, type: 3}
+  m_Name: TunnelAudioClips
+  m_EditorClassIdentifier: CarX.TunnelAudio::CarX.TunnelAudio.TunnelAudioClips
+  rumbleDryWide: {fileID: 0}
+  rumbleWetNarrow: {fileID: 0}
+  rumbleHall: {fileID: 0}
+  rumbleDeadEnd: {fileID: 0}
+  drip: {fileID: 8300000, guid: 642d086177cf47442bb72dfdd58ae409, type: 3}
+  stone: {fileID: 8300000, guid: c54e1b2bfbdde334685fd23a145e0782, type: 3}
+  metal: {fileID: 8300000, guid: f65b6825ddaa13b4e8c8ae535005f472, type: 3}
+  rats: {fileID: 8300000, guid: 54a47a3fc72a03841aadc05dd3df8d25, type: 3}
+  trash: {fileID: 8300000, guid: 86d4a460a575aa948bd1b0276b6c83f9, type: 3}
+  distantCity: {fileID: 8300000, guid: f79a46cfcfb12b041aeddaf02ce23918, type: 3}
+  car: {fileID: 8300000, guid: 270ad11150a644846af9517a326ac58d, type: 3}
+  carHorn: {fileID: 8300000, guid: ab6cc4a361f99c443b4a18ce558dc552, type: 3}
+  dumpTruck: {fileID: 8300000, guid: 5a8c53f9822e59b4da30ab10953906a2, type: 3}
+  machineryHorn: {fileID: 0}
+  casino: {fileID: 8300000, guid: 4c63079263ee8db4593f08d4be111218, type: 3}
+  casinoAmbience: {fileID: 8300000, guid: d92633b8ea421504695809343c4920a8, type: 3}
+  cough: {fileID: 8300000, guid: f76aed04f51407d4aaa9bbc9ac370012, type: 3}
+  groan: {fileID: 8300000, guid: 259a4a732efb7d8409f9c29f3665a1ec, type: 3}
+  cry: {fileID: 8300000, guid: 177e977bd8c0d7345bbe58cf22a505b8, type: 3}
+  moan: {fileID: 0}
+  mutter: {fileID: 8300000, guid: ea62ab185669f9d4280243d6b720a6d1, type: 3}
+  sob: {fileID: 8300000, guid: 9fda3cc82d781c54d8d96d0f6a6718a6, type: 3}
+  breath: {fileID: 8300000, guid: f2429eab609ce7a4f8f203320a668db3, type: 3}
+  scream: {fileID: 8300000, guid: 508384ef28cb5824b933eb30e2ef24d7, type: 3}
+  pipeHit: {fileID: 8300000, guid: 2e86e11be94166946b9dab81093ee1a9, type: 3}

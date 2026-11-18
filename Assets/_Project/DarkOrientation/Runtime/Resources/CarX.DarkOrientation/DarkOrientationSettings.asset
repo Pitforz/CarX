@@ -1,0 +1,81 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d0a7c3e1b5f94a2c8e6d1f3a9b7c5e21, type: 3}
+  m_Name: DarkOrientationSettings
+  m_EditorClassIdentifier: 
+  autoInstall: 1
+  toggleKey: 21
+  activateTime: 0.4
+  effectTime: 0.55
+  effectAfterHands: 0.88
+  deactivateTime: 0.35
+  shoulderOffset: {x: 0.19, y: -0.24, z: -0.04}
+  reach: 1.15
+  releaseDistance: 1.35
+  maxAnchorSpeed: 3
+  minCameraDistance: 0.46
+  palmOffset: 0.008
+  palmReach: 0.62
+  gripBreakSpeed: 1.4
+  gripStick: 0.2
+  handMaxSpeed: 1.1
+  handPitchLimit: 20
+  handsNearClip: 0.02
+  cornerYawSpeed: 46
+  minAnchorSeparation: 0.28
+  regrabDelay: 0.3
+  objectHoldTime: {x: 0.9, y: 1.6}
+  objectRegrabDelay: 0.1
+  reachTime: 0.12
+  handoverAngle: 15
+  handoverMaxAngle: 60
+  handoverOffset: 0.12
+  handGap: 0.14
+  seekView: 1
+  seekRange: 0.9
+  seekSpeed: 1.2
+  seekHeightBelowEyes: 0.3
+  handCollision: 1
+  handRadius: 0.035
+  forearmRadius: 0.045
+  probeRadius: 0.04
+  touchLayers:
+    serializedVersion: 2
+    m_Bits: 4294967291
+  sleeveArmsPrefab: {fileID: 7595069804240248157, guid: f26e2c9daa0d3e640bfb895ace654899, type: 3}
+  handScale: 1
+  handStyle: 0
+  handFill: {r: 0.006, g: 0.006, b: 0.008, a: 1}
+  outlineColor: {r: 0.92, g: 0.95, b: 1, a: 1}
+  outlineWidth: 3.5
+  innerLines: 0.35
+  wallZoneCore: 0.15
+  wallZoneEnd: 0.4
+  objectZoneCore: 0.08
+  objectZoneEnd: 0.2
+  faceCutoffAngle: 110
+  zoneFadeIn: 0.2
+  zoneFadeOut: 0.4
+  depthNear: {r: 0.72, g: 0.75, b: 0.8, a: 1}
+  depthFar: {r: 0.06, g: 0.07, b: 0.08, a: 1}
+  depthEdges: 0.8
+  depthRings: 0
+  ringSpacing: 0.03
+  dim: 0.15
+  desaturate: 0.7
+  blurIterations: 4
+  renderEvent: 600
+  npcProxies: 1
+  npcProxyRange: 8
+  handShader: {fileID: 4800000, guid: d0a7c3e1b5f94a2c8e6d1f3a9b7c5e22, type: 3}
+  blurShader: {fileID: 4800000, guid: d0a7c3e1b5f94a2c8e6d1f3a9b7c5e23, type: 3}
+  compositeShader: {fileID: 4800000, guid: d0a7c3e1b5f94a2c8e6d1f3a9b7c5e24, type: 3}

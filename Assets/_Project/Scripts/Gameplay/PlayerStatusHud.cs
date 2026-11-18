@@ -7,6 +7,8 @@ namespace CarX.Gameplay
     public class PlayerStatusHud : MonoBehaviour
     {
         const float StatusPadding = 24f;
+        const float BleedingHeight = 26f;
+        const float BleedingGap = 5f;
         const float SubtitleDuration = 3f;
         const float DamageFlashAttack = 0.04f;
         const float DamageFlashFade = 0.55f;
@@ -15,18 +17,23 @@ namespace CarX.Gameplay
         PlayerHealth _health;
         RectTransform _hudRect;
         RectTransform _statusPanel;
+        RectTransform _bleedingPanel;
         Rect _lastSafeArea;
         Vector2 _lastCanvasSize;
         UnityEngine.UI.Slider _healthBar;
         UnityEngine.UI.Slider _flashlightBar;
         UnityEngine.UI.Text _healthLabel;
+        UnityEngine.UI.Text _bleedingCount;
         UnityEngine.UI.Text _flashlightLabel;
         UnityEngine.UI.Text _ammoLabel;
         UnityEngine.UI.Text _reloadLabel;
         UnityEngine.UI.Text _aimDot;
         UnityEngine.UI.Text _pickupLabel;
         UnityEngine.UI.Text _subtitleLabel;
+        UnityEngine.UI.Text _storySubtitle;
+        NPC.NpcSpeechState _subtitleSpeaker;
         UnityEngine.UI.RawImage _damageFlash;
+        UnityEngine.UI.Image _criticalDarkness;
         Texture2D _damageTexture;
         int _lastHealth;
         float _damageFlashElapsed;
@@ -56,6 +63,13 @@ namespace CarX.Gameplay
             scaler.matchWidthOrHeight = 0.5f;
 
             CreateDamageFlash();
+            var darkness = CreateRect(_hudRect, "Critical Darkness", typeof(UnityEngine.UI.Image));
+            darkness.anchorMin = Vector2.zero;
+            darkness.anchorMax = Vector2.one;
+            darkness.offsetMin = darkness.offsetMax = Vector2.zero;
+            _criticalDarkness = darkness.GetComponent<UnityEngine.UI.Image>();
+            _criticalDarkness.raycastTarget = false;
+            SetCriticalDarkness(0f);
 
             var panel = CreateRect(_hudRect, "Status", typeof(UnityEngine.UI.VerticalLayoutGroup));
             panel.anchorMin = panel.anchorMax = panel.pivot = Vector2.zero;
@@ -70,6 +84,7 @@ namespace CarX.Gameplay
             layout.childForceExpandWidth = true;
 
             var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            CreateBleedingPanel(panel, font);
             _healthLabel = CreateLabel(panel, "Health Label", font);
             _healthBar = CreateBar(panel, "Health", new Color32(225, 83, 82, 255));
             _flashlightLabel = CreateLabel(panel, "Flashlight Label", font);
@@ -122,9 +137,22 @@ namespace CarX.Gameplay
             subtitleRect.sizeDelta = new Vector2(0f, 52f);
             _subtitleLabel.gameObject.SetActive(false);
 
+            _storySubtitle = CreateLabel(_hudRect, "Story Subtitle", font);
+            _storySubtitle.fontSize = 23;
+            _storySubtitle.alignment = TextAnchor.LowerCenter;
+            var storyRect = _storySubtitle.rectTransform;
+            storyRect.anchorMin = new Vector2(0.17f, 0f);
+            storyRect.anchorMax = new Vector2(0.83f, 0f);
+            storyRect.pivot = new Vector2(0.5f, 0f);
+            storyRect.anchoredPosition = new Vector2(0f, 72f);
+            storyRect.sizeDelta = new Vector2(0f, 116f);
+            _storySubtitle.gameObject.SetActive(false);
+
             _lastHealth = _health.CurrentHealth;
             _health.HealthChanged += Refresh;
+            _health.BleedingChanged += RefreshBleeding;
             Refresh(_health.CurrentHealth);
+            RefreshBleeding(_health.Bleeding);
         }
 
         void LateUpdate()
@@ -132,7 +160,10 @@ namespace CarX.Gameplay
             UpdateStatusLayout();
             UpdateDamageFlash();
             if (_subtitleLabel != null && _subtitleLabel.gameObject.activeSelf && Time.unscaledTime >= _subtitleUntil)
+            {
                 _subtitleLabel.gameObject.SetActive(false);
+                ClearSubtitleSpeaker();
+            }
         }
 
         void UpdateStatusLayout()
@@ -153,7 +184,8 @@ namespace CarX.Gameplay
 
             _lastSafeArea = safeArea;
             _lastCanvasSize = canvasSize;
-            Vector2 paddedSize = StatusSize + Vector2.one * (2f * StatusPadding);
+            Vector2 paddedSize = StatusSize + Vector2.one * (2f * StatusPadding) +
+                Vector2.up * (BleedingHeight + BleedingGap);
             float scale = Mathf.Min(1f, Mathf.Min(safeSize.x / paddedSize.x, safeSize.y / paddedSize.y));
             _statusPanel.anchorMin = _statusPanel.anchorMax = safeArea.min;
             _statusPanel.anchoredPosition = Vector2.one * (StatusPadding * scale);
@@ -168,6 +200,7 @@ namespace CarX.Gameplay
 
         void OnDisable()
         {
+            ClearSubtitleSpeaker();
             if (_damageFlash != null)
                 _damageFlash.enabled = false;
             if (_hudRect != null)
@@ -177,7 +210,10 @@ namespace CarX.Gameplay
         void OnDestroy()
         {
             if (_health != null)
+            {
                 _health.HealthChanged -= Refresh;
+                _health.BleedingChanged -= RefreshBleeding;
+            }
             if (_hudRect != null)
                 Destroy(_hudRect.gameObject);
             if (_damageTexture != null)
@@ -209,15 +245,36 @@ namespace CarX.Gameplay
             RefreshAimDot();
         }
 
-        internal void ShowSubtitle(string text)
+        internal void ShowSubtitle(string text, NPC.NpcSpeechState speaker = null)
         {
             if (_subtitleLabel == null)
                 return;
 
+            ClearSubtitleSpeaker();
+            _subtitleSpeaker = speaker;
+            if (_subtitleSpeaker != null)
+                _subtitleSpeaker.SetTalking(true);
             _subtitleUntil = Time.unscaledTime + SubtitleDuration;
             _subtitleLabel.text = text;
             _subtitleLabel.transform.SetAsLastSibling();
             _subtitleLabel.gameObject.SetActive(true);
+        }
+
+        void ClearSubtitleSpeaker()
+        {
+            if (_subtitleSpeaker != null)
+                _subtitleSpeaker.SetTalking(false);
+            _subtitleSpeaker = null;
+        }
+
+        internal void SetStorySubtitle(string text, Color color)
+        {
+            if (_storySubtitle == null)
+                return;
+
+            _storySubtitle.text = text;
+            _storySubtitle.color = color;
+            _storySubtitle.gameObject.SetActive(!string.IsNullOrEmpty(text));
         }
 
         internal void ShowPickupHint(string text)
@@ -241,11 +298,66 @@ namespace CarX.Gameplay
             if (health < _lastHealth && isActiveAndEnabled)
                 ShowDamageFlash(_lastHealth - health);
             _lastHealth = health;
-            float charge = Flashlight.ChargeForHealth(health);
             _healthBar.SetValueWithoutNotify(health / (float)PlayerHealth.MaxHealth);
-            _flashlightBar.SetValueWithoutNotify(charge);
             _healthLabel.text = $"Здоровье: {health}/{PlayerHealth.MaxHealth}";
+            RefreshFlashlight();
+        }
+
+        internal void RefreshFlashlight()
+        {
+            float charge = _health.FlashlightCharge;
+            _flashlightBar.SetValueWithoutNotify(charge);
             _flashlightLabel.text = $"Фонарик: {Mathf.RoundToInt(charge * 100f)}%";
+        }
+
+        void CreateBleedingPanel(RectTransform status, Font font)
+        {
+            _bleedingPanel = CreateRect(status, "Bleeding", typeof(UnityEngine.UI.Image));
+            _bleedingPanel.gameObject.AddComponent<UnityEngine.UI.LayoutElement>().ignoreLayout = true;
+            _bleedingPanel.anchorMin = new Vector2(0f, 1f);
+            _bleedingPanel.anchorMax = Vector2.one;
+            _bleedingPanel.pivot = new Vector2(0.5f, 0f);
+            _bleedingPanel.sizeDelta = new Vector2(0f, BleedingHeight);
+            _bleedingPanel.anchoredPosition = new Vector2(0f, BleedingGap);
+            var background = _bleedingPanel.GetComponent<UnityEngine.UI.Image>();
+            background.color = new Color32(166, 42, 32, 245);
+            background.raycastTarget = false;
+
+            var title = CreateLabel(_bleedingPanel, "Bleeding Label", font);
+            title.text = "КРОВОТЕЧЕНИЕ";
+            title.fontSize = 14;
+            title.fontStyle = FontStyle.Bold;
+            title.alignment = TextAnchor.MiddleLeft;
+            title.rectTransform.anchorMin = Vector2.zero;
+            title.rectTransform.anchorMax = new Vector2(0.76f, 1f);
+            title.rectTransform.offsetMin = new Vector2(8f, 0f);
+            title.rectTransform.offsetMax = Vector2.zero;
+
+            _bleedingCount = CreateLabel(_bleedingPanel, "Bleeding Count", font);
+            _bleedingCount.fontStyle = FontStyle.Bold;
+            _bleedingCount.alignment = TextAnchor.MiddleRight;
+            _bleedingCount.rectTransform.anchorMin = new Vector2(0.76f, 0f);
+            _bleedingCount.rectTransform.anchorMax = Vector2.one;
+            _bleedingCount.rectTransform.offsetMin = Vector2.zero;
+            _bleedingCount.rectTransform.offsetMax = new Vector2(-8f, 0f);
+            _bleedingPanel.gameObject.SetActive(false);
+        }
+
+        void RefreshBleeding(int amount)
+        {
+            _bleedingCount.text = amount.ToString();
+            _bleedingPanel.gameObject.SetActive(amount > 0);
+        }
+
+        internal void SetCriticalDarkness(float amount)
+        {
+            if (_criticalDarkness == null)
+                return;
+
+            _criticalDarkness.color = new Color(0f, 0f, 0f, amount);
+            bool visible = amount > 0f;
+            if (_criticalDarkness.enabled != visible)
+                _criticalDarkness.enabled = visible;
         }
 
         void CreateDamageFlash()

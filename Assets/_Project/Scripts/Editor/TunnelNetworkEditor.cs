@@ -81,6 +81,7 @@ namespace CarX.EditorTools
         static float penHeight;
         static string selNode, selEdge, penLast;
         static Vector2 issueScroll;
+        static int replaceFrom, replaceTo = 1;
 
         const string SchematicKey = "CarX.TunnelSchematic";
         public static bool Schematic
@@ -779,6 +780,9 @@ namespace CarX.EditorTools
                 EditorGUILayout.LabelField("Выбранный узел", EditorStyles.boldLabel);
                 var node = net.nodes[ni];
                 bool chamber = net.IsChamber(selNode);
+                if (node.kind == GraphNodeKind.Exit)
+                    EditorGUILayout.HelpBox("Выход наружу: конец тоннеля открыт, за ним дневной свет. Свет из выхода светит вдоль тоннеля, у выхода картинка чуть темнеет (глаз привыкает). Силу задаёт Exit Brightness ниже, общие настройки в библиотеке типов.", MessageType.None);
+                else
                 EditorGUILayout.HelpBox(node.kind == GraphNodeKind.Room ? "Многоугольная комната. Углы двигайте жёлтыми точками в окне Scene, зелёная точка на середине стены добавляет угол, Shift+клик по углу убирает его. Колонны (голубые) тоже двигаются мышью." :
                                         chamber ? "В этом узле камера-развязка." :
                                         net.joins.ContainsKey(selNode) ? (net.joins[selNode].back > 0f ? "Примыкание: меньший тоннель выходит из боковой стены у конца большего." : net.joins[selNode].reducer ? "Переход: торец большего тоннеля - стенка с проёмом, меньший идёт дальше. Высоту меньшего задаёт Join Lift." : "Прямая врезка: тоннели поменьше входят в стену главного.") : "Обычный узел (поворот или конец тоннеля).", MessageType.None);
@@ -795,6 +799,10 @@ namespace CarX.EditorTools
                 {
                     if (GUILayout.Button("Убрать камеру (тоннели соединятся напрямую)")) { Undo.RecordObject(net, "Камера"); node.kind = GraphNodeKind.Auto; net.MarkDirty(); serializedObject.Update(); }
                 }
+                else if (node.kind == GraphNodeKind.Exit)
+                {
+                    if (GUILayout.Button("Убрать выход (снова тупик со стенкой)")) { Undo.RecordObject(net, "Выход"); node.kind = GraphNodeKind.Auto; net.MarkDirty(); serializedObject.Update(); }
+                }
                 else
                 {
                     GUILayout.BeginHorizontal();
@@ -808,6 +816,14 @@ namespace CarX.EditorTools
                         serializedObject.Update();
                     }
                     GUILayout.EndHorizontal();
+                    if (GUILayout.Button("Сделать выходом наружу (дневной свет)"))
+                    {
+                        Undo.RecordObject(net, "Выход");
+                        node.kind = GraphNodeKind.Exit;
+                        if (node.exitBrightness <= 0f) node.exitBrightness = 1f;
+                        net.MarkDirty();
+                        serializedObject.Update();
+                    }
                 }
                 DrawChildren(serializedObject.FindProperty("nodes").GetArrayElementAtIndex(ni), "id");
             }
@@ -823,10 +839,39 @@ namespace CarX.EditorTools
 
             if (serializedObject.ApplyModifiedProperties()) net.MarkDirty();
 
+            ReplaceTypeGUI(net);
+
             TunnelAnchorHooks.NetworkGUI(net);
 
             EditorGUILayout.Space();
             if (GUILayout.Button("Перестроить всё")) { net.ForceRebuild(); if (!Schematic) net.Build(); }
+        }
+
+        /// <summary>Every line of one type gets another type; the graph then rebuilds by the new type's rules.</summary>
+        static void ReplaceTypeGUI(TunnelNetwork net)
+        {
+            var lib = net.library;
+            if (lib == null || lib.types.Count < 2) return;
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Заменить тип во всём графе", EditorStyles.boldLabel);
+            var labels = new string[lib.types.Count];
+            for (int i = 0; i < labels.Length; i++) labels[i] = lib.types[i] != null ? lib.types[i].Label : "—";
+            replaceFrom = Mathf.Clamp(EditorGUILayout.Popup("Был тип", replaceFrom, labels), 0, labels.Length - 1);
+            replaceTo = Mathf.Clamp(EditorGUILayout.Popup("Станет", replaceTo, labels), 0, labels.Length - 1);
+            var from = lib.types[replaceFrom];
+            var to = lib.types[replaceTo];
+            int count = 0;
+            foreach (var e in net.edges) if (net.TypeOf(e) == from) count++;
+            using (new EditorGUI.DisabledScope(count == 0 || from == to || to == null))
+            {
+                if (GUILayout.Button("Заменить (" + count + " линий)"))
+                {
+                    Undo.RecordObject(net, "Заменить тип тоннеля");
+                    foreach (var e in net.edges) if (net.TypeOf(e) == from) e.type = to;
+                    EditorUtility.SetDirty(net);
+                    net.MarkDirty();
+                }
+            }
         }
 
         static void DrawChildren(SerializedProperty prop, params string[] skip)

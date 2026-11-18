@@ -11,6 +11,8 @@ namespace CarX.Level
         public Material concrete;
         [Tooltip("Нижняя полоса стен со следом воды и грязи")]
         public Material concreteDirty;
+        [Tooltip("Варианты бетона стен (чуть светлее/темнее): каждая плита тоннеля случайно берёт один из них, так стыки читаются кольцами. Пусто = все плиты одинаковые")]
+        public Material[] concreteVariants = new Material[0];
         public Material floor;
         public Material soil;
         public Material sand;
@@ -37,6 +39,25 @@ namespace CarX.Level
         public Material[] TunnelSet()
         {
             return new[] { concrete, floor, soil, sand, concreteDirty != null ? concreteDirty : concrete };
+        }
+
+        public int VariantCount
+        {
+            get
+            {
+                if (concreteVariants == null) return 0;
+                int n = 0;
+                foreach (var m in concreteVariants) if (m != null) n++;
+                return n;
+            }
+        }
+
+        /// <summary>TunnelSet plus the wall variants as sub-meshes 5, 6, …</summary>
+        public Material[] TunnelSetWithVariants()
+        {
+            var list = new System.Collections.Generic.List<Material>(TunnelSet());
+            if (concreteVariants != null) foreach (var m in concreteVariants) if (m != null) list.Add(m);
+            return list.ToArray();
         }
     }
 }

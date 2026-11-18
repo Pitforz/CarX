@@ -18,3 +18,4 @@
 | PlayerCapsule, контроллер от первого лица, Assets/_Project/Scripts/Gameplay и Assets/_Project/Shaders/MuzzleFlash.shader — управление игроком, фонарик, оружие, инвентарь и меню | код/настройки | Codex | Дмитрий | 2026-11-14 |
 | Assets/_Project/Textures/UI/InventoryWheel — колесо инвентаря и иконки | арт | Codex | Дмитрий | 2026-11-14 |
 | Assets/_Project/Audio/Flashlight — обрезка предоставленной записи щелчка | обработка звука | Codex | Дмитрий | 2026-11-14 |
+| Дневной свет тоннелей: общие настройки для выходов, решёток и люков, адаптация глаза, теневая оболочка против просветов, текстура стен в метрах, ровные стыки у пола, перегенерированный бетон без трещин и точек: Scripts/Level (TunnelEyeAdaptation, TunnelTypeLibrary, TunnelShaftBuilder, ShaftSpec, TunnelExit, TunnelNetwork, TunnelPath), Scripts/Editor (TunnelAssets, TunnelAssets.Culvert), Textures/Tunnel | код/арт | Claude | BROFedka | 2026-11-15 |

@@ -18,4 +18,29 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 84ec7e18f056cd447876ffbf7ef1516d, type: 2}
   - {fileID: 11400000, guid: 6432ec81533e9554a95983d87da36a7d, type: 2}
   - {fileID: 11400000, guid: cad8b4cdc80df8b448cace19c7208e74, type: 2}
-  materials: {fileID: 11400000, guid: 602004a58c5e57341a3a1f614714beb7, type: 2}
+  - {fileID: 11400000, guid: 0a7be08d18e6f8942a01e14948ba3296, type: 2}
+  materials: {fileID: 11400000, guid: 48c10f4bd3838ab4a8fb041b659f7d9e, type: 2}
+  daylightColor: {r: 1, g: 0.94, b: 0.85, a: 1}
+  skyBrightness: 19
+  shaftFloorLight: 8
+  grateOpenness: 0.45
+  manholeOpenness: 0.06
+  shaftReach: 10
+  shaftBeam: 0.25
+  shaftDust: 0
+  eyeAdaptation: 1
+  eyeAdaptTime: 1
+  eyeAdaptStrength: 1
+  exitLightIntensity: 25000
+  exitLightRange: 40
+  exitLightBack: 8
+  exitLightColor: {r: 0.9, g: 0.95, b: 1, a: 1}
+  exitSkyColor: {r: 18, g: 19, b: 21, a: 1}
+  exitExposure: {fileID: 11400000, guid: 65c269f234b662c47977780d2b425437, type: 2}
+  exitExposureDepth: 30
+  exitShadows: 1
+  applyAtmosphere: 1
+  ambient: {r: 0.008, g: 0.009, b: 0.011, a: 1}
+  fogColor: {r: 0.006, g: 0.0068, b: 0.008, a: 1}
+  fogDensity: 0.012
+  puddles: 0

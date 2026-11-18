@@ -13,7 +13,7 @@ namespace CarX.EditorTools
 {
     /// <summary>Procedural tileable textures, materials, post effects and darkness for the tunnels.</summary>
     [InitializeOnLoad]
-    public static class TunnelAssets
+    public static partial class TunnelAssets
     {
         public const string TexDir = "Assets/_Project/Textures/Tunnel";
         public const string MatDir = "Assets/_Project/Materials/Tunnel";
@@ -23,7 +23,13 @@ namespace CarX.EditorTools
 
         static TunnelAssets()
         {
-            TunnelMaterials.DefaultProvider = () => AssetDatabase.LoadAssetAtPath<TunnelMaterials>(SetPath);
+            // the library's set wins (that is where the current look lives), the old set is the fallback
+            TunnelMaterials.DefaultProvider = () =>
+            {
+                var lib = AssetDatabase.LoadAssetAtPath<TunnelTypeLibrary>(TunnelGraphAssets.LibraryPath);
+                if (lib != null && lib.materials != null) return lib.materials;
+                return AssetDatabase.LoadAssetAtPath<TunnelMaterials>(SetPath);
+            };
         }
 
         [MenuItem("CarX/Tunnels/Regenerate Textures and Materials", priority = 40)]
@@ -240,26 +246,29 @@ namespace CarX.EditorTools
             }
             var tm = Add<Tonemapping>(profile);
             tm.mode.Override(TonemappingMode.ACES);
+            // reference photos: daylight at the far end burns out to white with a wide soft halo, the rest is dim, cool and grey
             var bloom = Add<Bloom>(profile);
-            bloom.threshold.Override(0.95f);
-            bloom.intensity.Override(1.2f);
-            bloom.scatter.Override(0.72f);
+            bloom.threshold.Override(1.0f);
+            bloom.intensity.Override(0.9f);
+            bloom.scatter.Override(0.8f);
+            // the daylight is HDR ~20: unclamped, a big exit right in front of the camera blooms the whole frame to flat grey
+            bloom.clamp.Override(16f);
             bloom.highQualityFiltering.Override(true);
             var vig = Add<Vignette>(profile);
-            vig.intensity.Override(0.38f);
+            vig.intensity.Override(0.48f);
             vig.smoothness.Override(0.45f);
             var grain = Add<FilmGrain>(profile);
             grain.type.Override(FilmGrainLookup.Medium3);
-            grain.intensity.Override(0.32f);
+            grain.intensity.Override(0.06f);
             grain.response.Override(0.75f);
             var ca = Add<ColorAdjustments>(profile);
             ca.postExposure.Override(0.35f);
-            ca.contrast.Override(16f);
-            ca.saturation.Override(-20f);
+            ca.contrast.Override(18f);
+            ca.saturation.Override(-28f);
             var wb = Add<WhiteBalance>(profile);
-            wb.temperature.Override(-6f);
+            wb.temperature.Override(-10f);
             var chroma = Add<ChromaticAberration>(profile);
-            chroma.intensity.Override(0.06f);
+            chroma.intensity.Override(0.04f);
             EditorUtility.SetDirty(profile);
             AssetDatabase.SaveAssets();
             return profile;
@@ -281,16 +290,21 @@ namespace CarX.EditorTools
         {
             RenderSettings.skybox = null;
             RenderSettings.sun = null;
-            RenderSettings.ambientMode = AmbientMode.Flat;
-            var amb = new Color(0.010f, 0.011f, 0.013f);
-            RenderSettings.ambientLight = amb;
-            var sh = new SphericalHarmonicsL2();
-            sh.AddAmbientLight(amb);
-            RenderSettings.ambientProbe = sh;
-            RenderSettings.fog = true;
-            RenderSettings.fogMode = FogMode.ExponentialSquared;
-            RenderSettings.fogDensity = 0.045f;
-            RenderSettings.fogColor = new Color(0.005f, 0.0055f, 0.006f);
+            var lib = AssetDatabase.LoadAssetAtPath<TunnelTypeLibrary>(TunnelGraphAssets.LibraryPath);
+            if (lib != null && lib.applyAtmosphere) lib.ApplyAtmosphere();   // the library holds the current look
+            else
+            {
+                RenderSettings.ambientMode = AmbientMode.Flat;
+                var amb = new Color(0.010f, 0.011f, 0.013f);
+                RenderSettings.ambientLight = amb;
+                var sh = new SphericalHarmonicsL2();
+                sh.AddAmbientLight(amb);
+                RenderSettings.ambientProbe = sh;
+                RenderSettings.fog = true;
+                RenderSettings.fogMode = FogMode.ExponentialSquared;
+                RenderSettings.fogDensity = 0.045f;
+                RenderSettings.fogColor = new Color(0.005f, 0.0055f, 0.006f);
+            }
             RenderSettings.defaultReflectionMode = DefaultReflectionMode.Custom;
             RenderSettings.reflectionIntensity = 0f;
 

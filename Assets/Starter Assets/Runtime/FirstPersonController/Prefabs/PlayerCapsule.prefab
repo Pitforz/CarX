@@ -159,6 +159,8 @@ GameObject:
   - component: {fileID: 8616685848737228386}
   - component: {fileID: 8616685848737228387}
   - component: {fileID: 8616685848737228388}
+  - component: {fileID: 8616685848737228389}
+  - component: {fileID: 8616685848737228390}
   m_Layer: 8
   m_Name: PlayerCapsule
   m_TagString: Player
@@ -178,6 +180,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bde4ac487d4445b1b50ff81a31154099, type: 3}
   m_Name:
   m_EditorClassIdentifier:
+  _hurtClips:
+  - {fileID: 8300000, guid: 2cdcc58e6bfe498ba21655f6a311a67f, type: 3}
+  - {fileID: 8300000, guid: d08d219152af4d868554999c6493302b, type: 3}
+  - {fileID: 8300000, guid: 4db3a8487a594b0488da095465e3f5b8, type: 3}
 --- !u!114 &8616685848737228384
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -190,6 +196,33 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4603d9d3b0924b5e80d0e73fc1f79066, type: 3}
   m_Name:
   m_EditorClassIdentifier:
+--- !u!114 &8616685848737228389
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8616685848737228372}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 293e945b6d8b431bb026c78f9c3346c9, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::CarX.Gameplay.PlayerCriticalCondition
+  _heartbeatClip: {fileID: 8300000, guid: 3f8709375a2a4fc4821c979d3efcb00a, type: 3}
+  _breathingClip: {fileID: 8300000, guid: 1890bdcca0c145f3a7e8762908f25361, type: 3}
+--- !u!114 &8616685848737228390
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8616685848737228372}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7289192b88024914b7fe429fd2dd262b, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::CarX.Gameplay.PlayerDeathFall
+  _impactClip: {fileID: 8300000, guid: 008e3428d1204112a73974415f2be71e, type: 3}
 --- !u!114 &8616685848737228385
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -204,6 +237,7 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   _placeholderShader: {fileID: 4800000, guid: 650dd9526735d5b46b79224bc6e94025, type: 3}
   _weaponShader: {fileID: 4800000, guid: 933532a4fcc9baf4fa0491de14d08ed7, type: 3}
+  _berettaPrefab: {fileID: 7976680450834729709, guid: b4a9d2663df31471995ce5807cd29a31, type: 3}
   _aimTransitionTime: 0.24
   _shotClip: {fileID: 8300000, guid: b8c23b7d26564e43a17e0f3bc38f2dd3, type: 3}
   _reloadClip: {fileID: 8300000, guid: fc09dd5457484d0b9baa8df4662cf5ab, type: 3}
@@ -246,6 +280,7 @@ MonoBehaviour:
   _selectedSector: {fileID: 21300000, guid: 6ae6efd3e36b43b8b4c31d75694e141e, type: 3}
   _pistolIcon: {fileID: 21300000, guid: f27d81855f3f42d79e379919f63d5a53, type: 3}
   _magazineIcon: {fileID: 21300000, guid: c2f45fe5a40b437e9a48dbf15f244487, type: 3}
+  _droppedMagazinePrefab: {fileID: 5944682720475498611, guid: 3ab0785ee108a445a8331f007538944c, type: 3}
   _pickupShader: {fileID: 4800000, guid: 650dd9526735d5b46b79224bc6e94025, type: 3}
 --- !u!114 &8616685848737228388
 MonoBehaviour:
@@ -315,11 +350,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   MoveSpeed: 4
-  SprintSpeed: 6
+  _backwardSpeedMultiplier: 0.65
   RotationSpeed: 1
   _lookSmoothingTime: 0.045
   SpeedChangeRate: 10
   Gravity: -30
+  _jumpHeight: 0.8
+  _crouchJumpHeight: 0.35
   _crouchHeight: 1.2
   _crouchSpeed: 2
   _crouchCameraDrop: 0.35
@@ -337,8 +374,8 @@ MonoBehaviour:
     m_Bits: 1
   CinemachineCameraTarget: {fileID: 4135013735270702863}
   _verticalCameraSmoothTime: 0.08
-  TopClamp: 89
-  BottomClamp: -89
+  _lookUpLimit: -89
+  _lookDownLimit: 89
 --- !u!114 &1978471637655604388
 MonoBehaviour:
   m_ObjectHideFlags: 0
