@@ -41,13 +41,19 @@ namespace CarX.DarkOrientation.Integration
             // TunnelTouchShell builds its bands and collision shells on scene load; the hands feel the bands instead of the
             // joints of the visible mesh, and ignore the collision shells.
             mode.KindQuery = KindOf;
-            mode.HandOccupiedQuery = side => side == HandSide.Right && pistol != null && pistol.IsEquipped;
+            // Both hands feel the way: the pistol and its arms are put away while the mode is on.
+            mode.HandOccupiedQuery = null;
+            if (pistol != null)
+            {
+                pistol.HideQuery = () => mode != null && mode.HidesWeapon;
+                pistol.BlockQuery = () => mode != null && mode.BlocksWeapon;
+            }
 
             // The pistol view model is built at runtime under the camera; keep it sharp and outlined like the hands.
             var weapon = new List<Renderer>();
             mode.ExtraSilhouettes = into =>
             {
-                if (pistol == null || !pistol.IsEquipped || pistol.ViewCamera == null) return;
+                if (pistol == null || !pistol.IsEquipped || pistol.ViewCamera == null || pistol.IsHiddenExternally) return;
                 if (weapon.Count == 0 || weapon[0] == null)
                 {
                     weapon.Clear();
@@ -67,7 +73,7 @@ namespace CarX.DarkOrientation.Integration
         static bool AnyOn(List<Flashlight> flashlights)
         {
             foreach (var flashlight in flashlights)
-                if (flashlight != null && flashlight.IsOn && flashlight.isActiveAndEnabled) return true;
+                if (flashlight != null && flashlight.IsSwitchedOn && flashlight.isActiveAndEnabled) return true;
             return false;
         }
 

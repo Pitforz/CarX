@@ -16,7 +16,8 @@ MonoBehaviour:
   toggleKey: 21
   activateTime: 0.4
   effectTime: 0.55
-  effectAfterHands: 0.88
+  handsAfterEffect: 0.95
+  weaponHideBlend: 0.5
   deactivateTime: 0.35
   shoulderOffset: {x: 0.19, y: -0.24, z: -0.04}
   reach: 1.15

@@ -60,6 +60,10 @@ namespace CarX.DarkOrientation
         public Transform Body => _body;
         public Camera ViewCamera => _viewCamera;
         public DarkOrientationSettings Settings => _settings;
+        /// <summary>The weapon and its arms are put away while the dark picture is mostly on.</summary>
+        public bool HidesWeapon => _settings != null && (Blend >= _settings.weaponHideBlend || _left?.Visible == true || _right?.Visible == true);
+        /// <summary>The weapon cannot be used from the moment the mode is asked for until it is fully gone again.</summary>
+        public bool BlocksWeapon => IsActive || Blend > 0f || _left?.Visible == true || _right?.Visible == true;
 
         internal readonly Vector4[] ZoneCenters = new Vector4[ZoneCount];
         internal readonly Vector4[] ZoneNormals = new Vector4[ZoneCount];
@@ -283,23 +287,15 @@ namespace CarX.DarkOrientation
                 if (_viewCamera == null) return;
             }
             float dt = Time.deltaTime;
-            bool wantLeft = IsActive && !IsHandOccupied(HandSide.Left);
-            bool wantRight = IsActive && !IsHandOccupied(HandSide.Right);
-            if (_sleeve == null)
-            {
-                Blend = Mathf.MoveTowards(Blend, IsActive ? 1f : 0f,
-                    dt / (IsActive ? _settings.activateTime : _settings.deactivateTime));
-            }
-            else
-            {
-                // Hands come up in their own colour first. The dark picture and the outline follow.
-                float raised = RaisedHands();
-                bool effect = IsActive && raised >= _settings.effectAfterHands;
-                Blend = Mathf.MoveTowards(Blend, effect ? 1f : 0f,
-                    dt / (effect ? _settings.effectTime : _settings.deactivateTime));
-                wantLeft = !IsHandOccupied(HandSide.Left) && (IsActive || Blend > 0.02f);
-                wantRight = !IsHandOccupied(HandSide.Right) && (IsActive || Blend > 0.02f);
-            }
+            // The dark picture comes first and the hands rise only once it is full, so they are never seen in their
+            // own colour, only as outlines. Leaving, the hands go down first and the picture clears after them.
+            bool handsUp = _left.Visible || _right.Visible;
+            bool effect = IsActive || handsUp;
+            Blend = Mathf.MoveTowards(Blend, effect ? 1f : 0f,
+                dt / (effect ? _settings.effectTime : _settings.deactivateTime));
+            bool handsWanted = IsActive && Blend >= _settings.handsAfterEffect;
+            bool wantLeft = handsWanted && !IsHandOccupied(HandSide.Left);
+            bool wantRight = handsWanted && !IsHandOccupied(HandSide.Right);
 
             if (!IsActive && Blend <= 0f && !_left.Visible && !_right.Visible)
             {

@@ -82,6 +82,11 @@ namespace CarX.Gameplay
 
         internal Camera ViewCamera => _camera;
         internal bool IsEquipped => _equipped;
+        /// <summary>Set by another system (dark orientation): true puts the pistol and its arms away, it stays equipped.</summary>
+        internal System.Func<bool> HideQuery;
+        /// <summary>Set by another system: true means no aiming, firing or reloading.</summary>
+        internal System.Func<bool> BlockQuery;
+        internal bool IsHiddenExternally { get; private set; }
         internal Vector3 GripLightPosition => _beretta != null ? _beretta.GripLightPosition : _view.position;
         internal event System.Action<Vector3> ShotFired;
         int ReserveRounds => _inventory != null ? _inventory.ReserveRounds : _reserve;
@@ -142,6 +147,9 @@ namespace CarX.Gameplay
             UpdateReload();
 
             if (_inventory != null && _inventory.BlocksWeaponInput)
+                equipPressed = reloadPressed = firePressed = aimHeld = false;
+            IsHiddenExternally = HideQuery != null && HideQuery();
+            if (BlockQuery != null && BlockQuery())
                 equipPressed = reloadPressed = firePressed = aimHeld = false;
 
             if (equipPressed)
@@ -479,6 +487,8 @@ namespace CarX.Gameplay
             bool showView = _beretta != null
                 ? _beretta.IsHolstering || (_equipped && !loweredForFlashlight)
                 : _equipped && flashlightDip < 1f;
+            if (IsHiddenExternally)
+                showView = false;
             if (_view.gameObject.activeSelf != showView)
                 _view.gameObject.SetActive(showView);
             if (_beretta != null && showView)

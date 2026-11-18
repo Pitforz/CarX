@@ -308,7 +308,7 @@ namespace CarX.Gameplay
             _weaponSpill.enabled = _weaponSpill.intensity > 0f;
         }
 
-        public bool IsOn => _isOn;
+        public bool IsSwitchedOn => _isOn;
 
         /// <summary>Switches the light off with the usual click (used when the dark-orientation mode is asked for).</summary>
         public void SwitchOff()
