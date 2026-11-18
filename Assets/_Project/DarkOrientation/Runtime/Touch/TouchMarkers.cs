@@ -15,6 +15,14 @@ namespace CarX.DarkOrientation
         public bool generated;
     }
 
+    /// <summary>
+    /// Colliders on this object and its children are level walls: wide highlight, the hand slides along them,
+    /// holds the player and turns the view at corners. Tunnel-graph geometry is a wall without this marker.
+    /// </summary>
+    [DisallowMultipleComponent]
+    [AddComponentMenu("CarX/Dark Orientation/Touch Wall")]
+    public sealed class DarkTouchWall : MonoBehaviour { }
+
     /// <summary>The hands never touch colliders on this object or its children.</summary>
     [DisallowMultipleComponent]
     [AddComponentMenu("CarX/Dark Orientation/Touch Ignore")]

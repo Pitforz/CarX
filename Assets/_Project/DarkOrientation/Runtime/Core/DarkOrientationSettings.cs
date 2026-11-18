@@ -29,14 +29,10 @@ namespace CarX.DarkOrientation
         [Header("Плечи и досягаемость")]
         [Tooltip("Правое плечо относительно камеры (вправо, вверх, вперёд), м. Левое зеркально")]
         public Vector3 shoulderOffset = new(0.19f, -0.24f, -0.04f);
-        [Tooltip("Какую долю наклона взгляда вверх-вниз повторяют руки")]
-        [Range(0f, 1f)] public float pitchFollow = 0.5f;
         [Tooltip("Дальше этого от плеча рука не нащупывает новую опору, м")]
         [Min(0.2f)] public float reach = 1.15f;
         [Tooltip("Уже взятая стена держится до этого расстояния, даже если перед ней препятствие, м")]
         [Min(0.2f)] public float releaseDistance = 1.35f;
-        [Tooltip("Рука отпускает точку, когда она ушла за этот угол от направления тела, градусы")]
-        [Range(30f, 170f)] public float releaseAngle = 140f;
         [Tooltip("Рука срывается, если точка движется относительно игрока быстрее, м/с")]
         [Min(0.5f)] public float maxAnchorSpeed = 3f;
         [Tooltip("Кисть не подходит к камере ближе, м (ближняя плоскость камеры 0.2)")]
@@ -53,35 +49,50 @@ namespace CarX.DarkOrientation
         [Min(0.2f)] public float handMaxSpeed = 1.1f;
         [Tooltip("Дальше этого наклона взгляда вверх или вниз свободные руки не поднимаются и не опускаются, градусы")]
         [Range(5f, 60f)] public float handPitchLimit = 20f;
+        [Tooltip("Ближняя плоскость камеры, пока руки видны, м: при взгляде вверх и вниз камера не срезает руки. 0 — не трогать камеру")]
+        [Range(0f, 0.2f)] public float handsNearClip = 0.02f;
         [Tooltip("Как быстро камера доворачивается вдоль угла, градусы в секунду")]
         [Min(0f)] public float cornerYawSpeed = 46f;
-        [Tooltip("Куда рука стремится скользить относительно камеры (вбок наружу, вверх, вперёд), м")]
-        public Vector3 slideHome = new(0.14f, 0.02f, 0.5f);
-        [Tooltip("Сдвиг меньше этого рука не повторяет: мелкие движения камеры её не двигают, м")]
-        [Min(0f)] public float slideDeadzone = 0.04f;
-        [Tooltip("За какое время точка контакта догоняет руку, с")]
-        [Min(0.01f)] public float slideSmoothTime = 0.16f;
-        [Tooltip("Доля кадра от края, внутри которой рука обязана оставаться")]
-        [Range(0.02f, 0.35f)] public float viewMargin = 0.1f;
         [Tooltip("Две руки не держатся ближе друг к другу, м")]
-        [Min(0f)] public float minAnchorSeparation = 0.15f;
-        [Tooltip("Пауза после отпускания до нового касания, с")]
+        [Min(0f)] public float minAnchorSeparation = 0.28f;
+        [Tooltip("Пауза после отпускания стены до нового касания, с")]
         [Min(0f)] public float regrabDelay = 0.3f;
+        [Tooltip("Сколько рука лежит на предмете (не стене), потом перехватывается на ближайшее удобное место, с (от и до)")]
+        public Vector2 objectHoldTime = new(0.9f, 1.6f);
+        [Tooltip("Пауза перед перехватом предмета, с")]
+        [Min(0f)] public float objectRegrabDelay = 0.1f;
         [Tooltip("За сколько рука доходит до найденной точки, с")]
         [Min(0.01f)] public float reachTime = 0.12f;
 
+        [Header("Две руки")]
+        [Tooltip("Точка, которую держит рука, ушла на чужую половину взгляда на этот угол: её перехватывает другая рука, градусы")]
+        [Range(0f, 60f)] public float handoverAngle = 15f;
+        [Tooltip("Другая рука не может перехватить (держит стену или пистолет): рука отпускает после этого угла, градусы")]
+        [Range(10f, 120f)] public float handoverMaxAngle = 60f;
+        [Tooltip("Перехватившая рука ложится на стену на столько в свою сторону, м")]
+        [Min(0f)] public float handoverOffset = 0.12f;
+        [Tooltip("Левая ладонь всегда левее правой хотя бы на столько, м")]
+        [Min(0f)] public float handGap = 0.14f;
+
+        [Header("Рука на стене тянется к взгляду")]
+        [Tooltip("Рука на стене ищет точку ближе к центру взгляда: лицом к стене прижимается, вдоль стены вытягивается вперёд, при повороте от стены распрямляется к взгляду")]
+        public bool seekView = true;
+        [Tooltip("Как далеко вдоль стены рука ищет точку ближе к взгляду, м")]
+        [Min(0.1f)] public float seekRange = 0.9f;
+        [Tooltip("Как быстро точка касания скользит к взгляду, м/с")]
+        [Min(0.1f)] public float seekSpeed = 1.2f;
+        [Tooltip("Удобная высота ладони ниже глаз, м")]
+        [Min(0f)] public float seekHeightBelowEyes = 0.3f;
+
+        [Header("Мягкая физика рук")]
+        [Tooltip("Кисть и предплечье выталкиваются из стен и предметов")]
+        public bool handCollision = true;
+        [Tooltip("Толщина кисти с пальцами (радиус капсулы), м")]
+        [Min(0.005f)] public float handRadius = 0.035f;
+        [Tooltip("Толщина предплечья (радиус капсулы), м")]
+        [Min(0.005f)] public float forearmRadius = 0.045f;
+
         [Header("Поиск")]
-        [Tooltip("Насколько впереди камеры рука ищет опору, м")]
-        public Vector2 searchDistance = new(0.42f, 0.58f);
-        [Tooltip("Смещение руки вбок от центра взгляда наружу, м")]
-        public Vector2 searchSideRange = new(0.04f, 0.16f);
-        [Tooltip("Смещение руки вверх от центра взгляда, м. Отрицательное — ниже центра")]
-        public Vector2 searchHeightRange = new(-0.02f, 0.08f);
-        [Tooltip("Как часто рука выбирает новую точку поиска, с")]
-        public Vector2 retargetInterval = new(0.5f, 1.3f);
-        [Min(0.01f)] public float searchSmoothTime = 0.28f;
-        [Tooltip("Мелкое дрожание руки при поиске, м")]
-        [Min(0f)] public float searchJitter = 0.025f;
         [Tooltip("Радиус сферы, которой рука нащупывает препятствия, м")]
         [Min(0.005f)] public float probeRadius = 0.04f;
         [Tooltip("Слои, которых можно касаться")]
@@ -101,10 +112,16 @@ namespace CarX.DarkOrientation
         [Range(0f, 1f)] public float innerLines = 0.35f;
 
         [Header("Зона касания")]
-        [Tooltip("Радиус сферы вокруг точки касания, м")]
-        [Range(0.05f, 6f)] public float zoneRadius = 3.2f;
-        [Tooltip("Доля радиуса, на которой зона плавно гаснет к краю")]
-        [Range(0.05f, 0.95f)] public float zoneSoftness = 0.78f;
+        [Tooltip("Стена: до этого расстояния от точки касания подсветка полной яркости, м")]
+        [Min(0.01f)] public float wallZoneCore = 0.15f;
+        [Tooltip("Стена: здесь подсветка гаснет полностью, м")]
+        [Min(0.02f)] public float wallZoneEnd = 0.4f;
+        [Tooltip("Предмет или человек: до этого расстояния подсветка полной яркости, м")]
+        [Min(0.01f)] public float objectZoneCore = 0.08f;
+        [Tooltip("Предмет или человек: здесь подсветка гаснет полностью, м")]
+        [Min(0.02f)] public float objectZoneEnd = 0.2f;
+        [Tooltip("Грани, повёрнутые от поверхности касания больше чем на этот угол, не подсвечиваются, градусы")]
+        [Range(60f, 180f)] public float faceCutoffAngle = 110f;
         [Min(0.01f)] public float zoneFadeIn = 0.2f;
         [Min(0.01f)] public float zoneFadeOut = 0.4f;
         [Tooltip("Цвет ближних точек карты глубины")]

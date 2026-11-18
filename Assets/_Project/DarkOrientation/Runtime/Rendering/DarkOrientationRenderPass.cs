@@ -31,6 +31,13 @@ namespace CarX.DarkOrientation
             public static readonly int Zones = Shader.PropertyToID("_DO_Zones");
             public static readonly int ZoneWeights = Shader.PropertyToID("_DO_ZoneWeights");
             public static readonly int ZoneParams = Shader.PropertyToID("_DO_ZoneParams");
+            public static readonly int RingParams = Shader.PropertyToID("_DO_RingParams");
+            // Normals go as separate vectors, not an array: a second array on this material did not arrive.
+            public static readonly int[] ZoneNormals =
+            {
+                Shader.PropertyToID("_DO_ZoneN0"), Shader.PropertyToID("_DO_ZoneN1"),
+                Shader.PropertyToID("_DO_ZoneN2"), Shader.PropertyToID("_DO_ZoneN3"),
+            };
             public static readonly int DepthNear = Shader.PropertyToID("_DO_DepthNear");
             public static readonly int DepthFar = Shader.PropertyToID("_DO_DepthFar");
             public static readonly int Look = Shader.PropertyToID("_DO_Look");
@@ -229,7 +236,12 @@ namespace CarX.DarkOrientation
             c.SetVector(Ids.RayTR, cam.ViewportToWorldPoint(new Vector3(1f, 1f, 1f)) - camPos);
             c.SetVectorArray(Ids.Zones, owner.ZoneCenters);
             c.SetVector(Ids.ZoneWeights, owner.ZoneWeights);
-            c.SetVector(Ids.ZoneParams, new Vector4(s.zoneRadius, s.zoneSoftness, s.ringSpacing, s.depthRings));
+            for (int i = 0; i < Ids.ZoneNormals.Length && i < owner.ZoneNormals.Length; i++)
+                c.SetVector(Ids.ZoneNormals[i], owner.ZoneNormals[i]);
+            float wallEnd = Mathf.Max(s.wallZoneEnd, s.wallZoneCore + 0.01f);
+            float objectEnd = Mathf.Max(s.objectZoneEnd, s.objectZoneCore + 0.01f);
+            c.SetVector(Ids.ZoneParams, new Vector4(s.wallZoneCore, wallEnd, s.objectZoneCore, objectEnd));
+            c.SetVector(Ids.RingParams, new Vector4(s.ringSpacing, s.depthRings, Mathf.Cos(s.faceCutoffAngle * Mathf.Deg2Rad), 0f));
             c.SetColor(Ids.DepthNear, s.depthNear);
             c.SetColor(Ids.DepthFar, s.depthFar);
             c.SetVector(Ids.Look, new Vector4(s.dim, s.desaturate, s.depthEdges, owner.Blend));

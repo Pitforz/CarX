@@ -239,6 +239,19 @@ namespace CarX.Gameplay
             _spill.intensity = _spillPower * fade;
         }
 
+        public bool IsOn => _isOn;
+
+        /// <summary>Switches the light off with the usual click (used when the dark-orientation mode is asked for).</summary>
+        public void SwitchOff()
+        {
+            if (!_isOn)
+                return;
+            _nextToggleAt = Time.time + ToggleInterval;
+            if (_switchAudio != null)
+                _switchAudio.PlayOneShot(_switchClip, _switchVolume);
+            TurnOff();
+        }
+
         void TurnOff()
         {
             _isOn = false;

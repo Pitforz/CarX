@@ -34,8 +34,16 @@ namespace CarX.DarkOrientation
 
         /// <summary>True while the toggle key must be ignored (menus, inventory).</summary>
         public Func<bool> InputBlockedQuery;
-        /// <summary>True when the mode must not run (e.g. the flashlight is on): blocks switching on and switches it off.</summary>
+        /// <summary>True when the mode must not run (e.g. the flashlight is on): switches it off.</summary>
         public Func<bool> ForceOffQuery;
+        /// <summary>Called when the player asks for the mode while <see cref="ForceOffQuery"/> holds (e.g. turns the flashlight off).</summary>
+        public Action ClearForceOff;
+        /// <summary>Project rule: which colliders are level walls, which are objects and which the hands ignore.</summary>
+        public Func<Collider, TouchKind> KindQuery
+        {
+            get => _classifier.KindQuery;
+            set { _classifier.KindQuery = value; _classifier.Clear(); }
+        }
         /// <summary>True when a hand is busy (e.g. holds a weapon): that hand stays hidden and does not search.</summary>
         public Func<HandSide, bool> HandOccupiedQuery;
         /// <summary>Adds renderers that stay sharp and outlined like the hands (e.g. the weapon in the busy hand).</summary>
@@ -67,11 +75,12 @@ namespace CarX.DarkOrientation
             public Vector3 normal;
             public float weight;
             public int owner;   // -1 = fading out, 0 = left hand, 1 = right hand
-            public bool person;
+            public bool small;   // an object or a person: tight highlight
         }
 
         readonly Zone[] _zones = new Zone[ZoneCount];
         readonly HumanoidTouchProxyBuilder _proxies = new();
+        readonly TouchClassifier _classifier = new();
         HandController _left;
         HandController _right;
         float _leftAssist;
@@ -82,6 +91,8 @@ namespace CarX.DarkOrientation
         bool _bound;
         bool _createdRaised;
         bool _subscribed;
+        CharacterController _bodyController;
+        Transform _bodyControllerOf;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics() => Current = null;
@@ -112,16 +123,20 @@ namespace CarX.DarkOrientation
             if (_subscribed) RenderPipelineManager.beginCameraRendering -= OnBeginCameraRendering;
             _subscribed = false;
             if (IsActive) SetActive(false);
+            RestoreNearClip(_viewCamera);
             Blend = 0f;
             _left?.ForceHide();
             _right?.ForceHide();
             for (int i = 0; i < ZoneCount; i++) _zones[i] = new Zone { owner = -1 };
             ZoneWeights = Vector4.zero;
             _proxies.Clear();
+            _classifier.Clear();
         }
 
         void OnDestroy()
         {
+            _left?.Dispose();
+            _right?.Dispose();
             if (_left != null && _left.Rig != null && _left.Rig != _leftRig) ProceduralHandBuilder.DestroyMeshes(_left.Rig);
             if (_right != null && _right.Rig != null && _right.Rig != _rightRig) ProceduralHandBuilder.DestroyMeshes(_right.Rig);
             CoreUtils.Destroy(MaskMaterial);
@@ -158,8 +173,8 @@ namespace CarX.DarkOrientation
                 _sleeve = SleeveArms.TryCreate(_settings, _handRoot);
                 if (_sleeve != null)
                 {
-                    _left = new HandController(HandSide.Left, _sleeve.Left, false, _settings, _body, 13.7f);
-                    _right = new HandController(HandSide.Right, _sleeve.Right, false, _settings, _body, 71.3f);
+                    _left = new HandController(HandSide.Left, _sleeve.Left, false, _settings, _body, 13.7f, _classifier);
+                    _right = new HandController(HandSide.Right, _sleeve.Right, false, _settings, _body, 71.3f, _classifier);
                 }
                 else
                 {
@@ -186,6 +201,7 @@ namespace CarX.DarkOrientation
             if (old != null)
             {
                 old.ForceHide();
+                old.Dispose();
                 if (old.Rig != null && old.Rig.transform.IsChildOf(_handRoot))
                 {
                     ProceduralHandBuilder.DestroyMeshes(old.Rig);
@@ -204,7 +220,10 @@ namespace CarX.DarkOrientation
 
         public void SetActive(bool on)
         {
-            if (on && (!_bound || !enabled || ForceOff())) return;
+            if (on && (!_bound || !enabled)) return;
+            // Asking for the mode with the flashlight on puts the flashlight out first.
+            if (on && ForceOff()) ClearForceOff?.Invoke();
+            if (on && ForceOff()) return;
             if (IsActive == on) return;
             IsActive = on;
             ActiveChanged?.Invoke(on);
@@ -241,7 +260,7 @@ namespace CarX.DarkOrientation
             {
                 rig.Bind();
             }
-            return new HandController(side, rig, owns, _settings, _body, side == HandSide.Left ? 13.7f : 71.3f);
+            return new HandController(side, rig, owns, _settings, _body, side == HandSide.Left ? 13.7f : 71.3f, _classifier);
         }
 
         void Update()
@@ -285,6 +304,7 @@ namespace CarX.DarkOrientation
             if (!IsActive && Blend <= 0f && !_left.Visible && !_right.Visible)
             {
                 if (_proxies.Count > 0) _proxies.Clear();
+                _classifier.Clear();
                 UpdateZones(dt);
                 return;
             }
@@ -323,6 +343,10 @@ namespace CarX.DarkOrientation
             Handle(_left, 0, _left.Tick(frame, wantLeft, _right));
             frame.shoulder = rightShoulder;
             Handle(_right, 1, _right.Tick(frame, wantRight, _left));
+            UpdateHandover(frame);
+            KeepHandsApart(frame);
+            _left.FinishPose(frame);
+            _right.FinishPose(frame);
             if (_sleeve != null)
             {
                 bool shown = _left.Visible || _right.Visible;
@@ -340,7 +364,12 @@ namespace CarX.DarkOrientation
         void ApplyBodyGrip(float dt, Vector3 bodyForward)
         {
             if (!IsActive || _body == null) return;
-            var cc = _body.GetComponentInParent<CharacterController>();
+            if (_bodyController == null || _bodyControllerOf != _body)
+            {
+                _bodyController = _body.GetComponentInParent<CharacterController>();
+                _bodyControllerOf = _body;
+            }
+            var cc = _bodyController;
             if (cc == null || !cc.enabled) return;
             Vector3 velocity = cc.velocity;
             float forward = Vector3.Dot(velocity, bodyForward);
@@ -363,8 +392,8 @@ namespace CarX.DarkOrientation
             Vector3 n = Vector3.ProjectOnPlane(hand.ContactNormal, Vector3.up);
             if (n.sqrMagnitude < 0.05f) return;
             n.Normalize();
-            // People are not a wall: the hand may rest on them, but it does not drag the player.
-            if (hand.ContactIsPerson) return;
+            // Only walls hold the player. People and props are just felt.
+            if (hand.ContactIsObject) return;
             // Only motion straight off the wall is resisted. Forward and back along the wall are free.
             float leaving = Vector3.Dot(velocity, n);
             if (leaving > _settings.gripBreakSpeed)
@@ -382,6 +411,110 @@ namespace CarX.DarkOrientation
                 assist += step;
                 yaw += step;
             }
+        }
+
+        // ------------------------------------------------------------------ the two hands together
+
+        /// <summary>Horizontal angle of a point from the view direction, degrees; positive is to the right.</summary>
+        static float Azimuth(in HandFrame f, Vector3 point)
+        {
+            Vector3 to = Vector3.ProjectOnPlane(point - f.camPos, Vector3.up);
+            Vector3 fwd = Vector3.ProjectOnPlane(f.camFwd, Vector3.up);
+            if (to.sqrMagnitude < 1e-6f || fwd.sqrMagnitude < 1e-6f) return 0f;
+            return Vector3.SignedAngle(fwd, to, Vector3.up);
+        }
+
+        /// <summary>
+        /// A held point that drifted into the other hand's half of the view (the player turned) goes over to the other hand,
+        /// so the contact is not lost and the arms never cross. If the other hand cannot take it, this hand lets go.
+        /// </summary>
+        void UpdateHandover(in HandFrame f)
+        {
+            if (!IsActive) return;
+            Exchange(_right, 1, _left, 0, f);
+            Exchange(_left, 0, _right, 1, f);
+            // Both hands hold and their points are in the wrong order: the one deeper on the wrong side lets go.
+            if (_left.HasContact && _right.HasContact)
+            {
+                float l = Azimuth(f, _left.AnchorPoint), r = Azimuth(f, _right.AnchorPoint);
+                if (l > r)
+                {
+                    if (l > -r) Handle(_left, 0, _left.BreakGrip(f.time));
+                    else Handle(_right, 1, _right.BreakGrip(f.time));
+                }
+            }
+        }
+
+        void Exchange(HandController giver, int giverOwner, HandController taker, int takerOwner, in HandFrame f)
+        {
+            if (!giver.HasContact) return;
+            float sign = giver.side == HandSide.Right ? 1f : -1f;
+            float wrong = -Azimuth(f, giver.AnchorPoint) * sign;   // degrees into the other hand's half
+            if (wrong < _settings.handoverAngle) return;
+
+            bool takerHoldsWall = taker.HasContact && !taker.ContactIsObject;
+            bool takerFree = !IsHandOccupied(taker.side) && taker.Visible && !takerHoldsWall;
+            if (takerFree)
+            {
+                bool isObject = giver.ContactIsObject;
+                var anchor = ShiftToward(giver.Anchor, taker.side, isObject);
+                if (taker.HasContact) Handle(taker, takerOwner, taker.BreakGrip(f.time));
+                var given = giver.LastTouch;
+                giver.HandOff(f.time);
+                TouchEnded?.Invoke(giver.side, given);
+                if (taker.TakeOver(anchor, isObject, f.time) == HandEvent.TouchBegan)
+                {
+                    // The highlight stays on: its zone changes owner instead of fading out and in again.
+                    for (int i = 0; i < ZoneCount; i++)
+                        if (_zones[i].owner == giverOwner) _zones[i].owner = takerOwner;
+                    TouchBegan?.Invoke(taker.side, taker.LastTouch);
+                }
+                else
+                {
+                    for (int i = 0; i < ZoneCount; i++)
+                        if (_zones[i].owner == giverOwner) _zones[i].owner = -1;
+                }
+                return;
+            }
+            // The other hand already holds the wall, or carries the pistol: hold on up to the limit, then let go.
+            if (takerHoldsWall || wrong > _settings.handoverMaxAngle)
+                Handle(giver, giverOwner, giver.BreakGrip(f.time));
+        }
+
+        readonly RaycastHit[] _shiftHits = new RaycastHit[8];
+
+        /// <summary>The taking hand lands a little to its own side of the point on the same wall, so the two palms do not overlap.</summary>
+        TouchAnchor ShiftToward(TouchAnchor a, HandSide side, bool isObject)
+        {
+            if (isObject || _settings.handoverOffset <= 0f || !a.IsValid || _viewCamera == null) return a;
+            Vector3 n = a.Normal, p = a.Point;
+            Vector3 toward = Vector3.ProjectOnPlane(_viewCamera.transform.right * (side == HandSide.Right ? 1f : -1f), n);
+            if (toward.sqrMagnitude < 1e-4f) return a;
+            Vector3 q = p + toward.normalized * _settings.handoverOffset;
+            int count = Physics.RaycastNonAlloc(q + n * 0.3f, -n, _shiftHits, 0.6f, _settings.touchLayers.value, QueryTriggerInteraction.Ignore);
+            float best = float.MaxValue;
+            TouchAnchor result = a;
+            for (int i = 0; i < count; i++)
+            {
+                var h = _shiftHits[i];
+                if (h.distance >= best || _classifier.Kind(h.collider) != TouchKind.Wall || Vector3.Angle(h.normal, n) > 40f) continue;
+                best = h.distance;
+                result = TouchAnchor.Create(h.collider, h.point, h.normal);
+            }
+            return result;
+        }
+
+        /// <summary>The left palm is always drawn left of the right one, with a gap; they never pass through each other.</summary>
+        void KeepHandsApart(in HandFrame f)
+        {
+            if (f.cam == null || !_left.NeedsPose || !_right.NeedsPose) return;
+            Vector3 right = f.cam.transform.right;
+            Vector3 l = _left.DrawnPalm, r = _right.DrawnPalm;
+            float gap = Vector3.Dot(r - l, right);
+            if (gap >= _settings.handGap) return;
+            float d = (_settings.handGap - gap) * 0.5f;
+            _left.DrawnPalm = l - right * d;
+            _right.DrawnPalm = r + right * d;
         }
 
         float RaisedHands()
@@ -429,20 +562,49 @@ namespace CarX.DarkOrientation
                 {
                     z.center = hand.AnchorPoint;
                     z.normal = hand.ContactNormal;
-                    z.person = hand.ContactIsPerson;
+                    z.small = hand.ContactIsObject;
                 }
                 else if (hand != null) z.owner = -1;
                 bool on = z.owner >= 0;
                 z.weight = Mathf.MoveTowards(z.weight, on ? 1f : 0f, dt / (on ? _settings.zoneFadeIn : _settings.zoneFadeOut));
                 ZoneCenters[i] = z.center;
-                ZoneCenters[i].w = z.person ? 1f : 0f;
+                ZoneCenters[i].w = z.small ? 1f : 0f;
                 ZoneNormals[i] = z.normal;
                 ZoneWeights[i] = z.weight;
             }
         }
 
+        float _savedNear = -1f, _appliedNear = -1f;
+
+        /// <summary>
+        /// While the hands are shown the view camera's near plane is pulled in, so looking up or down never slices the arms.
+        /// Done right before rendering, after Cinemachine has written its lens for the frame; the old value comes back after.
+        /// </summary>
+        void ApplyNearClip(Camera cam)
+        {
+            if (cam == null || cam != _viewCamera) return;
+            bool shown = _bound && _settings != null && _settings.handsNearClip > 0f
+                && ((_left != null && _left.Visible) || (_right != null && _right.Visible));
+            if (shown)
+            {
+                // Something else (Cinemachine) may write its own value every frame: take that as the one to restore.
+                if (_savedNear < 0f || !Mathf.Approximately(cam.nearClipPlane, _appliedNear)) _savedNear = cam.nearClipPlane;
+                _appliedNear = Mathf.Min(_savedNear, _settings.handsNearClip);
+                cam.nearClipPlane = _appliedNear;
+            }
+            else RestoreNearClip(cam);
+        }
+
+        void RestoreNearClip(Camera cam)
+        {
+            if (_savedNear < 0f) return;
+            if (cam != null && Mathf.Approximately(cam.nearClipPlane, _appliedNear)) cam.nearClipPlane = _savedNear;
+            _savedNear = -1f;
+        }
+
         void OnBeginCameraRendering(ScriptableRenderContext context, Camera cam)
         {
+            if (cam.cameraType == CameraType.Game) ApplyNearClip(cam);
             if (!_bound || Blend <= 0.001f || cam != _viewCamera || cam.cameraType != CameraType.Game) return;
             if (!cam.TryGetComponent(out UniversalAdditionalCameraData data)) return;
             var renderer = data.scriptableRenderer;
