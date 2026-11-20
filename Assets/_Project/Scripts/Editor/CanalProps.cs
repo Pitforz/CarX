@@ -43,19 +43,19 @@ namespace CarX.EditorTools
         // ------------------------------------------------------------------ trash: invisible round walls
 
         const string TrashWallsName = "Мусор: невидимые стены (авто)";
-        static readonly string[] TrashSkip = { "TrashGroup_7", "TrashGroup_8", "TrashGroup_9", "TrashGroup_10", "TrashGroup_11", "Flies", "Stain" };
+        static readonly string[] TrashSkip = { "TrashGroup_7", "TrashGroup_8", "TrashGroup_9", "TrashGroup_10", "TrashGroup_11", "Flies", "Stain", "Pile1", "Pile2", "Pile3", "Pile" };
 
-        [MenuItem("CarX/Canal/Мусор: пересоздать невидимые стены")]
-        static void TrashCollidersMenu() { Debug.Log("Мусор: " + TrashColliders()); }
-
+        
         [MenuItem("CarX/Canal/Ветер: применить к деревьям и траве")]
         static void SetupWindMenu() { Debug.Log("Ветер: " + SetupWind()); }
 
         /// <summary>A simple round collider around each piece of trash (overlapping ones merged), so the player keeps a little distance.
         /// Small piles TrashGroup 7-11 stay walkable. Run again after moving trash: the old walls are replaced.</summary>
-        public static string TrashColliders()
+        public static string TrashWallsApply() { return TrashColliders(); }
+        public static string TrashColliders() { return TrashColliders(TrashWallsWindow.Margin, TrashWallsWindow.MaxMerged); }
+
+        public static string TrashColliders(float margin, float maxMerged)
         {
-            const float margin = 0.35f, maxMerged = 2.6f;
             var old = GameObject.Find(TrashWallsName);
             if (old != null) Undo.DestroyObjectImmediate(old);
             var circles = new List<Vector4>();   // x, z, radius, ground y
@@ -71,6 +71,7 @@ namespace CarX.EditorTools
                 string src = Path.GetFileNameWithoutExtension(path);
                 bool skip = false;
                 foreach (var k in TrashSkip) if (src.EndsWith(k)) skip = true;
+                if (src.Contains("TrashPile")) skip = true;
                 if (skip) continue;
                 if (parent == null) parent = root.transform.parent;
                 var b = r.bounds;
@@ -196,6 +197,30 @@ namespace CarX.EditorTools
             m.renderQueue = clip > 0.5f ? (int)RenderQueue.AlphaTest : (int)RenderQueue.Geometry;
             m.SetOverrideTag("RenderType", clip > 0.5f ? "TransparentCutout" : "Opaque");
             EditorUtility.SetDirty(m);
+        }
+    }
+}
+
+namespace CarX.EditorTools
+{
+    /// <summary>Окно: невидимые круглые стены вокруг мусора с настраиваемым радиусом.</summary>
+    public class TrashWallsWindow : EditorWindow
+    {
+        public static float Margin { get { return EditorPrefs.GetFloat("CarX.TrashMargin", 0.35f); } set { EditorPrefs.SetFloat("CarX.TrashMargin", value); } }
+        public static float MaxMerged { get { return EditorPrefs.GetFloat("CarX.TrashMaxMerged", 2.6f); } set { EditorPrefs.SetFloat("CarX.TrashMaxMerged", value); } }
+        string _result = "";
+
+        [MenuItem("CarX/Canal/Мусор: невидимые стены...")]
+        static void Open() { GetWindow<TrashWallsWindow>("Стены вокруг мусора"); }
+
+        void OnGUI()
+        {
+            EditorGUILayout.HelpBox("Круглая невидимая стена вокруг каждого мусорного объекта и Trash Group. Не трогает Trash Group 7-11 и кучи (Pile). Пересекающиеся стены объединяются. Повторное применение заменяет старые стены.", MessageType.Info);
+            Margin = EditorGUILayout.Slider("Отступ от мусора, м", Margin, 0f, 2f);
+            MaxMerged = EditorGUILayout.Slider("Макс. радиус объединённой стены, м", MaxMerged, 0.5f, 6f);
+            if (GUILayout.Button("Применить ко всему мусору в открытой сцене", GUILayout.Height(32)))
+                _result = CanalEntranceBuilder.TrashColliders(Margin, MaxMerged);
+            if (_result.Length > 0) EditorGUILayout.LabelField("Готово: " + _result);
         }
     }
 }
