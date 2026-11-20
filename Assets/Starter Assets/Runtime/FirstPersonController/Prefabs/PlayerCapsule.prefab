@@ -161,6 +161,7 @@ GameObject:
   - component: {fileID: 8616685848737228388}
   - component: {fileID: 8616685848737228389}
   - component: {fileID: 8616685848737228390}
+  - component: {fileID: 8616685848737228391}
   m_Layer: 8
   m_Name: PlayerCapsule
   m_TagString: Player
@@ -239,6 +240,12 @@ MonoBehaviour:
   _weaponShader: {fileID: 4800000, guid: 933532a4fcc9baf4fa0491de14d08ed7, type: 3}
   _berettaPrefab: {fileID: 7976680450834729709, guid: b4a9d2663df31471995ce5807cd29a31, type: 3}
   _aimTransitionTime: 0.24
+  _upwardRecoilDegrees: {x: 0.9, y: 1.4}
+  _sidewaysRecoilDegrees: 0.6
+  _aimedRecoilMultiplier: 0.6
+  _stressAimSwayDegrees: {x: 1.05, y: 0.75}
+  _stressHandRollDegrees: 2
+  _stressRecoilMultiplier: 1.45
   _shotClip: {fileID: 8300000, guid: b8c23b7d26564e43a17e0f3bc38f2dd3, type: 3}
   _reloadClip: {fileID: 8300000, guid: fc09dd5457484d0b9baa8df4662cf5ab, type: 3}
   _shotVolume: 0.8
@@ -294,6 +301,24 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e39fd41471194208848eb89c471b9c6a, type: 3}
   m_Name:
   m_EditorClassIdentifier:
+  _clueBlur: {fileID: 2100000, guid: 484cf90908311467c9ba53ffc464098c, type: 2}
+--- !u!114 &8616685848737228391
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8616685848737228372}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2fa0be4bf3114c8c809c38121c87cb85, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::CarX.Gameplay.PlayerInnerVoice
+  _civilianWarningVoice: {fileID: 8300000, guid: b3d65898ac7c47529df3a67285efc31e, type: 3}
+  _keepPistolVoice: {fileID: 8300000, guid: 2916439ec028433c8119fb03b02cd182, type: 3}
+  _intimidationVoice: {fileID: 8300000, guid: ab768aa25a5d40e48bbdca36d292f77e, type: 3}
+  _volume: 0.35
+  _hintRepeatDelay: 8
 --- !u!4 &8997996947095583982
 Transform:
   m_ObjectHideFlags: 0
@@ -362,8 +387,8 @@ MonoBehaviour:
   _crouchCameraDrop: 0.35
   _crouchTransitionTime: 0.28
   _capsuleModel: {fileID: 5393215578589016641}
-  _leanDistance: 0.62
-  _leanAngle: 30
+  _leanDistance: 0.53
+  _leanAngle: 24.5
   _leanTransitionTime: 0.5
   _leanRollSmoothTime: 0.08
   Grounded: 1

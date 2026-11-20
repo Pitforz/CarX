@@ -21,17 +21,33 @@ namespace CarX.Gameplay
         const string QuestDescription = "тест";
         const string DeniQuestTitle = "Вернуть Дени инструменты из мастерской";
         const string MouseSensitivityPref = "CarX.MouseSensitivityPercent";
+        const string MasterVolumePref = "CarX.MasterVolumePercent";
         const int DefaultSensitivity = 100;
         const int MinSensitivity = 25;
         const int MaxSensitivity = 200;
+        const int DefaultMasterVolume = 60;
         const float DialogueOptionSpacing = 59f;
+        const float SlowTimeScale = 0.02f;
+        const float SlowTimePhysicsStepScale = 0.1f;
         static readonly Vector2 PanelSize = new(400f, 330f);
 
-        enum Menu { None, Pause, Settings, Quests, Dying, Death, Dialogue }
+        enum Menu { None, Pause, Settings, Quests, Dying, Death, Dialogue, Clue, SlowTime }
 
+        [SerializeField] Material _clueBlur;
+
+        NoteReaderView _noteReader;
+        SlowTimeTutorialView _slowTimeTutorial;
+        System.Action<int> _selectEncounterChoice;
+        System.Action _skipEncounterDialogue;
+        System.Action _resumeEncounterFight;
+        bool _encounterInputLocked;
+        bool _encounterCinematic;
+        bool _openingClue;
+        System.Action _onClueDismissed;
         PlayerStatusHud _hud;
         PlayerHealth _health;
         PlayerInventory _inventory;
+        PlayerInnerVoice _innerVoice;
         PlayerPistol _pistol;
         StarterAssetsInputs _inputs;
         FirstPersonController _controller;
@@ -44,6 +60,7 @@ namespace CarX.Gameplay
         RectTransform _deathPanel;
         RectTransform _dialoguePanel;
         UnityEngine.UI.Text _talkHint;
+        UnityEngine.UI.Text _skipDialogueHint;
         UnityEngine.UI.Text _dialogueTitle;
         readonly List<UnityEngine.UI.Text> _dialogueOptionLabels = new();
         int _dialogueOptionCount;
@@ -55,40 +72,50 @@ namespace CarX.Gameplay
         WorkshopEncounter _workshop;
         bool _clueInView;
         UnityEngine.UI.Text _sensitivityLabel;
+        UnityEngine.UI.Text _masterVolumeLabel;
         int _sensitivityPercent;
-        bool _sensitivityChanged;
+        int _masterVolumePercent;
+        bool _settingsChanged;
         UnityEngine.UI.Text _trackedQuest;
         bool _questTracked;
         bool _trackingDeniQuest;
         bool _restartingScene;
         Menu _menu;
         float _previousTimeScale;
+        float _previousFixedDeltaTime;
         bool _previousAudioPause;
         CursorLockMode _previousCursorLock;
         bool _previousCursorVisible;
         bool _previousInputCursorLock;
         int _closedFrame = -1;
 
-        internal bool BlocksGameplayInput => _menu != Menu.None || _closedFrame == Time.frameCount;
+        internal bool BlocksGameplayInput => _encounterInputLocked || _openingClue ||
+            _menu != Menu.None || _closedFrame == Time.frameCount;
+        internal bool AllowsEncounterWeaponInput => _encounterInputLocked && !_encounterCinematic && _menu == Menu.None;
         internal bool HasTalkTarget => _nearbyNpc != null || _clueInView;
+        internal bool IsNpcSpeaking => (_activeTour != null && _activeTour.IsRunning) ||
+            (_activeDeniDialogue != null && _activeDeniDialogue.IsSpeaking) ||
+            (_workshop != null && _workshop.IsSpeaking);
         internal bool CanStartNpcConversation => _hud.HudRect != null && !_health.IsDead &&
-            !BlocksGameplayInput && Time.timeScale > 0f && (_inventory == null || !_inventory.BlocksWeaponInput) &&
-            (_activeTour == null || !_activeTour.IsRunning) &&
-            (_activeDeniDialogue == null || !_activeDeniDialogue.IsSpeaking) &&
-            (_workshop == null || !_workshop.IsSpeaking);
+            !BlocksGameplayInput && Time.timeScale > 0f && (_inventory == null || !_inventory.IsOpen) &&
+            (_innerVoice == null || !_innerVoice.IsSpeaking) &&
+            !IsNpcSpeaking;
 
         void Awake()
         {
             _hud = GetComponent<PlayerStatusHud>();
             _health = GetComponent<PlayerHealth>();
             _inventory = GetComponent<PlayerInventory>();
+            _innerVoice = GetComponent<PlayerInnerVoice>();
             _pistol = GetComponent<PlayerPistol>();
             _inputs = GetComponent<StarterAssetsInputs>();
             _controller = GetComponent<FirstPersonController>();
             _deathFall = GetComponent<PlayerDeathFall>();
             _sensitivityPercent = Mathf.Clamp(PlayerPrefs.GetInt(MouseSensitivityPref, DefaultSensitivity),
                 MinSensitivity, MaxSensitivity);
+            _masterVolumePercent = Mathf.Clamp(PlayerPrefs.GetInt(MasterVolumePref, DefaultMasterVolume), 0, 100);
             ApplySensitivity();
+            ApplyMasterVolume();
         }
 
         void OnEnable()
@@ -146,14 +173,63 @@ namespace CarX.Gameplay
             bool escape = keyboard?.escapeKey.wasPressedThisFrame == true;
             bool quests = keyboard?.tKey.wasPressedThisFrame == true;
             bool interact = keyboard?.eKey.wasPressedThisFrame == true;
+            bool skipDialogue = keyboard?.mKey.wasPressedThisFrame == true;
+            bool slowTime = keyboard?.oKey.wasPressedThisFrame == true;
+            bool resumeTime = keyboard?.spaceKey.wasPressedThisFrame == true;
 #else
             bool escape = Input.GetKeyDown(KeyCode.Escape);
             bool quests = Input.GetKeyDown(KeyCode.T);
             bool interact = Input.GetKeyDown(KeyCode.E);
+            bool skipDialogue = Input.GetKeyDown(KeyCode.M);
+            bool slowTime = Input.GetKeyDown(KeyCode.O);
+            bool resumeTime = Input.GetKeyDown(KeyCode.Space);
 #endif
+            if (_menu == Menu.SlowTime)
+            {
+                if (_selectEncounterChoice != null)
+                {
+                    int choice = ReadEncounterChoice();
+                    if (choice != 0)
+                        SelectEncounterChoice(choice);
+                }
+                else if (resumeTime)
+                {
+                    var resumeFight = _resumeEncounterFight;
+                    SetMenu(Menu.None);
+                    resumeFight?.Invoke();
+                }
+                return;
+            }
+
+            if (_encounterInputLocked)
+            {
+                if (skipDialogue)
+                    _skipEncounterDialogue?.Invoke();
+                return;
+            }
+
+            if (_menu == Menu.Clue)
+            {
+#if ENABLE_INPUT_SYSTEM
+                bool closeNote = keyboard?.tabKey.wasPressedThisFrame == true;
+#else
+                bool closeNote = Input.GetKeyDown(KeyCode.Tab);
+#endif
+                if (escape || interact || closeNote)
+                {
+                    var onDismissed = _onClueDismissed;
+                    SetMenu(Menu.None);
+                    onDismissed?.Invoke();
+                }
+                return;
+            }
+
+            if (_openingClue)
+                return;
+
             if (_menu == Menu.Dialogue)
             {
-                if (escape || _dialogueNpc == null || !_dialogueNpc.CanTalk)
+                if (escape || skipDialogue || _dialogueNpc == null || !_dialogueNpc.CanTalk)
                     SetMenu(Menu.None);
                 else
                     UpdateDialogueSelection();
@@ -170,7 +246,94 @@ namespace CarX.Gameplay
             else if (quests && (_menu == Menu.None || _menu == Menu.Quests))
                 SetMenu(_menu == Menu.Quests ? Menu.None : Menu.Quests);
             else if (_menu == Menu.None && Time.timeScale > 0f)
-                UpdateTalkTarget(interact);
+            {
+                if (slowTime)
+                {
+                    ShowSlowTimeTutorial();
+                    return;
+                }
+
+                if (skipDialogue && SkipActiveDialogue())
+                    return;
+
+                if (!HandleDeniReturn(interact, skipDialogue))
+                    UpdateTalkTarget(interact);
+            }
+        }
+
+        bool SkipActiveDialogue()
+        {
+            if (!IsNpcSpeaking)
+                return false;
+
+            _activeTour?.Skip();
+            _activeDeniDialogue?.SkipConversation();
+            _workshop?.SkipConversation();
+            _closedFrame = Time.frameCount;
+            HideTalkHint();
+            return true;
+        }
+
+        bool HandleDeniReturn(bool interact, bool skipDialogue)
+        {
+            if (!CanStartNpcConversation || _deniQuest == null || !_deniQuest.CanReturnTools(_inventory) ||
+                _pistol == null || _pistol.ViewCamera == null)
+                return false;
+
+            var npc = _deniQuest.GetComponent<NpcDialogue>();
+            var collider = _deniQuest.GetComponent<Collider>();
+            if (npc == null || !npc.CanTalk || collider == null || !collider.enabled ||
+                npc.gameObject.scene != gameObject.scene)
+                return false;
+
+            Vector3 center = transform.position + Vector3.up * 0.9f;
+            if ((collider.ClosestPoint(center) - center).sqrMagnitude > npc.InteractionDistance * npc.InteractionDistance)
+                return false;
+
+            Vector3 origin = _pistol.ViewCamera.transform.position;
+            Vector3 target = collider.bounds.center + Vector3.up * (collider.bounds.extents.y * 0.5f);
+            Vector3 direction = target - origin;
+            foreach (var hit in Physics.RaycastAll(origin, direction.normalized, direction.magnitude,
+                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                if (!hit.transform.IsChildOf(transform) && !hit.transform.IsChildOf(_deniQuest.transform))
+                    return false;
+            }
+
+            if (!_deniQuest.HasGreetedForTools)
+            {
+                _activeDeniDialogue = _deniQuest;
+                _deniQuest.GreetForTools(_hud);
+                HideTalkHint();
+                _closedFrame = Time.frameCount;
+                return true;
+            }
+
+            if (skipDialogue)
+                _deniQuest.SkipRemainingReturnDialogue();
+            if ((interact || (skipDialogue && _deniQuest.ToolsReturned)) && StartDeniReturn(_deniQuest))
+            {
+                _closedFrame = Time.frameCount;
+                return true;
+            }
+
+            _nearbyNpc = npc;
+            _clueInView = false;
+            string action = _deniQuest.ToolsReturned ? "E — продолжить разговор" : "E — отдать ящик";
+            ShowTalkHint(_deniQuest.HasReturnDialogueRemaining ? action + "\nM — пропустить диалог" : action);
+            return true;
+        }
+
+        bool StartDeniReturn(DeniDialogue deni)
+        {
+            if (!deni.TryReturnTools(_hud, _inventory, RefreshQuestDisplay))
+                return false;
+
+            _activeDeniDialogue = deni;
+            _deniQuest = deni;
+            TrackDeniQuest();
+            HideTalkHint();
+            return true;
         }
 
         void UpdateTalkTarget(bool interact)
@@ -180,25 +343,11 @@ namespace CarX.Gameplay
             _clueInView = canInteract && _workshop != null && _workshop.CanTakeClue();
             _nearbyNpc = npc;
 
-            if (HasTalkTarget && _talkHint == null)
-            {
-                Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                _talkHint = MakeText(_hud.HudRect, font, "Talk Hint", "", 18,
-                    new Vector2(0f, -56f), new Vector2(280f, 52f));
-            }
-
-            if (_talkHint != null)
-            {
-                _talkHint.text = _clueInView ? "E — подобрать улику" : "E — поговорить";
-                if (_talkHint.gameObject.activeSelf != HasTalkTarget)
-                    _talkHint.gameObject.SetActive(HasTalkTarget);
-            }
+            ShowTalkHint(!HasTalkTarget ? null : _clueInView ? "E — подобрать улику" : "E — поговорить");
 
             if (interact && _clueInView)
             {
                 _workshop.TakeClue();
-                _talkHint.gameObject.SetActive(false);
-                // Keep the input claimed until the inventory has processed this frame.
                 return;
             }
 
@@ -209,6 +358,23 @@ namespace CarX.Gameplay
             SetMenu(Menu.Dialogue);
             ConfigureDialogue(npc);
             UpdateLayout();
+        }
+
+        void ShowTalkHint(string text)
+        {
+            if (text != null && _talkHint == null)
+            {
+                Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                _talkHint = MakeText(_hud.HudRect, font, "Talk Hint", "", 18,
+                    new Vector2(0f, -56f), new Vector2(280f, 52f));
+            }
+
+            if (_talkHint == null)
+                return;
+            if (text != null)
+                _talkHint.text = text;
+            if (_talkHint.gameObject.activeSelf != (text != null))
+                _talkHint.gameObject.SetActive(text != null);
         }
 
         void ConfigureDialogue(NpcDialogue npc)
@@ -251,9 +417,10 @@ namespace CarX.Gameplay
 
                 string text;
                 if (toolsReturned)
-                    text = option == 1 && offerRepair ? "Починить фонарик" : npc.SecondQuestion;
+                    text = option == 1 && offerRepair ? "Проверишь свет?" : npc.SecondQuestion;
                 else if (option == 1 && deni != null && deni.HasQuest)
-                    text = _inventory.IsCarryingTools ? "Вернуть инструменты" : "Где мастерская?";
+                    text = deni.ToolsReturned ? "Продолжить разговор" :
+                        deni.CanReturnTools(_inventory) ? "Отдать ящик" : "Где мастерская?";
                 else if (option == 1)
                     text = npc.FirstQuestion;
                 else if (tour != null)
@@ -331,18 +498,11 @@ namespace CarX.Gameplay
                     return;
                 if (deni.QuestCompleted)
                 {
-                    if (_dialogueOptionCount == 2 && _health.TryRepairFlashlight())
-                    {
-                        _hud.RefreshFlashlight();
-                        _hud.ShowSubtitle("Дени починил фонарик");
-                    }
+                    if (_dialogueOptionCount == 2 && deni.TryRepairFlashlight(_hud, _health))
+                        _activeDeniDialogue = deni;
                 }
-                else if (deni.HasQuest && _inventory.DeliverTools())
-                {
-                    deni.CompleteQuest();
-                    TrackDeniQuest();
-                    _hud.ShowSubtitle("Инструменты возвращены Дени");
-                }
+                else if (StartDeniReturn(deni))
+                    return;
                 else if (deni.TryTalk(_hud, () => AcceptDeniQuest(deni)))
                     _activeDeniDialogue = deni;
             }
@@ -363,8 +523,19 @@ namespace CarX.Gameplay
 
         void LateUpdate()
         {
+            if (_menu == Menu.SlowTime)
+            {
+                _slowTimeTutorial.FitToScreen();
+                return;
+            }
+
             if (HasTalkTarget && _inventory != null && _inventory.IsOpen)
                 HideTalkHint();
+
+            if (_skipDialogueHint != null)
+                _skipDialogueHint.gameObject.SetActive(_menu == Menu.None &&
+                    (_skipEncounterDialogue != null || IsNpcSpeaking) &&
+                    (_inventory == null || !_inventory.IsOpen));
 
             if (_overlay == null)
                 return;
@@ -375,20 +546,185 @@ namespace CarX.Gameplay
             UpdateLayout();
         }
 
+        public void ShowSlowTimeTutorial()
+        {
+            if (!isActiveAndEnabled || BlocksGameplayInput || _hud.HudRect == null || _health.IsDead ||
+                Time.timeScale <= 0f || (_inventory != null && _inventory.IsOpen))
+                return;
+
+            OpenSlowTime();
+        }
+
+        internal void LockEncounterInput(Vector3 facingPoint, System.Action skipDialogue)
+        {
+            _encounterInputLocked = true;
+            _skipEncounterDialogue = skipDialogue;
+            _inventory?.CloseForMenu();
+            _controller?.BeginEncounterLook(facingPoint);
+            EnsureSkipDialogueHint();
+            _skipDialogueHint.text = "M — перейти к выбору";
+            HideTalkHint();
+        }
+
+        internal void UnlockEncounterInput()
+        {
+            if (!_encounterInputLocked)
+                return;
+
+            _encounterInputLocked = false;
+            _encounterCinematic = false;
+            _skipEncounterDialogue = null;
+            _controller?.EndEncounterLook();
+            if (_skipDialogueHint != null)
+                _skipDialogueHint.text = "M — пропустить диалог";
+            if (_menu != Menu.SlowTime)
+                _controller?.SetControlsFrozen(false);
+        }
+
+        internal bool ShowEncounterChoice(System.Action<int> selectChoice)
+        {
+            if (_menu != Menu.None || _health.IsDead || !OpenSlowTime())
+                return false;
+
+            _selectEncounterChoice = selectChoice;
+            _slowTimeTutorial.ShowEncounterChoice(SelectEncounterChoice);
+            if (_inputs != null)
+                _inputs.cursorLocked = false;
+            ShowCursor();
+            return true;
+        }
+
+        internal void UpdateEncounterTimer(int seconds) => _slowTimeTutorial.SetEncounterTimer(seconds);
+
+        internal void ShowEncounterChoiceHint(string text) => _slowTimeTutorial.SetChoiceHint(text);
+
+        internal void BeginEncounterCinematic(System.Action skipDialogue = null)
+        {
+            _encounterCinematic = true;
+            _skipEncounterDialogue = skipDialogue;
+            if (_skipDialogueHint != null && skipDialogue != null)
+                _skipDialogueHint.text = "M — пропустить диалог";
+            SetMenu(Menu.None);
+        }
+
+        internal bool ShowEncounterCombatTutorial(System.Action resumeFight)
+        {
+            if (_menu != Menu.SlowTime && (_menu != Menu.None || !OpenSlowTime()))
+                return false;
+
+            _selectEncounterChoice = null;
+            _resumeEncounterFight = resumeFight;
+            _slowTimeTutorial.ShowCombatTutorial();
+            if (_inputs != null)
+                _inputs.cursorLocked = true;
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+            return true;
+        }
+
+        internal void CloseEncounterOverlay()
+        {
+            if (_menu == Menu.SlowTime && _encounterInputLocked)
+                SetMenu(Menu.None);
+        }
+
+        void SelectEncounterChoice(int choice)
+        {
+            if (_menu != Menu.SlowTime || _selectEncounterChoice == null)
+                return;
+            _selectEncounterChoice.Invoke(choice);
+        }
+
+        static int ReadEncounterChoice()
+        {
+#if ENABLE_INPUT_SYSTEM
+            var keyboard = Keyboard.current;
+            if (keyboard == null)
+                return 0;
+            if (keyboard.digit1Key.wasPressedThisFrame || keyboard.numpad1Key.wasPressedThisFrame) return 1;
+            if (keyboard.digit2Key.wasPressedThisFrame || keyboard.numpad2Key.wasPressedThisFrame) return 2;
+            if (keyboard.digit3Key.wasPressedThisFrame || keyboard.numpad3Key.wasPressedThisFrame) return 3;
+#else
+            if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1)) return 1;
+            if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2)) return 2;
+            if (Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3)) return 3;
+#endif
+            return 0;
+        }
+
+        bool OpenSlowTime()
+        {
+            Camera camera = _pistol != null ? _pistol.ViewCamera : null;
+            if (camera == null)
+                camera = Camera.main;
+            if (camera == null)
+                return false;
+
+            _slowTimeTutorial ??= new SlowTimeTutorialView(_hud.HudRect);
+            SetMenu(Menu.SlowTime);
+            _slowTimeTutorial.Open(camera);
+            return true;
+        }
+
+        internal bool ShowClue(ClueNote note, System.Action onDismissed = null)
+        {
+            if (!isActiveAndEnabled || note == null || note.Paper == null || BlocksGameplayInput || _health.IsDead)
+                return false;
+
+            StartCoroutine(OpenClue(note.Paper, onDismissed));
+            return true;
+        }
+
+        System.Collections.IEnumerator OpenClue(Sprite image, System.Action onDismissed)
+        {
+            _openingClue = true;
+            _inventory?.CloseForMenu();
+            HideTalkHint();
+            yield return new WaitForEndOfFrame();
+            if (!_openingClue)
+                yield break;
+            _openingClue = false;
+            if (!isActiveAndEnabled || _menu != Menu.None || _health.IsDead)
+                yield break;
+            var capture = ScreenCapture.CaptureScreenshotAsTexture();
+            if (_overlay == null)
+                BuildMenus();
+            _noteReader ??= new NoteReaderView(_overlay);
+            _noteReader.Open(image, _clueBlur, capture);
+            _onClueDismissed = onDismissed;
+            SetMenu(Menu.Clue);
+        }
+
         void SetMenu(Menu menu)
         {
             if (_menu == menu)
                 return;
 
             HideTalkHint();
+            if (_menu == Menu.SlowTime)
+            {
+                _slowTimeTutorial.Close();
+                _selectEncounterChoice = null;
+                _resumeEncounterFight = null;
+                Time.fixedDeltaTime = _previousFixedDeltaTime;
+                _controller?.SetControlsFrozen(false);
+                if (_inputs != null)
+                    _inputs.cursorLocked = false;
+            }
+            if (_menu == Menu.Clue && menu != Menu.Clue)
+            {
+                _noteReader?.Close();
+                _onClueDismissed = null;
+            }
             if (menu != Menu.Dialogue)
                 _dialogueNpc = null;
 
-            if (_menu == Menu.Settings && _sensitivityChanged)
+            if (_menu == Menu.Settings && _settingsChanged)
             {
                 PlayerPrefs.SetInt(MouseSensitivityPref, _sensitivityPercent);
+                PlayerPrefs.SetInt(MasterVolumePref, _masterVolumePercent);
                 PlayerPrefs.Save();
-                _sensitivityChanged = false;
+                _settingsChanged = false;
             }
 
             if (menu == Menu.None)
@@ -433,13 +769,21 @@ namespace CarX.Gameplay
                     _inputs.cursorLocked = false;
                     _inputs.LookInput(Vector2.zero);
                 }
+            }
 
-                Time.timeScale = 0f;
+            Time.timeScale = menu == Menu.SlowTime ? _previousTimeScale * SlowTimeScale : 0f;
+            if (menu == Menu.SlowTime)
+            {
+                _previousFixedDeltaTime = Time.fixedDeltaTime;
+                Time.fixedDeltaTime *= SlowTimePhysicsStepScale;
+                _controller?.SetControlsFrozen(true);
+                if (_inputs != null)
+                    _inputs.cursorLocked = true;
             }
 
             // Keep audio running during the fall so breathing and heartbeat can fade out.
             AudioListener.pause = menu == Menu.Dying ? _previousAudioPause : true;
-            if (menu == Menu.Dying)
+            if (menu == Menu.Dying || menu == Menu.SlowTime)
             {
                 Cursor.lockState = CursorLockMode.Locked;
                 Cursor.visible = false;
@@ -456,7 +800,7 @@ namespace CarX.Gameplay
             _deathPanel.gameObject.SetActive(menu == Menu.Death);
             _dialoguePanel.gameObject.SetActive(menu == Menu.Dialogue);
             _overlay.SetAsLastSibling();
-            _overlay.gameObject.SetActive(menu != Menu.Dying);
+            _overlay.gameObject.SetActive(menu != Menu.Dying && menu != Menu.SlowTime);
             UpdateLayout();
             if (menu == Menu.Pause)
                 _pauseMenu.FocusContinue();
@@ -481,10 +825,11 @@ namespace CarX.Gameplay
 
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             _trackedQuest = MakeText(hud, font, "Tracked Quest", $"{QuestTitle}\n{QuestDescription}", 18,
-                Vector2.zero, new Vector2(270f, 56f));
+                Vector2.zero, new Vector2(300f, 84f));
             _trackedQuest.alignment = TextAnchor.UpperRight;
             _trackedQuest.rectTransform.pivot = Vector2.one;
             _trackedQuest.gameObject.SetActive(_questTracked);
+            EnsureSkipDialogueHint();
 
             _overlay = MakePanel(hud, "Menu Overlay", new Color32(0, 0, 0, 160));
             _overlay.anchorMin = Vector2.zero;
@@ -496,10 +841,24 @@ namespace CarX.Gameplay
             MakeText(_settingsPanel, font, "Settings Title", "Настройки", 29,
                 new Vector2(0f, 117f), new Vector2(320f, 42f));
             _sensitivityLabel = MakeText(_settingsPanel, font, "Mouse Sensitivity Value", "", 19,
-                new Vector2(0f, 49f), new Vector2(320f, 34f));
-            MakeSensitivitySlider();
+                new Vector2(0f, 68f), new Vector2(320f, 28f));
+            MakeSettingsSlider("Mouse Sensitivity", 30f, MinSensitivity, MaxSensitivity, _sensitivityPercent, value =>
+            {
+                _sensitivityPercent = Mathf.RoundToInt(value);
+                _settingsChanged = true;
+                ApplySensitivity();
+            });
+            _masterVolumeLabel = MakeText(_settingsPanel, font, "Master Volume Value", "", 19,
+                new Vector2(0f, -12f), new Vector2(320f, 28f));
+            MakeSettingsSlider("Master Volume", -48f, 0, 100, _masterVolumePercent, value =>
+            {
+                _masterVolumePercent = Mathf.RoundToInt(value);
+                _settingsChanged = true;
+                ApplyMasterVolume();
+            });
             ApplySensitivity();
-            MakeButton(_settingsPanel, font, "Назад", -99f, () => SetMenu(Menu.Pause));
+            ApplyMasterVolume();
+            MakeButton(_settingsPanel, font, "Назад", -115f, () => SetMenu(Menu.Pause));
 
             _deathPanel = MakePanel(_overlay, "Death Menu", new Color32(30, 33, 35, 255));
             _deathPanel.sizeDelta = new Vector2(PanelSize.x, 230f);
@@ -515,9 +874,24 @@ namespace CarX.Gameplay
                 new Vector2(0f, 117f), new Vector2(320f, 42f));
         }
 
-        void MakeSensitivitySlider()
+        void EnsureSkipDialogueHint()
         {
-            var sliderRect = MakePanel(_settingsPanel, "Mouse Sensitivity", new Color32(24, 27, 29, 255));
+            if (_skipDialogueHint != null)
+                return;
+
+            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            _skipDialogueHint = MakeText(_hud.HudRect, font, "Skip Dialogue Hint", "M — пропустить диалог", 16,
+                new Vector2(0f, 18f), new Vector2(280f, 24f));
+            var rect = _skipDialogueHint.rectTransform;
+            rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0.5f, 0f);
+            _skipDialogueHint.gameObject.SetActive(false);
+        }
+
+        void MakeSettingsSlider(string name, float y, int minimum, int maximum, int initialValue,
+            UnityAction<float> onValueChanged)
+        {
+            var sliderRect = MakePanel(_settingsPanel, name, new Color32(24, 27, 29, 255));
+            sliderRect.anchoredPosition = new Vector2(0f, y);
             sliderRect.sizeDelta = new Vector2(280f, 42f);
             var slider = sliderRect.gameObject.AddComponent<UnityEngine.UI.Slider>();
 
@@ -536,16 +910,11 @@ namespace CarX.Gameplay
             handle.sizeDelta = new Vector2(20f, 24f);
             slider.targetGraphic = handle.GetComponent<UnityEngine.UI.Image>();
             slider.handleRect = handle;
-            slider.maxValue = MaxSensitivity;
-            slider.minValue = MinSensitivity;
+            slider.maxValue = maximum;
+            slider.minValue = minimum;
             slider.wholeNumbers = true;
-            slider.SetValueWithoutNotify(_sensitivityPercent);
-            slider.onValueChanged.AddListener(value =>
-            {
-                _sensitivityPercent = Mathf.RoundToInt(value);
-                _sensitivityChanged = true;
-                ApplySensitivity();
-            });
+            slider.SetValueWithoutNotify(initialValue);
+            slider.onValueChanged.AddListener(onValueChanged);
         }
 
         void ApplySensitivity()
@@ -554,6 +923,13 @@ namespace CarX.Gameplay
                 _controller.MouseSensitivityScale = _sensitivityPercent / 100f;
             if (_sensitivityLabel != null)
                 _sensitivityLabel.text = $"Чувствительность мыши: {_sensitivityPercent}%";
+        }
+
+        void ApplyMasterVolume()
+        {
+            AudioListener.volume = _masterVolumePercent / 100f;
+            if (_masterVolumeLabel != null)
+                _masterVolumeLabel.text = $"Общая громкость: {_masterVolumePercent}%";
         }
 
         void TrackQuest()
@@ -591,16 +967,18 @@ namespace CarX.Gameplay
             bool completed = _deniQuest != null && _deniQuest.QuestCompleted;
             bool carrying = _inventory != null && _inventory.IsCarryingTools;
             bool inWorkshopQuest = _deniQuest != null && _workshop != null && _deniQuest == _workshop.QuestGiver;
-            string description = completed ? "Инструменты возвращены Дени."
+            bool returning = _deniQuest != null && _deniQuest.ToolsReturned && !completed;
+            string description = completed ? "Инструменты возвращены Дени. Получен ключ от нижнего этажа."
+                : returning ? "Поговори с Дени об отце и ключе."
                 : carrying ? "Отнеси ящик Дени."
                 : "Найди ящик с красной ручкой. Ориентир — дверь с белой полосой.";
-            string objective = carrying ? "Вернуть ящик" : "Найти ящик";
-            if (inWorkshopQuest && !completed && !carrying)
+            string objective = returning ? "Поговорить с Дени" : carrying ? "Вернуть ящик" : "Найти ящик";
+            if (inWorkshopQuest && !completed && !carrying && !returning)
             {
                 if (_workshop.NeedsIntimidation)
                 {
-                    objective = "Напугать вымогателя";
-                    description = "Достань пистолет и напугай вымогателя.\nНаведи на него пистолет, удерживая ПКМ.";
+                    objective = "Наведи пистолет на вымогателя";
+                    description = "Достань пистолет и наведи его на вымогателя, удерживая ПКМ.";
                 }
                 else if (_workshop.HasIntimidated)
                 {
@@ -614,9 +992,10 @@ namespace CarX.Gameplay
             }
             _questJournal?.SetQuests(_questTracked && !_trackingDeniQuest, _deniQuest != null,
                 _trackingDeniQuest, completed, DeniQuestTitle, description);
+            bool aimingAtExtortionist = inWorkshopQuest && !completed && _workshop.NeedsIntimidation;
             if (_trackedQuest != null)
                 _trackedQuest.text = _trackingDeniQuest
-                    ? "Инструменты Дени\n" + objective
+                    ? "Инструменты Дени\n" + objective + (aimingAtExtortionist ? "\nУдерживай ПКМ" : "")
                     : $"{QuestTitle}\n{QuestDescription}";
         }
 
@@ -649,7 +1028,7 @@ namespace CarX.Gameplay
 
             var tracker = _trackedQuest.rectTransform;
             tracker.anchorMin = tracker.anchorMax = max;
-            float trackerScale = Mathf.Clamp01(size.x / 318f);
+            float trackerScale = Mathf.Clamp01(size.x / 348f);
             tracker.localScale = new Vector3(trackerScale, trackerScale, 1f);
             tracker.anchoredPosition = new Vector2(-24f, -18f) * trackerScale;
         }
@@ -728,12 +1107,16 @@ namespace CarX.Gameplay
 
         void OnApplicationFocus(bool focused)
         {
-            if (focused && _menu != Menu.None && _menu != Menu.Dying)
+            if (focused && _menu != Menu.None && _menu != Menu.Dying &&
+                (_menu != Menu.SlowTime || _selectEncounterChoice != null))
                 ShowCursor();
         }
 
         void OnDisable()
         {
+            _openingClue = false;
+            if (_encounterInputLocked)
+                UnlockEncounterInput();
             _activeTour?.Cancel();
             _activeDeniDialogue?.Cancel();
             _workshop?.CancelConversation();
@@ -743,10 +1126,13 @@ namespace CarX.Gameplay
             HideTalkHint();
             if (_trackedQuest != null)
                 _trackedQuest.gameObject.SetActive(false);
+            if (_skipDialogueHint != null)
+                _skipDialogueHint.gameObject.SetActive(false);
         }
 
         void OnDestroy()
         {
+            _slowTimeTutorial?.Destroy();
             _typewriterText?.ReleaseFont();
             if (_talkHint != null)
                 Destroy(_talkHint.gameObject);
@@ -754,6 +1140,8 @@ namespace CarX.Gameplay
                 Destroy(_overlay.gameObject);
             if (_trackedQuest != null)
                 Destroy(_trackedQuest.gameObject);
+            if (_skipDialogueHint != null)
+                Destroy(_skipDialogueHint.gameObject);
         }
 
         void HideTalkHint()

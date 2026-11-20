@@ -1,0 +1,17 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1f5eaf47873f4cb19a2e43382177bc69, type: 3}
+  m_Name: CatacombsNote
+  m_EditorClassIdentifier: Assembly-CSharp::CarX.Gameplay.ClueNote
+  _title: "Катакомбы"
+  _paper: {fileID: 21300000, guid: df543d5949ac42eca7921b17538f1ebf, type: 3}
+  _readVoice: {fileID: 8300000, guid: f972cf031b7549cd8c45e506399f1a66, type: 3}

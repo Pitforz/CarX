@@ -54,6 +54,7 @@ namespace CarX.Gameplay
         AudioSource _switchAudio;
         PlayerPistol _pistol;
         PlayerInventory _inventory;
+        PlayerStatusHud _hud;
         Transform _view;
         Vector3 _viewOffset;
         Quaternion _viewRotation;
@@ -68,20 +69,7 @@ namespace CarX.Gameplay
         float _beamPower;
         float _spillPower;
 
-        float Charge => _health != null ? _health.FlashlightCharge : 1f;
-        internal bool IsOn => isActiveAndEnabled && _isOn && Charge > 0f;
-
-        internal bool IsPointInMainBeam(Vector3 point)
-        {
-            if (!IsOn || _beam == null || !_beam.enabled || _beam.intensity <= 0f)
-                return false;
-
-            Vector3 offset = point - _beam.transform.position;
-            float distance = offset.magnitude;
-            float coneCosine = Mathf.Cos(_beam.spotAngle * 0.5f * Mathf.Deg2Rad);
-            return distance <= _beam.range &&
-                Vector3.Dot(_beam.transform.forward, offset) >= distance * coneCosine;
-        }
+        float Charge => _health == null ? 1f : _health.IsDead ? 0f : _health.FlashlightCharge;
 
         void Awake()
         {
@@ -100,6 +88,7 @@ namespace CarX.Gameplay
                 _obstacleMask &= ~(1 << player.gameObject.layer);
                 _pistol = player.GetComponent<PlayerPistol>();
                 _inventory = player.GetComponent<PlayerInventory>();
+                _hud = player.GetComponent<PlayerStatusHud>();
             }
 
             if (_switchClip != null)
@@ -187,22 +176,18 @@ namespace CarX.Gameplay
 
         void Update()
         {
-            if (Charge <= 0f)
-            {
-                TurnOff();
-                return;
-            }
             if (Time.timeScale == 0f)
                 return;
 
             float now = Time.time;
-            if (_switchAt > 0f && now >= _switchAt)
+            float charge = Charge;
+            if (charge > 0f && _switchAt > 0f && now >= _switchAt)
             {
                 _switchAt = 0f;
                 SwitchLight();
             }
 
-            if (_inventory != null && _inventory.BlocksWeaponInput)
+            if (_inventory != null && _inventory.BlocksGameplayInput)
                 return;
 
 #if ENABLE_INPUT_SYSTEM
@@ -210,6 +195,15 @@ namespace CarX.Gameplay
 #else
             bool toggle = Input.GetKeyDown(KeyCode.F);
 #endif
+            if (charge <= 0f)
+            {
+                if (toggle && _health != null && !_health.IsDead)
+                    ShowBrokenFlashlightSubtitle();
+                return;
+            }
+            if (_inventory != null && _inventory.IsCarryingTools)
+                return;
+
             if (toggle)
                 _toggleQueued = true;
             if (!_toggleQueued || _switchAt > 0f || now < _nextToggleAt)
@@ -224,6 +218,17 @@ namespace CarX.Gameplay
                 _switchAt = now + switchDelay;
             else
                 SwitchLight();
+        }
+
+        void ShowBrokenFlashlightSubtitle()
+        {
+            string text = _health.FlashlightBreakCause switch
+            {
+                PlayerHealth.DamageSource.Gunfire => "Вот скотина, прострелил фонарь.",
+                PlayerHealth.DamageSource.Melee => "Вот скотина, фонарь сломал.",
+                _ => "Чёрт, фонарь накрылся."
+            };
+            _hud?.ShowSubtitle(text);
         }
 
         void SwitchLight()
