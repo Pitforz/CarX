@@ -198,7 +198,7 @@ namespace CarX.EditorTools
             cam.transform.SetPositionAndRotation(pos, Quaternion.Euler(pitch, yaw, 0f));
             cam.fieldOfView = fov;
             cam.nearClipPlane = 0.05f;
-            cam.farClipPlane = 400f;
+            cam.farClipPlane = 2000f;
             TunnelAssets.SetupCamera(cam);
             if (flashlight) TunnelMazeBuilder.AddFlashlight(go.transform);
             // half-float target: URP renders a camera with a target texture in that texture's format,
