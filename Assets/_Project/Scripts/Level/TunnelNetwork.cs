@@ -46,6 +46,8 @@ namespace CarX.Level
         [Header("Выход наружу (если узел - выход)")]
         [Tooltip("Яркость дневного света в этом выходе (1 = как в настройках библиотеки типов)")]
         [Range(0f, 4f)] public float exitBrightness = 1f;
+        [Tooltip("Снаружи настоящая сцена (например канал CanalEntrance): не рисовать за проёмом светящуюся коробку «неба»")]
+        public bool exitOpenAir;
 
         /// <summary>Default plan of a new room: an octagon about 10 m across.</summary>
         public static List<Vector2> DefaultRoom()
@@ -94,6 +96,9 @@ namespace CarX.Level
         public List<GraphEdge> edges = new List<GraphEdge>();
 
         public const string GeneratedRoot = "_Generated";
+        /// <summary>Extra rendering layer on all tunnel geometry (Default stays on): lets an open-air exit light take shadows
+        /// from the tunnel walls only, so people standing in the mouth do not throw long shadows into the tunnel.</summary>
+        public const uint TunnelRenderingLayer = 1u << 4;
         public const float MaxTunnelLength = 3000f;
         /// <summary>Editor hook: scatter puddles on a rebuilt tunnel.</summary>
         public static Action<TunnelPath, int> DressingHook;
@@ -1756,6 +1761,7 @@ namespace CarX.Level
                 builtChambers++;
             }
 
+            foreach (var r in root.GetComponentsInChildren<Renderer>(true)) r.renderingLayerMask |= TunnelRenderingLayer;
             var dead = new List<GameObject>();
             foreach (Transform ch in root) if (!keep.Contains(ch)) dead.Add(ch.gameObject);
             foreach (var g in dead)
@@ -1788,6 +1794,8 @@ namespace CarX.Level
                 ex.height = sec.Height;
                 ex.brightness = nodeMap[id].exitBrightness;
                 ex.skyMaterial = mats != null ? mats.sky : null;
+                ex.fakeSky = !nodeMap[id].exitOpenAir;
+                ex.tunnelShadowsOnly = nodeMap[id].exitOpenAir;
                 if (library != null)
                 {
                     ex.lightIntensity = library.exitLightIntensity;
