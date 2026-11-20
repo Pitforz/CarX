@@ -10,11 +10,15 @@ namespace CarX.Gameplay
     [AddComponentMenu("CarX/Player Health")]
     public class PlayerHealth : MonoBehaviour
     {
+        internal enum DamageSource { Other, Melee, Gunfire }
+
         public const int MaxHealth = 100;
         const int TestDamage = 5;
         const int TestBleeding = 5;
         const double BleedingInterval = 7.0;
         const double HealthRecoveryInterval = 50.0;
+        const int MaxFlashlightCondition = 100;
+        const int FlashlightDamagePerHealthPoint = 2;
         const float FlashlightRepairThreshold = 0.7f;
 
         [SerializeField] AudioClip[] _hurtClips;
@@ -24,13 +28,14 @@ namespace CarX.Gameplay
         public bool IsDead => CurrentHealth == 0;
         public event Action<int> HealthChanged;
         public event Action<int> BleedingChanged;
+        internal event Action DirectDamageTaken;
         double _nextBleedingTick;
         double _nextHealthRecovery;
-        int _healthAtFlashlightRepair = MaxHealth;
+        int _flashlightCondition = MaxFlashlightCondition;
         AudioSource _hurtAudio;
 
-        internal float FlashlightCharge => IsDead ? 0f : Mathf.InverseLerp(
-            _healthAtFlashlightRepair - MaxHealth / 2f, _healthAtFlashlightRepair, CurrentHealth);
+        internal float FlashlightCharge => _flashlightCondition / (float)MaxFlashlightCondition;
+        internal DamageSource FlashlightBreakCause { get; private set; }
         internal bool CanRepairFlashlight => !IsDead && FlashlightCharge < FlashlightRepairThreshold;
 
         internal bool TryRepairFlashlight()
@@ -38,7 +43,8 @@ namespace CarX.Gameplay
             if (!CanRepairFlashlight)
                 return false;
 
-            _healthAtFlashlightRepair = CurrentHealth;
+            _flashlightCondition = MaxFlashlightCondition;
+            FlashlightBreakCause = DamageSource.Other;
             return true;
         }
 
@@ -47,12 +53,12 @@ namespace CarX.Gameplay
             SetHealth(CurrentHealth - Mathf.Clamp(amount, 0, MaxHealth));
         }
 
-        internal void TakeAttackDamage(int amount)
+        internal void TakeAttackDamage(int amount, DamageSource source = DamageSource.Melee)
         {
             if (amount <= 0 || IsDead)
                 return;
 
-            TakeDamage(amount);
+            SetHealth(CurrentHealth - Mathf.Clamp(amount, 0, MaxHealth), isDirectDamage: true, source: source);
             if (_hurtClips == null || _hurtClips.Length == 0)
                 return;
 
@@ -69,7 +75,9 @@ namespace CarX.Gameplay
             _hurtAudio.PlayOneShot(clip);
         }
 
-        public void SetHealth(int amount)
+        public void SetHealth(int amount) => SetHealth(amount, isDirectDamage: true);
+
+        void SetHealth(int amount, bool isDirectDamage, DamageSource source = DamageSource.Other)
         {
             int health = Mathf.Clamp(amount, 0, MaxHealth);
             if (IsDead || health == CurrentHealth) return;
@@ -77,10 +85,21 @@ namespace CarX.Gameplay
             if (CurrentHealth == MaxHealth && health > 0)
                 _nextHealthRecovery = Time.timeAsDouble + HealthRecoveryInterval;
 
+            bool tookDirectDamage = isDirectDamage && health < CurrentHealth;
+            if (tookDirectDamage && _flashlightCondition > 0)
+            {
+                _flashlightCondition = Mathf.Max(0,
+                    _flashlightCondition - (CurrentHealth - health) * FlashlightDamagePerHealthPoint);
+                if (_flashlightCondition == 0)
+                    FlashlightBreakCause = source;
+            }
+
             CurrentHealth = health;
             if (IsDead && Bleeding > 0)
                 SetBleeding(0);
             HealthChanged?.Invoke(health);
+            if (tookDirectDamage)
+                DirectDamageTaken?.Invoke();
         }
 
         internal void AddBleeding(int amount)
@@ -126,7 +145,7 @@ namespace CarX.Gameplay
             {
                 _nextBleedingTick += BleedingInterval;
                 SetBleeding(Bleeding - 1);
-                TakeDamage(1);
+                SetHealth(CurrentHealth - 1, isDirectDamage: false);
             }
 
             if (!IsDead && CurrentHealth < MaxHealth && now >= _nextHealthRecovery)

@@ -48,7 +48,7 @@ namespace CarX.NPC
             {
                 yield return null;
             }
-            while (voice != null && (voice.isPlaying || AudioListener.pause));
+            while (voice != null && (voice.isPlaying || (AudioListener.pause && !voice.ignoreListenerPause)));
         }
 
         internal static AudioClip GetClip(AudioClip[] clips, int index) =>

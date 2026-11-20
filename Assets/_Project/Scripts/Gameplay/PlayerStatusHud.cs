@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CarX.Gameplay
@@ -7,16 +8,21 @@ namespace CarX.Gameplay
     public class PlayerStatusHud : MonoBehaviour
     {
         const float StatusPadding = 24f;
+        const float HealthOnlyHeight = 40f;
         const float BleedingHeight = 26f;
         const float BleedingGap = 5f;
         const float SubtitleDuration = 3f;
         const float DamageFlashAttack = 0.04f;
         const float DamageFlashFade = 0.55f;
+        const float DamageBarsDuration = 7f;
         static readonly Vector2 StatusSize = new(200f, 82f);
 
         PlayerHealth _health;
+        readonly List<NPC.HostileNpc> _hostiles = new();
+        PlayerStatusZone[] _statusZones;
         RectTransform _hudRect;
         RectTransform _statusPanel;
+        RectTransform _barsPanel;
         RectTransform _bleedingPanel;
         Rect _lastSafeArea;
         Vector2 _lastCanvasSize;
@@ -39,6 +45,7 @@ namespace CarX.Gameplay
         float _damageFlashElapsed;
         float _damageFlashStartAlpha;
         float _damageFlashPeak;
+        double _damageBarsVisibleUntil;
         float _subtitleUntil;
         bool _aiming;
         bool _inventoryOpen;
@@ -47,9 +54,14 @@ namespace CarX.Gameplay
 
         internal RectTransform HudRect => _hudRect;
 
+        internal void RegisterHostile(NPC.HostileNpc hostile) => _hostiles.Add(hostile);
+
+        internal void UnregisterHostile(NPC.HostileNpc hostile) => _hostiles.Remove(hostile);
+
         void Start()
         {
             _health = GetComponent<PlayerHealth>();
+            _statusZones = FindObjectsByType<PlayerStatusZone>();
 
             var hud = new GameObject("Player Status HUD", typeof(RectTransform), typeof(Canvas),
                 typeof(UnityEngine.UI.CanvasScaler));
@@ -71,12 +83,18 @@ namespace CarX.Gameplay
             _criticalDarkness.raycastTarget = false;
             SetCriticalDarkness(0f);
 
-            var panel = CreateRect(_hudRect, "Status", typeof(UnityEngine.UI.VerticalLayoutGroup));
+            var panel = CreateRect(_hudRect, "Status");
             panel.anchorMin = panel.anchorMax = panel.pivot = Vector2.zero;
             panel.sizeDelta = StatusSize;
             _statusPanel = panel;
             UpdateStatusLayout();
-            var layout = panel.GetComponent<UnityEngine.UI.VerticalLayoutGroup>();
+
+            var bars = CreateRect(panel, "Health and Flashlight", typeof(UnityEngine.UI.VerticalLayoutGroup));
+            bars.anchorMin = Vector2.zero;
+            bars.anchorMax = Vector2.one;
+            bars.offsetMin = bars.offsetMax = Vector2.zero;
+            _barsPanel = bars;
+            var layout = bars.GetComponent<UnityEngine.UI.VerticalLayoutGroup>();
             layout.spacing = 3;
             layout.childControlWidth = true;
             layout.childControlHeight = true;
@@ -85,10 +103,10 @@ namespace CarX.Gameplay
 
             var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             CreateBleedingPanel(panel, font);
-            _healthLabel = CreateLabel(panel, "Health Label", font);
-            _healthBar = CreateBar(panel, "Health", new Color32(225, 83, 82, 255));
-            _flashlightLabel = CreateLabel(panel, "Flashlight Label", font);
-            _flashlightBar = CreateBar(panel, "Flashlight", new Color32(248, 199, 89, 255));
+            _healthLabel = CreateLabel(bars, "Health Label", font);
+            _healthBar = CreateBar(bars, "Health", new Color32(225, 83, 82, 255));
+            _flashlightLabel = CreateLabel(bars, "Flashlight Label", font);
+            _flashlightBar = CreateBar(bars, "Flashlight", new Color32(248, 199, 89, 255));
 
             var bottomRight = new Vector2(1f, 0f);
             _ammoLabel = CreateLabel(_hudRect, "Pistol Ammo", font);
@@ -151,19 +169,54 @@ namespace CarX.Gameplay
             _lastHealth = _health.CurrentHealth;
             _health.HealthChanged += Refresh;
             _health.BleedingChanged += RefreshBleeding;
+            _health.DirectDamageTaken += RevealDamageBars;
             Refresh(_health.CurrentHealth);
             RefreshBleeding(_health.Bleeding);
+            UpdateBarsVisibility();
         }
 
         void LateUpdate()
         {
             UpdateStatusLayout();
+            UpdateBarsVisibility();
             UpdateDamageFlash();
             if (_subtitleLabel != null && _subtitleLabel.gameObject.activeSelf && Time.unscaledTime >= _subtitleUntil)
             {
                 _subtitleLabel.gameObject.SetActive(false);
                 ClearSubtitleSpeaker();
             }
+        }
+
+        void UpdateBarsVisibility()
+        {
+            bool showFlashlight = !_health.IsDead &&
+                (Time.timeAsDouble < _damageBarsVisibleUntil || IsStatusRelevant());
+            bool showHealth = showFlashlight || (!_health.IsDead && _health.Bleeding > 0);
+            if (_barsPanel.gameObject.activeSelf == showHealth && _flashlightBar.gameObject.activeSelf == showFlashlight)
+                return;
+
+            _flashlightLabel.gameObject.SetActive(showFlashlight);
+            _flashlightBar.gameObject.SetActive(showFlashlight);
+            _barsPanel.gameObject.SetActive(showHealth);
+            float panelHeight = showFlashlight ? StatusSize.y : HealthOnlyHeight;
+            _statusPanel.sizeDelta = new Vector2(StatusSize.x, panelHeight);
+            _bleedingPanel.anchoredPosition = Vector2.up * (showHealth ? panelHeight + BleedingGap : 0f);
+        }
+
+        void RevealDamageBars() => _damageBarsVisibleUntil = Time.timeAsDouble + DamageBarsDuration;
+
+        bool IsStatusRelevant()
+        {
+            foreach (var hostile in _hostiles)
+                if (hostile != null && hostile.IsEngaged)
+                    return true;
+
+            Vector3 position = transform.position;
+            foreach (var zone in _statusZones)
+                if (zone != null && zone.gameObject.scene == gameObject.scene && zone.Contains(position))
+                    return true;
+
+            return false;
         }
 
         void UpdateStatusLayout()
@@ -213,6 +266,7 @@ namespace CarX.Gameplay
             {
                 _health.HealthChanged -= Refresh;
                 _health.BleedingChanged -= RefreshBleeding;
+                _health.DirectDamageTaken -= RevealDamageBars;
             }
             if (_hudRect != null)
                 Destroy(_hudRect.gameObject);
@@ -245,7 +299,7 @@ namespace CarX.Gameplay
             RefreshAimDot();
         }
 
-        internal void ShowSubtitle(string text, NPC.NpcSpeechState speaker = null)
+        internal void ShowSubtitle(string text, NPC.NpcSpeechState speaker = null, float duration = SubtitleDuration)
         {
             if (_subtitleLabel == null)
                 return;
@@ -254,7 +308,7 @@ namespace CarX.Gameplay
             _subtitleSpeaker = speaker;
             if (_subtitleSpeaker != null)
                 _subtitleSpeaker.SetTalking(true);
-            _subtitleUntil = Time.unscaledTime + SubtitleDuration;
+            _subtitleUntil = Time.unscaledTime + duration;
             _subtitleLabel.text = text;
             _subtitleLabel.transform.SetAsLastSibling();
             _subtitleLabel.gameObject.SetActive(true);
@@ -313,12 +367,11 @@ namespace CarX.Gameplay
         void CreateBleedingPanel(RectTransform status, Font font)
         {
             _bleedingPanel = CreateRect(status, "Bleeding", typeof(UnityEngine.UI.Image));
-            _bleedingPanel.gameObject.AddComponent<UnityEngine.UI.LayoutElement>().ignoreLayout = true;
-            _bleedingPanel.anchorMin = new Vector2(0f, 1f);
-            _bleedingPanel.anchorMax = Vector2.one;
+            _bleedingPanel.anchorMin = Vector2.zero;
+            _bleedingPanel.anchorMax = Vector2.right;
             _bleedingPanel.pivot = new Vector2(0.5f, 0f);
             _bleedingPanel.sizeDelta = new Vector2(0f, BleedingHeight);
-            _bleedingPanel.anchoredPosition = new Vector2(0f, BleedingGap);
+            _bleedingPanel.anchoredPosition = Vector2.up * (StatusSize.y + BleedingGap);
             var background = _bleedingPanel.GetComponent<UnityEngine.UI.Image>();
             background.color = new Color32(166, 42, 32, 245);
             background.raycastTarget = false;
@@ -467,9 +520,11 @@ namespace CarX.Gameplay
             return bar;
         }
 
-        internal static RectTransform CreateRect(Transform parent, string name, System.Type component)
+        internal static RectTransform CreateRect(Transform parent, string name, System.Type component = null)
         {
-            var rect = new GameObject(name, typeof(RectTransform), component).GetComponent<RectTransform>();
+            var rect = (RectTransform)new GameObject(name, typeof(RectTransform)).transform;
+            if (component != null)
+                rect.gameObject.AddComponent(component);
             rect.SetParent(parent, false);
             return rect;
         }

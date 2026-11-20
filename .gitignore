@@ -65,3 +65,12 @@ desktop.ini
 
 # Archives prepared for sharing via cloud drive
 /_ForDrive/
+
+# Heavy third-party packs (tree pack 325 MB, trash pack 252 MB): shared as an archive with .meta files so GUIDs match
+/[Aa]ssets/TreePackVol.1/
+/[Aa]ssets/TreePackVol.1.meta
+/[Aa]ssets/URP_WasteOvergrowth_SA/
+/[Aa]ssets/URP_WasteOvergrowth_SA.meta
+
+# local tooling
+/.codegraph/

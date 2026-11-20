@@ -25,6 +25,10 @@ namespace CarX.Level
         public Color skyColor = new Color(6f, 6.3f, 7f);
         [Tooltip("Тени от дневного света (люди и предметы у выхода дают тени на пол)")]
         public bool shadows = true;
+        [Tooltip("Светящаяся коробка «неба» за проёмом. Выключено, если снаружи настоящая сцена")]
+        public bool fakeSky = true;
+        [Tooltip("Тени от этого света отбрасывают только стены тоннеля (не люди и не предметы). Для выхода в настоящую сцену")]
+        public bool tunnelShadowsOnly;
         public Material skyMaterial;
         public VolumeProfile exposureProfile;
         [Tooltip("На какую глубину внутрь тоннеля действует пониженная экспозиция, м")]
@@ -64,7 +68,7 @@ namespace CarX.Level
                     h = h * 31 + Mathf.RoundToInt(f * 1000f);
                 h = h * 31 + (skyMaterial != null ? skyMaterial.name.GetHashCode() : 1);
                 h = h * 31 + (exposureProfile != null ? exposureProfile.name.GetHashCode() : 1);
-                h = h * 31 + (mesh != null ? 1 : 0) + (shadows ? 2 : 0);
+                h = h * 31 + (mesh != null ? 1 : 0) + (shadows ? 2 : 0) + (fakeSky ? 4 : 0) + (tunnelShadowsOnly ? 8 : 0);
                 return h;
             }
         }
@@ -91,6 +95,7 @@ namespace CarX.Level
             mpb.SetColor("_Color", skyColor * k);
             mpb.SetFloat("_Horizon", 0.15f);
             mr.SetPropertyBlock(mpb);
+            sky.gameObject.SetActive(fakeSky);
 
             // grazing light: a spot out in the daylight, on the tunnel axis, shining in through the mouth like a window.
             // Set back from the mouth so the walls right at the exit are not burnt out (a point light at the mouth would be)
@@ -114,7 +119,12 @@ namespace CarX.Level
             light.shadowBias = 1f;
             light.shadowNormalBias = 3f;
             var data = light.GetUniversalAdditionalLightData();
-            if (data != null) data.usePipelineSettings = false;
+            if (data != null)
+            {
+                data.usePipelineSettings = false;
+                data.customShadowLayers = tunnelShadowsOnly;
+                if (tunnelShadowsOnly) data.shadowRenderingLayers = TunnelNetwork.TunnelRenderingLayer;
+            }
             light.enabled = k > 0.001f;
 
             // eye adaptation stand-in: a volume with lower exposure; its weight follows the camera (1 at the mouth, 0 deep inside)

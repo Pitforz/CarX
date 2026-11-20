@@ -339,6 +339,16 @@ namespace CarX.NPC
             }
         }
 
+        internal void Skip()
+        {
+            if (!IsRunning)
+                return;
+
+            if (_runningTour)
+                _hasCompletedIntroduction = true;
+            Cancel();
+        }
+
         internal void Cancel()
         {
             if (!IsRunning)

@@ -8,19 +8,20 @@ namespace CarX.Gameplay
 {
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerPistol))]
+    [RequireComponent(typeof(PlayerInnerVoice))]
     [DefaultExecutionOrder(-100)]
     public sealed class PlayerInventory : MonoBehaviour
     {
         internal const int SlotCount = 7;
         internal const int PistolSlot = 0;
         internal const int MagazineSlot = 1;
+        internal const int FirstClueSlot = 2;
         const float PointerResumeDistance = 3f;
         const float PickupDistance = 3f;
         const float PickupAimRadius = 0.085f;
         const float DropDistance = 1f;
         const float DropRadius = 0.15f;
         const int WorldLayers = Physics.DefaultRaycastLayers;
-        const string PistolDropSubtitle = "Эта вещь мне ещё понадобится";
         internal const string HandsFullSubtitle = "Сначала поставь ящик на Q";
 
         [SerializeField] Sprite _wheelBase;
@@ -34,12 +35,14 @@ namespace CarX.Gameplay
         readonly RaycastHit[] _hits = new RaycastHit[16];
         readonly RaycastHit[] _pickupSightHits = new RaycastHit[8];
         readonly Collider[] _overlaps = new Collider[16];
+        readonly ClueNote[] _clues = new ClueNote[SlotCount];
         int? _spareRounds = PlayerPistol.MagazineSize;
         FirstPersonController _controller;
         StarterAssetsInputs _inputs;
         PlayerPistol _pistol;
         PlayerStatusHud _hud;
         PlayerMenus _menus;
+        PlayerInnerVoice _innerVoice;
         InventoryWheelView _wheel;
         MonoBehaviour _focusedPickup;
         ToolboxPickup _carriedToolbox;
@@ -57,8 +60,11 @@ namespace CarX.Gameplay
         internal bool IsOpen => _open;
         internal bool IsCarryingTools => _carriedToolbox != null;
         internal bool IsCarryingToolbox(ToolboxPickup toolbox) => toolbox != null && _carriedToolbox == toolbox;
-        internal bool BlocksWeaponInput =>
-            _open || _closedFrame == Time.frameCount || (_menus != null && _menus.BlocksGameplayInput);
+        public bool HasLowerFloorKey { get; private set; }
+
+        internal bool BlocksGameplayInput => _open || _closedFrame == Time.frameCount ||
+            (_menus != null && _menus.BlocksGameplayInput);
+        internal bool BlocksWeaponInput => IsCarryingTools || BlocksGameplayInput;
         bool IsHoldingMagazine => _heldMagazine != null && _heldMagazine.activeSelf;
 
         void Awake()
@@ -68,6 +74,7 @@ namespace CarX.Gameplay
             _pistol = GetComponent<PlayerPistol>();
             _hud = GetComponent<PlayerStatusHud>();
             _menus = GetComponent<PlayerMenus>();
+            _innerVoice = GetComponent<PlayerInnerVoice>();
         }
 
         void Update()
@@ -111,9 +118,9 @@ namespace CarX.Gameplay
                 if (drop)
                 {
                     if (IsCarryingTools)
-                        PutDownToolbox();
+                        TryPutDownToolbox();
                     else if (_selectedSlot == PistolSlot)
-                        _hud.ShowSubtitle(PistolDropSubtitle);
+                        _innerVoice.KeepPistol();
                     else if (_selectedSlot == MagazineSlot)
                         DropMagazine();
                 }
@@ -126,9 +133,9 @@ namespace CarX.Gameplay
             if (drop)
             {
                 if (IsCarryingTools)
-                    PutDownToolbox();
+                    TryPutDownToolbox();
                 else if (_pistol.IsEquipped)
-                    _hud.ShowSubtitle(PistolDropSubtitle);
+                    _innerVoice.KeepPistol();
                 else if (IsHoldingMagazine)
                     DropMagazine();
             }
@@ -271,11 +278,18 @@ namespace CarX.Gameplay
         void RefreshWheel()
         {
             if (_open)
-                _wheel.Refresh(_selectedSlot, _spareRounds, _pistol.IsEquipped, IsHoldingMagazine);
+                _wheel.Refresh(_selectedSlot, _spareRounds, _pistol.IsEquipped, IsHoldingMagazine, _clues,
+                    IsCarryingTools);
         }
 
         void ConfirmSelectedItem()
         {
+            if (_clues[_selectedSlot] != null)
+            {
+                _menus?.ShowClue(_clues[_selectedSlot]);
+                return;
+            }
+
             if (IsCarryingTools)
             {
                 _hud.ShowSubtitle(HandsFullSubtitle);
@@ -295,6 +309,30 @@ namespace CarX.Gameplay
                 return;
 
             SetOpen(false);
+        }
+
+        internal bool TryCollectClue(ClueNote note, System.Action onDismissed = null)
+        {
+            if (note == null || _menus == null)
+                return false;
+
+            for (int slot = FirstClueSlot; slot < SlotCount; slot++)
+            {
+                if (_clues[slot] == note)
+                    return false;
+                if (_clues[slot] != null)
+                    continue;
+
+                if (!_menus.ShowClue(note, () =>
+                {
+                    _innerVoice.ReadClue(note.ReadVoice);
+                    onDismissed?.Invoke();
+                }))
+                    return false;
+                _clues[slot] = note;
+                return true;
+            }
+            return false;
         }
 
         bool HoldMagazine()
@@ -383,7 +421,7 @@ namespace CarX.Gameplay
 
         void UpdatePickup(bool pickupPressed)
         {
-            if (IsCarryingTools || (_menus != null && _menus.HasTalkTarget))
+            if (_menus != null && _menus.HasTalkTarget)
             {
                 SetFocusedPickup(null);
                 return;
@@ -394,7 +432,12 @@ namespace CarX.Gameplay
             if (!pickupPressed)
                 return;
 
-            if (pickup is ToolboxPickup toolbox)
+            if (pickup is CluePickup clue && TryCollectClue(clue.Note))
+            {
+                clue.gameObject.SetActive(false);
+                Destroy(clue.gameObject);
+            }
+            else if (pickup is ToolboxPickup toolbox)
                 CarryToolbox(toolbox);
             else if (pickup is DroppedMagazine magazine && !_spareRounds.HasValue)
             {
@@ -413,21 +456,27 @@ namespace CarX.Gameplay
             _carriedToolbox = toolbox;
             toolbox.Carry(_pistol.ViewCamera.transform);
             _menus?.RefreshQuestDisplay();
+            RefreshWheel();
             _hud.ShowSubtitle("Q — поставить ящик");
         }
 
-        void PutDownToolbox()
+        internal bool TryPutDownToolbox()
         {
+            if (!IsCarryingTools)
+                return true;
+
             if (!TryGetDropPosition(out var position, ToolboxPickup.DropClearanceRadius))
             {
                 _hud.ShowSubtitle("Здесь нет места для ящика");
-                return;
+                return false;
             }
 
             var toolbox = _carriedToolbox;
             _carriedToolbox = null;
             toolbox.PutDown(position, transform.eulerAngles.y, GetComponentsInChildren<Collider>());
             _menus?.RefreshQuestDisplay();
+            RefreshWheel();
+            return true;
         }
 
         internal bool DeliverTools()
@@ -439,8 +488,11 @@ namespace CarX.Gameplay
             _carriedToolbox = null;
             toolbox.gameObject.SetActive(false);
             Destroy(toolbox.gameObject);
+            RefreshWheel();
             return true;
         }
+
+        internal void ReceiveLowerFloorKey() => HasLowerFloorKey = true;
 
         MonoBehaviour FindPickupInView()
         {
@@ -467,6 +519,7 @@ namespace CarX.Gameplay
 
                 var pickup = FindPickup(hit.collider);
                 if (pickup == null || !pickup.isActiveAndEnabled || pickup.gameObject.scene != gameObject.scene ||
+                    (IsCarryingTools && pickup is not CluePickup) ||
                     !HasPickupLineOfSight(ray.origin, hit.point, pickup.transform))
                     continue;
 
@@ -478,6 +531,10 @@ namespace CarX.Gameplay
 
         static MonoBehaviour FindPickup(Collider collider)
         {
+            var clue = collider.GetComponentInParent<CluePickup>();
+            if (clue != null)
+                return clue.Note != null && clue.Note.Paper != null ? clue : null;
+
             var toolbox = collider.GetComponentInParent<ToolboxPickup>();
             if (toolbox != null)
                 return toolbox.PickupAllowed ? toolbox : null;
@@ -529,6 +586,8 @@ namespace CarX.Gameplay
                     previousToolbox.SetHighlighted(false);
                 else if (_focusedPickup is DroppedMagazine previousMagazine)
                     previousMagazine.SetHighlighted(false);
+                else if (_focusedPickup is CluePickup previousClue)
+                    previousClue.SetHighlighted(false);
             }
             _focusedPickup = pickup;
 
@@ -542,6 +601,11 @@ namespace CarX.Gameplay
                 magazine.SetHighlighted(true);
                 string action = _spareRounds.HasValue ? "Слот обоймы занят" : "E — подобрать";
                 _hud.ShowPickupHint($"Обойма · {magazine.Rounds}/{PlayerPistol.MagazineSize}\n{action}");
+            }
+            else if (pickup is CluePickup clue)
+            {
+                clue.SetHighlighted(true);
+                _hud.ShowPickupHint($"{clue.Note.Title}\nE — подобрать");
             }
             else if (_hud != null)
                 _hud.ShowPickupHint(null);
