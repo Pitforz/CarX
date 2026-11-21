@@ -17,6 +17,10 @@ namespace CarX.EditorTools
             Undo.undoRedoPerformed += () =>
             {
                 foreach (var n in Object.FindObjectsByType<TunnelNetwork>(FindObjectsInactive.Exclude)) n.MarkDirty();
+                EditorApplication.delayCall += () =>
+                {
+                    foreach (var n in Object.FindObjectsByType<TunnelNetwork>(FindObjectsInactive.Exclude)) TunnelTrash.Sync(n);
+                };
             };
             Selection.selectionChanged += Redirect;
             SceneView.duringSceneGui -= TunnelNetworkEditor.OnScene;
@@ -60,16 +64,17 @@ namespace CarX.EditorTools
     [CustomEditor(typeof(TunnelNetwork))]
     public class TunnelNetworkEditor : Editor
     {
-        enum Tool { Select, Pen, Brush, Marker, Scissors }
+        enum Tool { Select, Pen, Brush, Marker, Scissors, Trash }
 
-        static readonly string[] ToolNames = { "Выбор", "Перо", "Кисть", "Метка", "Ножницы" };
+        static readonly string[] ToolNames = { "Выбор", "Перо", "Кисть", "Метка", "Ножницы", "Мусор" };
         static readonly string[] ToolHints =
         {
             "Клик по узлу или линии. Узел двигайте стрелками, Delete удаляет выбранное. Esc снимает выделение.",
             "Клик: новый узел и линия от предыдущего. Клик по узлу соединяет с ним, Shift+клик по линии делает врезку в неё. Esc заканчивает линию.",
             "Клик по линии красит её в выбранный тип. С Shift красит весь тоннель от камеры до камеры.",
             "Клик по линии ставит подъём наверх выбранного вида. Двигать и удалять в инспекторе линии.",
-            "Клик по линии вставляет узел. Клик по узлу убирает его (линии с двух сторон сливаются)."
+            "Клик по линии вставляет узел. Клик по узлу убирает его (линии с двух сторон сливаются).",
+            "Клик по линии, комнате или камере: больше мусора. Shift+клик: меньше. Ctrl+клик: разложить по-новому (новый сид)."
         };
 
         static Tool tool = Tool.Select;
@@ -103,6 +108,12 @@ namespace CarX.EditorTools
                 {
                     if (on) SceneVisibilityManager.instance.Hide(gen.gameObject, true);
                     else SceneVisibilityManager.instance.Show(gen.gameObject, true);
+                }
+                var trash = net.transform.Find(TunnelTrash.RootName);
+                if (trash != null)
+                {
+                    if (on) SceneVisibilityManager.instance.Hide(trash.gameObject, true);
+                    else SceneVisibilityManager.instance.Show(trash.gameObject, true);
                 }
                 if (!on) net.MarkDirty();
             }
@@ -353,6 +364,7 @@ namespace CarX.EditorTools
                         Changed();
                     }
                     break;
+                case Tool.Trash: TrashClick(net, node, edge, e); break;
                 case Tool.Scissors:
                     if (node != null) { Record("Убрать узел"); Dissolve(net, node); Changed(); }
                     else if (edge != null)
@@ -405,6 +417,111 @@ namespace CarX.EditorTools
             Changed();
         }
 
+        // ------------------------------------------------------------------ trash tool
+
+        /// <summary>The room or chamber under the mouse (its floor), when no node or line is hovered.</summary>
+        static GraphNode HoverFloorArea(TunnelNetwork net, Vector2 mouse)
+        {
+            var ray = HandleUtility.GUIPointToWorldRay(mouse);
+            GraphNode best = null;
+            float bestT = float.MaxValue;
+            foreach (var n in net.nodes)
+            {
+                if (!TunnelTrash.CanHold(net, n)) continue;
+                var plane = new Plane(net.transform.up, net.World(n.position));
+                float t;
+                if (!plane.Raycast(ray, out t) || t > 400f || t >= bestT) continue;
+                var p = net.Local(ray.GetPoint(t));
+                if (net.RoomAt(p, 0.2f) != null && net.RoomAt(p, 0.2f).node == n || net.ChamberAt(p, 0.2f) != null && net.ChamberAt(p, 0.2f).node == n)
+                {
+                    best = n;
+                    bestT = t;
+                }
+            }
+            return best;
+        }
+
+        static void TrashClick(TunnelNetwork net, GraphNode node, GraphEdge edge, Event ev)
+        {
+            if (node != null && !TunnelTrash.CanHold(net, node)) node = null;
+            if (node == null && edge == null) node = HoverFloorArea(net, ev.mousePosition);
+            if (node == null && edge == null) return;
+            if (!TunnelTrash.Ready) Note("Пак URP_WasteOvergrowth_SA не найден: количество запомнится, мусор появится, когда пак будет в проекте");
+            int step = TunnelTrash.Settings.perClick;
+            Record("Мусор");
+            if (node != null)
+            {
+                if (ev.control || ev.command) node.trashSeed = TunnelTrash.NewSeed();
+                else node.trash = Mathf.Max(0, node.trash + (ev.shift ? -step : step));
+                selNode = node.id; selEdge = null;
+            }
+            else
+            {
+                if (ev.control || ev.command) edge.trashSeed = TunnelTrash.NewSeed();
+                else edge.trash = Mathf.Max(0, edge.trash + (ev.shift ? -step : step));
+                selEdge = edge.id; selNode = null;
+            }
+            EditorUtility.SetDirty(net);
+            TunnelTrash.Sync(net);
+            SceneView.RepaintAll();
+            RepaintInspector();
+        }
+
+        static void Note(string text)
+        {
+            if (SceneView.lastActiveSceneView != null) SceneView.lastActiveSceneView.ShowNotification(new GUIContent(text));
+        }
+
+        static void TrashEverywhere(TunnelNetwork net, int sign)
+        {
+            Record(sign > 0 ? "Мусор везде" : "Меньше мусора везде");
+            int step = TunnelTrash.Settings.perClick;
+            foreach (var e in net.edges) e.trash = Mathf.Max(0, e.trash + sign * TunnelTrash.EverywhereStep(net, e, step));
+            foreach (var n in net.nodes) if (TunnelTrash.CanHold(net, n)) n.trash = Mathf.Max(0, n.trash + sign * step * (net.IsRoom(n.id) ? 2 : 1));
+            EditorUtility.SetDirty(net);
+            TunnelTrash.Sync(net);
+        }
+
+        static void TrashPanel(TunnelNetwork net)
+        {
+            var st = TunnelTrash.Settings;
+            EditorGUI.BeginChangeCheck();
+            int pc = EditorGUILayout.IntSlider("Точек за клик", st.perClick, 1, 10);
+            if (EditorGUI.EndChangeCheck()) { Undo.RecordObject(st, "Мусор: за клик"); st.perClick = pc; EditorUtility.SetDirty(st); }
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("+ Везде", EditorStyles.miniButton)) TrashEverywhere(net, 1);
+            if (GUILayout.Button("− Везде", EditorStyles.miniButton)) TrashEverywhere(net, -1);
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Новый сид везде", EditorStyles.miniButton))
+            {
+                Record("Мусор: новый сид");
+                foreach (var e in net.edges) if (e.trash > 0) e.trashSeed = TunnelTrash.NewSeed();
+                foreach (var n in net.nodes) if (n.trash > 0) n.trashSeed = TunnelTrash.NewSeed();
+                EditorUtility.SetDirty(net);
+                TunnelTrash.Sync(net);
+            }
+            if (GUILayout.Button("Убрать весь", EditorStyles.miniButton))
+            {
+                Record("Убрать весь мусор");
+                foreach (var e in net.edges) e.trash = 0;
+                foreach (var n in net.nodes) n.trash = 0;
+                EditorUtility.SetDirty(net);
+                TunnelTrash.Sync(net);
+            }
+            GUILayout.EndHorizontal();
+            if (GUILayout.Button("Настройки мусора (префабы, доли)", EditorStyles.miniButton)) EditorUtility.OpenPropertyEditor(st);
+            int spots, places, objects;
+            TunnelTrash.Stats(net, out spots, out places, out objects);
+            var style = new GUIStyle(EditorStyles.wordWrappedMiniLabel);
+            if (!TunnelTrash.Ready)
+            {
+                style.normal.textColor = new Color(1f, 0.6f, 0.3f);
+                GUILayout.Label("Пак URP_WasteOvergrowth_SA не найден: мусор не ставится и не удаляется, количество хранится в графе.", style);
+            }
+            GUILayout.Label("Мусор: " + spots + " точек на " + places + " участках, объектов " + objects, style);
+        }
+
         /// <summary>Removes a node; a node between exactly two lines merges them into one.</summary>
         static void Dissolve(TunnelNetwork net, GraphNode n)
         {
@@ -425,7 +542,7 @@ namespace CarX.EditorTools
             net.RemoveNode(n.id);
             if (x == y) return;
             var ne = net.AddEdge(x, y, e1.type);
-            if (ne != null) { ne.shafts = shafts; ne.seed = e1.seed; }
+            if (ne != null) { ne.shafts = shafts; ne.seed = e1.seed; ne.trash = e1.trash + e2.trash; ne.trashSeed = e1.trashSeed; }
         }
 
         static void AddColumn(TunnelNetwork net, GraphNode n, ColumnShape shape)
@@ -655,6 +772,21 @@ namespace CarX.EditorTools
                 if (selected && n.id == hoverNode) s *= 1.4f;
                 Handles.SphereHandleCap(0, p, Quaternion.identity, s, EventType.Repaint);
             }
+            // trash counts while the trash tool is active
+            if (selected && tool == Tool.Trash)
+            {
+                var ls = new GUIStyle(EditorStyles.boldLabel);
+                ls.normal.textColor = new Color(0.85f, 0.65f, 0.3f);
+                foreach (var e in net.edges)
+                {
+                    if (e.trash <= 0) continue;
+                    var A = net.Node(e.a); var B = net.Node(e.b);
+                    if (A == null || B == null) continue;
+                    Handles.Label(net.World((A.position + B.position) * 0.5f) + Vector3.up * 0.6f, "мусор " + e.trash, ls);
+                }
+                foreach (var n in net.nodes)
+                    if (n.trash > 0) Handles.Label(net.World(n.position) + Vector3.up * 0.9f, "мусор " + n.trash, ls);
+            }
             // problems
             Handles.color = Color.red;
             foreach (var i in net.issues)
@@ -693,6 +825,7 @@ namespace CarX.EditorTools
             }
             if (tool == Tool.Marker) markerType = (ShaftType)EditorGUILayout.EnumPopup("Вид метки", markerType);
             if (tool == Tool.Pen) penHeight = EditorGUILayout.FloatField("Высота нового узла", penHeight);
+            if (tool == Tool.Trash) TrashPanel(net);
             GUILayout.BeginHorizontal();
             snap = GUILayout.Toggle(snap, "Сетка 1 м", EditorStyles.miniButton);
             bool sch = GUILayout.Toggle(Schematic, "Схема", EditorStyles.miniButton);
