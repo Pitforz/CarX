@@ -65,3 +65,11 @@ desktop.ini
 
 # Archives prepared for sharing via cloud drive
 /_ForDrive/
+
+# Asset packs shared separately from the Unity project
+/Assets/Abandoned World/
+/Assets/Abandoned World.meta
+/Assets/TreePackVol.1/
+/Assets/TreePackVol.1.meta
+/Assets/URP_WasteOvergrowth_SA/
+/Assets/URP_WasteOvergrowth_SA.meta
