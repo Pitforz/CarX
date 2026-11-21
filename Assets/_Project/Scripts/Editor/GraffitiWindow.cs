@@ -47,6 +47,8 @@ namespace CarX.EditorTools
             EditorApplication.projectChanged += Reload;
             SceneView.duringSceneGui -= OnScene;
             SceneView.duringSceneGui += OnScene;
+            SceneView.beforeSceneGui -= BeforeScene;
+            SceneView.beforeSceneGui += BeforeScene;
         }
 
         void OnDisable()
@@ -56,6 +58,7 @@ namespace CarX.EditorTools
             if (open.Count == 0)
             {
                 SceneView.duringSceneGui -= OnScene;
+                SceneView.beforeSceneGui -= BeforeScene;
                 SetSpray(false);
             }
             Save();
@@ -223,19 +226,7 @@ namespace CarX.EditorTools
             int id = GUIUtility.GetControlID(Hint, FocusType.Passive);
             if (e.type == EventType.Layout) HandleUtility.AddDefaultControl(id);   // clicks spray instead of selecting
 
-            if (e.type == EventType.KeyDown && e.keyCode == KeyCode.Escape) { SetSpray(false); e.Use(); return; }
-            if (e.type == EventType.MouseDown && e.button == 1 && !e.alt) { SetSpray(false); e.Use(); return; }
-            if (e.type == EventType.ScrollWheel && (e.shift || e.control))
-            {
-                float d = Mathf.Abs(e.delta.y) > Mathf.Abs(e.delta.x) ? e.delta.y : e.delta.x;
-                if (e.shift) size = Mathf.Clamp(size * (d > 0 ? 1f / 1.08f : 1.08f), 0.1f, 8f);
-                else angle = Mathf.Repeat(angle + (d > 0 ? -5f : 5f) + 180f, 360f) - 180f;
-                Save();
-                RepaintAll();
-                e.Use();
-            }
-
-            bool mouse = e.type == EventType.MouseMove || e.type == EventType.MouseDrag || e.type == EventType.MouseDown || e.type == EventType.ScrollWheel;
+            bool mouse = e.type == EventType.MouseMove || e.type == EventType.MouseDrag || e.type == EventType.ScrollWheel;
             if (mouse || (e.type == EventType.Layout && e.mousePosition != lastMouse))
             {
                 lastMouse = e.mousePosition;
@@ -250,13 +241,75 @@ namespace CarX.EditorTools
                 var rot = Orientation(normal, view.camera, angle);
                 ShowPreview(pos, rot);
                 DrawOutline(pos, rot);
-                if (e.type == EventType.MouseDown && e.button == 0 && !e.alt)
-                {
-                    Place(current, pos, rot, hitGo, size, opacity, wear, flip);
-                    e.Use();
-                }
             }
             if (e.type == EventType.MouseMove || e.type == EventType.MouseDrag) view.Repaint();
+        }
+
+        static bool downTaken;
+
+        /// <summary>Automation (bridge: call CarX.EditorTools.GraffitiWindow.ClickTest): sends a mouse move + click to the Scene view centre
+        /// with the spray on and reports whether a graffiti appeared; the new graffiti is undone right away.</summary>
+        static string ClickTest()
+        {
+            var view = SceneView.lastActiveSceneView;
+            if (view == null) return "no scene view";
+            Open();
+            var imgs = GraffitiLibrary.Images();
+            if (imgs.Count == 0) return "no pictures";
+            if (current == null) current = imgs[0];
+            SetSpray(true);
+            int before = Object.FindObjectsByType<GraffitiDecal>(FindObjectsInactive.Include).Length;
+            var c = new Vector2(view.position.width * 0.5f, view.position.height * 0.5f);
+            view.SendEvent(new Event { type = EventType.MouseMove, mousePosition = c });
+            view.SendEvent(new Event { type = EventType.Layout, mousePosition = c });
+            bool hitBefore = lastHit;
+            view.SendEvent(new Event { type = EventType.MouseDown, button = 0, clickCount = 1, mousePosition = c });
+            view.SendEvent(new Event { type = EventType.MouseUp, button = 0, clickCount = 1, mousePosition = c });
+            int after = Object.FindObjectsByType<GraffitiDecal>(FindObjectsInactive.Include).Length;
+            string where = lastGo != null ? lastGo.name : "-";
+            if (after > before) Undo.PerformUndo();
+            int undone = Object.FindObjectsByType<GraffitiDecal>(FindObjectsInactive.Include).Length;
+            SetSpray(false);
+            return "hit " + hitBefore + " on " + where + ", graffiti " + before + " -> " + after + " -> after undo " + undone;
+        }
+
+        /// <summary>Clicks, keys and the wheel are taken here, before any other Scene view tool (the tunnel graph editor also listens
+        /// to clicks and would otherwise eat the click). The spot under the cursor comes from the last mouse move.</summary>
+        static void BeforeScene(SceneView view)
+        {
+            if (!spray || current == null || EditorApplication.isPlaying) { downTaken = false; return; }
+            var e = Event.current;
+            switch (e.type)
+            {
+                case EventType.KeyDown:
+                    if (e.keyCode == KeyCode.Escape) { SetSpray(false); e.Use(); }
+                    break;
+                case EventType.MouseDown:
+                    if (e.alt) break;   // Alt + mouse = orbit the camera as usual
+                    if (e.button == 1) { SetSpray(false); e.Use(); break; }
+                    if (e.button != 0) break;
+                    if (lastHit && (e.mousePosition - lastMouse).sqrMagnitude < 36f)
+                        Place(current, lastPos, Orientation(lastNormal, view.camera, angle), lastGo, size, opacity, wear, flip);
+                    downTaken = true;
+                    e.Use();
+                    break;
+                case EventType.MouseDrag:
+                    if (downTaken && e.button == 0) e.Use();
+                    break;
+                case EventType.MouseUp:
+                    if (downTaken && e.button == 0) { downTaken = false; e.Use(); }
+                    break;
+                case EventType.ScrollWheel:
+                    if (!e.shift && !e.control) break;
+                    float d = Mathf.Abs(e.delta.y) > Mathf.Abs(e.delta.x) ? e.delta.y : e.delta.x;
+                    if (e.shift) size = Mathf.Clamp(size * (d > 0 ? 1f / 1.08f : 1.08f), 0.1f, 8f);
+                    else angle = Mathf.Repeat(angle + (d > 0 ? -5f : 5f) + 180f, 360f) - 180f;
+                    Save();
+                    RepaintAll();
+                    view.Repaint();
+                    e.Use();
+                    break;
+            }
         }
 
         /// <summary>Upright on walls (picture "up" = world up), on floors and ceilings it faces the viewer.</summary>
@@ -307,42 +360,120 @@ namespace CarX.EditorTools
 
         // ------------------------------------------------------------------ hit test: what you see, not just colliders
 
-        static MethodInfo intersectRayMesh;
-
         public static bool Raycast(Vector2 guiPos, out Vector3 pos, out Vector3 normal, out GameObject go)
         {
-            var ray = HandleUtility.GUIPointToWorldRay(guiPos);
+            var picked = HandleUtility.PickGameObject(guiPos, false);
+            return Cast(HandleUtility.GUIPointToWorldRay(guiPos), picked, out pos, out normal, out go);
+        }
+
+        /// <summary>First surface that is actually visible along the ray. Tunnels are one-sided meshes: from outside, the wall nearest to the
+        /// camera has its back to the viewer and is not drawn, so the ray passes through it and lands on the inner wall behind.
+        /// `picked` is what the Scene view picked under the cursor (may be null).</summary>
+        public static bool Cast(Ray ray, GameObject picked, out Vector3 pos, out Vector3 normal, out GameObject go)
+        {
             pos = normal = Vector3.zero;
-            go = HandleUtility.PickGameObject(guiPos, false);
+            go = picked;
             if (go != null && go.name.StartsWith("_CarX_Graffiti")) go = null;
             if (go != null)
             {
                 var mf = go.GetComponent<MeshFilter>();
                 RaycastHit h;
-                if (mf != null && mf.sharedMesh != null && RayMesh(ray, mf, out h))
+                if (mf != null && mf.sharedMesh != null && RayMeshVisible(ray, mf, out h))
                 {
                     pos = h.point;
-                    normal = h.normal.sqrMagnitude > 0.5f ? h.normal.normalized : -ray.direction;
-                    if (Vector3.Dot(normal, ray.direction) > 0f) normal = -normal;   // inside tunnels: face the viewer
+                    normal = h.normal;
                     return true;
                 }
             }
-            // terrains, skinned meshes, objects without a mesh filter: physics
-            RaycastHit best = default(RaycastHit);
-            float bestD = float.MaxValue;
-            foreach (var h in Physics.RaycastAll(ray, 2000f, ~(1 << 2), QueryTriggerInteraction.Ignore))
+            // terrains, skinned meshes, objects without a mesh filter, or the picked object has no visible face here: physics
+            foreach (var h in SortedHits(ray))
             {
                 if (!h.collider.gameObject.scene.isLoaded) continue;
-                if (h.distance < bestD) { bestD = h.distance; best = h; }
+                Vector3 n = FaceNormal(h);
+                if (!Visible(n, ray.direction, CullOf(h.collider.gameObject))) continue;
+                pos = h.point;
+                normal = Vector3.Dot(n, ray.direction) > 0f ? -n : n;
+                go = h.collider.gameObject;
+                return true;
             }
-            if (bestD == float.MaxValue) return false;
-            pos = best.point;
-            normal = Vector3.Dot(best.normal, ray.direction) > 0f ? -best.normal : best.normal;
-            go = best.collider.gameObject;
-            return true;
+            go = null;
+            return false;
         }
 
-        static bool RayMesh(Ray ray, MeshFilter mf, out RaycastHit hit)
+        static RaycastHit[] SortedHits(Ray ray)
+        {
+            var hits = Physics.RaycastAll(ray, 2000f, ~(1 << 2), QueryTriggerInteraction.Ignore);
+            System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+            return hits;
+        }
+
+        /// <summary>Which faces the material draws: 0 = both sides, 1 = front faces only (normal towards the viewer), 2 = back faces only.</summary>
+        static int CullOf(GameObject go)
+        {
+            var r = go.GetComponent<Renderer>();
+            if (r == null) return 1;
+            var m = r.sharedMaterial;
+            if (m != null && m.HasProperty("_Cull"))
+            {
+                int c = Mathf.RoundToInt(m.GetFloat("_Cull"));   // UnityEngine.Rendering.CullMode: Off 0, Front 1, Back 2
+                return c == 0 ? 0 : c == 1 ? 2 : 1;
+            }
+            return 1;
+        }
+
+        static bool Visible(Vector3 faceNormal, Vector3 dir, int sides)
+        {
+            float d = Vector3.Dot(faceNormal, dir);
+            return sides == 0 || (sides == 1 ? d < 0f : d > 0f);
+        }
+
+        /// <summary>Normal of the triangle that was hit, from its winding (what decides which side is drawn).</summary>
+        static Vector3 FaceNormal(RaycastHit h)
+        {
+            var mc = h.collider as MeshCollider;
+            if (mc != null && mc.sharedMesh != null && mc.sharedMesh.isReadable && h.triangleIndex >= 0)
+                return TriNormal(mc.sharedMesh, h.triangleIndex, mc.transform);
+            return h.normal;
+        }
+
+        static Vector3 TriNormal(Mesh mesh, int tri, Transform t)
+        {
+            var idx = mesh.triangles;
+            if (tri * 3 + 2 >= idx.Length) return Vector3.zero;
+            var v = mesh.vertices;
+            Vector3 a = v[idx[tri * 3]], b = v[idx[tri * 3 + 1]], c = v[idx[tri * 3 + 2]];
+            return t.TransformDirection(Vector3.Cross(b - a, c - a)).normalized;   // Unity: clockwise = front
+        }
+
+        static MethodInfo intersectRayMesh;
+
+        /// <summary>First drawn face of the mesh along the ray: faces seen from behind are skipped (the ray goes on through them).</summary>
+        static bool RayMeshVisible(Ray ray, MeshFilter mf, out RaycastHit hit)
+        {
+            int sides = CullOf(mf.gameObject);
+            float travelled = 0f;
+            Vector3 origin = ray.origin;
+            for (int i = 0; i < 24; i++)
+            {
+                if (!RayMesh(new Ray(origin, ray.direction), mf, out hit)) return false;
+                Vector3 n = hit.normal;
+                if (mf.sharedMesh.isReadable && hit.triangleIndex >= 0) n = TriNormal(mf.sharedMesh, hit.triangleIndex, mf.transform);
+                if (n.sqrMagnitude < 0.25f) n = hit.normal;
+                travelled += hit.distance;
+                if (Visible(n, ray.direction, sides))
+                {
+                    hit.normal = Vector3.Dot(n, ray.direction) > 0f ? -n : n;   // double-sided: face the viewer
+                    hit.distance = travelled;
+                    return true;
+                }
+                origin = hit.point + ray.direction * 0.02f;
+                travelled += 0.02f;
+            }
+            hit = default(RaycastHit);
+            return false;
+        }
+
+        internal static bool RayMesh(Ray ray, MeshFilter mf, out RaycastHit hit)
         {
             hit = default(RaycastHit);
             if (intersectRayMesh == null)
