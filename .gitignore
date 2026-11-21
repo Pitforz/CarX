@@ -80,3 +80,7 @@ desktop.ini
 /Assets/_Project/Models/Toolbox/Textures/Tool_box_Albedo.png.meta
 /Assets/_Project/Models/Toolbox/Textures/Tool_box_Normal.png
 /Assets/_Project/Models/Toolbox/Textures/Tool_box_Normal.png.meta
+
+# Asset packs shared separately (from carx-scenes-integration)
+/Assets/Abandoned World/
+/Assets/Abandoned World.meta
