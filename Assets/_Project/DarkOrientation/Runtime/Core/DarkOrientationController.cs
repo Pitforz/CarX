@@ -56,6 +56,10 @@ namespace CarX.DarkOrientation
         public bool IsActive { get; private set; }
         /// <summary>0..1, how much of the effect is on screen.</summary>
         public float Blend { get; private set; }
+        /// <summary>0..1, how far the wider view of the mode is in. Faster than the dark picture and the hands.</summary>
+        public float FovBlend { get; private set; }
+        /// <summary>Degrees to add to the camera's field of view right now.</summary>
+        public float FovBonus => _settings == null ? 0f : Mathf.SmoothStep(0f, 1f, FovBlend) * _settings.modeFovBonus;
         public bool InputBlocked { get; set; }
         public Transform Body => _body;
         public Camera ViewCamera => _viewCamera;
@@ -104,6 +108,7 @@ namespace CarX.DarkOrientation
         void Awake()
         {
             if (_settings == null) _settings = DarkOrientationSettings.Load();
+            _classifier.Settings = _settings;
             for (int i = 0; i < ZoneCount; i++) _zones[i].owner = -1;
         }
 
@@ -153,6 +158,7 @@ namespace CarX.DarkOrientation
         public void Bind(Transform body, Camera viewCamera)
         {
             if (_settings == null) _settings = DarkOrientationSettings.Load();
+            _classifier.Settings = _settings;
             _body = body != null ? body : DarkOrientationBootstrap.FindPlayer();
             _viewCamera = viewCamera != null ? viewCamera : Camera.main;
             if (!_bound || _left == null || _right == null)
@@ -287,6 +293,7 @@ namespace CarX.DarkOrientation
                 if (_viewCamera == null) return;
             }
             float dt = Time.deltaTime;
+            FovBlend = Mathf.MoveTowards(FovBlend, IsActive ? 1f : 0f, dt / Mathf.Max(0.01f, _settings.modeFovTime));
             // The dark picture comes first and the hands rise only once it is full, so they are never seen in their
             // own colour, only as outlines. Leaving, the hands go down first and the picture clears after them.
             bool handsUp = _left.Visible || _right.Visible;
@@ -398,10 +405,10 @@ namespace CarX.DarkOrientation
                 Handle(hand, owner, hand.BreakGrip(Time.time));
                 return;
             }
-            if (leaving > 0.2f)
+            if (leaving > _settings.gripMinLeave)
                 cc.Move(-n * (leaving * dt * _settings.gripStick));
             // One corner turns the view by up to a right angle, then the player looks for themselves.
-            if (hand.AtCorner && forward > 0.35f && Mathf.Abs(assist) < 80f)
+            if (hand.AtCorner && forward > _settings.cornerMinForward && Mathf.Abs(assist) < _settings.cornerMaxTurn)
             {
                 float step = (hand.side == HandSide.Left ? -1f : 1f) * _settings.cornerYawSpeed * dt;
                 assist += step;
@@ -487,13 +494,13 @@ namespace CarX.DarkOrientation
             Vector3 toward = Vector3.ProjectOnPlane(_viewCamera.transform.right * (side == HandSide.Right ? 1f : -1f), n);
             if (toward.sqrMagnitude < 1e-4f) return a;
             Vector3 q = p + toward.normalized * _settings.handoverOffset;
-            int count = Physics.RaycastNonAlloc(q + n * 0.3f, -n, _shiftHits, 0.6f, _settings.touchLayers.value, QueryTriggerInteraction.Ignore);
+            int count = Physics.RaycastNonAlloc(q + n * 0.3f, -n, _shiftHits, _settings.handoverProbeDistance, _settings.TouchMask, QueryTriggerInteraction.Ignore);
             float best = float.MaxValue;
             TouchAnchor result = a;
             for (int i = 0; i < count; i++)
             {
                 var h = _shiftHits[i];
-                if (h.distance >= best || _classifier.Kind(h.collider) != TouchKind.Wall || Vector3.Angle(h.normal, n) > 40f) continue;
+                if (h.distance >= best || _classifier.Kind(h.collider) != TouchKind.Wall || Vector3.Angle(h.normal, n) > _settings.handoverMaxNormalAngle) continue;
                 best = h.distance;
                 result = TouchAnchor.Create(h.collider, h.point, h.normal);
             }

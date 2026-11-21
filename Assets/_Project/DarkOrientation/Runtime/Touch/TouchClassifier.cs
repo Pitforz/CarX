@@ -23,6 +23,9 @@ namespace CarX.DarkOrientation
         /// <summary>Project rule (set by the integration). Without it, large colliders without a rigidbody count as walls.</summary>
         public Func<Collider, TouchKind> KindQuery;
 
+        /// <summary>Size limits for the fallback rule; defaults are used while this is not set.</summary>
+        public DarkOrientationSettings Settings;
+
         public TouchKind Kind(Collider c)
         {
             if (c == null) return TouchKind.Ignore;
@@ -45,7 +48,8 @@ namespace CarX.DarkOrientation
             if (c.GetComponentInParent<DarkTouchWall>() != null) return TouchKind.Wall;
             if (KindQuery != null) return KindQuery(c);
             Vector3 size = c.bounds.size;
-            return size.y >= 1.35f && Mathf.Max(size.x, size.z) >= 0.85f ? TouchKind.Wall : TouchKind.Object;
+            float minHeight = Settings != null ? Settings.wallMinHeight : 1.35f, minWidth = Settings != null ? Settings.wallMinWidth : 0.85f;
+            return size.y >= minHeight && Mathf.Max(size.x, size.z) >= minWidth ? TouchKind.Wall : TouchKind.Object;
         }
     }
 }

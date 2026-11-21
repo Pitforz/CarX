@@ -642,10 +642,7 @@ namespace CarX.Level
                         if (flatE) Tri2(kit, P(sl, prof, j, s1, 0f), P(sl, prof, j, s1 - bev, 0f), P(sl, prof, j, s1, bev));
                     }
                 // dead end: a wall just past the rim; a wall with an opening (meets another tunnel): exactly at the end
-                bool holeS = capHoleStart != null && capHoleStart.Count >= 3, holeE = capHoleEnd != null && capHoleEnd.Count >= 3;
-                // (a wall with an opening covers only the inside of the tunnel: nothing of it lies on the other tunnel's walls)
-                if (k == 0 && capStart && (!startAtWall || holeS)) Cap(kit, sl, prof, startAtWall ? s0 : s0 - 0.01f, startAtWall ? 0f : thick, sl.fwd, capHoleStart);
-                if (k == last && capEnd && (!endAtWall || holeE)) Cap(kit, sl, prof, endAtWall ? s1 : s1 + 0.01f, endAtWall ? 0f : thick, -sl.fwd, capHoleEnd);
+                EndWalls(kit, prof, thick, k == 0, k == last);
                 if (k == 0 && startReveal != null && startReveal.Count >= 2) Reveal(kit, sl, s0, -1f, startOpening, startReveal);
                 if (k == last && endReveal != null && endReveal.Count >= 2) Reveal(kit, sl, s1, 1f, endOpening, endReveal);
             }
@@ -760,6 +757,37 @@ namespace CarX.Level
                 float u0 = prof.perim[e] * 0.5f + vOff, u1 = prof.perim[e + 1] * 0.5f + vOff;
                 kit.Quad(sub, A, B, C, D, new Vector2(u0, e0 * 0.5f), new Vector2(u1, e0 * 0.5f), new Vector2(u1, thick * 0.5f), new Vector2(u0, thick * 0.5f), facing);
             }
+        }
+
+        /// <summary>End walls of the first and/or last slab: a dead end (a wall just past the rim) or
+        /// a wall with an opening (meets another tunnel: exactly at the end).</summary>
+        void EndWalls(MeshKit kit, Profile prof, float thick, bool first, bool lastSlab)
+        {
+            if (slabs.Count == 0) return;
+            bool holeS = capHoleStart != null && capHoleStart.Count >= 3, holeE = capHoleEnd != null && capHoleEnd.Count >= 3;
+            // (a wall with an opening covers only the inside of the tunnel: nothing of it lies on the other tunnel's walls)
+            if (first && capStart && (!startAtWall || holeS))
+            {
+                var sl = slabs[0];
+                float s0 = sl.tStart;
+                Cap(kit, sl, prof, startAtWall ? s0 : s0 - 0.01f, startAtWall ? 0f : thick, sl.fwd, capHoleStart);
+            }
+            if (lastSlab && capEnd && (!endAtWall || holeE))
+            {
+                var sl = slabs[slabs.Count - 1];
+                float s1 = sl.length - sl.tEnd;
+                Cap(kit, sl, prof, endAtWall ? s1 : s1 + 0.01f, endAtWall ? 0f : thick, -sl.fwd, capHoleEnd);
+            }
+        }
+
+        /// <summary>The end walls exactly as in the visible mesh, as world-space triangles (3 points each, facing into the tunnel).
+        /// The play-mode collision shell copies them: the player ignores the visible mesh and would walk through a dead end.</summary>
+        public void EndWallTriangles(List<Vector3> world)
+        {
+            if (slabs.Count == 0 || section == null || (!capStart && !capEnd)) return;
+            var kit = new MeshKit(1);
+            EndWalls(kit, section.Build(dirtLine), Mathf.Max(0.05f, slabThickness), true, true);
+            foreach (int i in kit.tris[0]) world.Add(transform.TransformPoint(kit.verts[i]));
         }
 
         static void Cap(MeshKit kit, Slab sl, Profile prof, float s, float thick, Vector3 facing, List<Vector2> hole)

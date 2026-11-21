@@ -38,6 +38,8 @@ Shader "Hidden/CarX/DarkOrientation/Composite"
             float4 _DO_RingParams;      // x = ring spacing, y = ring strength, z = cos of the face cutoff angle
             float4 _DO_DepthNear;
             float4 _DO_DepthFar;
+            float4 _DO_DepthRange;      // x = near distance, y = far distance (m from the camera), z = curve, w = side shade
+            float4 _DO_ZoneMerge;       // x = 0 max of the zones, 1 soft union (no seam where two zones meet)
             float4 _DO_Look;            // x = dim, y = desaturate, z = edge strength, w = blend
             float4 _DO_HandFill;
             float4 _DO_HandOutline;
@@ -104,10 +106,11 @@ Shader "Hidden/CarX/DarkOrientation/Composite"
 
                 // Wall: bright out to the wall core, gone at the wall end. Object or person: the same with the tight pair.
                 // Faces turned away from the touched surface by more than the cutoff angle stay dark.
-                float w = 0.0;
-                float dist = 1.0;
+                // Zones are joined as a soft union, 1 - (1 - a)(1 - b): no crease where two circles meet.
+                float wMax = 0.0;
+                float keep = 1.0;
+                float dist = 1e4;
                 float zoneEnd = _DO_ZoneParams.y;
-                float3 centre = ws;
                 [unroll]
                 for (int i = 0; i < ZONE_COUNT; i++)
                 {
@@ -118,23 +121,27 @@ Shader "Hidden/CarX/DarkOrientation/Composite"
                     float3 zn = ZoneNormal(i);
                     float face = dot(zn, zn) > 0.25 ? smoothstep(_DO_RingParams.z - 0.08, _DO_RingParams.z + 0.08, dot(n, normalize(zn))) : 1.0;
                     float wi = (1.0 - smoothstep(solid, reach, d)) * face * _DO_ZoneWeights[i];
-                    if (wi > w)
+                    wMax = max(wMax, wi);
+                    keep *= 1.0 - wi;
+                    if (wi > 0.001 && d < dist)
                     {
-                        w = wi;
                         dist = d;
                         zoneEnd = reach;
-                        centre = _DO_Zones[i].xyz;
                     }
                 }
+                float w = lerp(wMax, 1.0 - keep, _DO_ZoneMerge.x);
 
                 if (w > 0.001)
                 {
-                    float centreEye = dot(centre - _DO_CamPos.xyz, _DO_CamFwd.xyz);
-                    float t = saturate(0.5 + (centreEye - eye) / (2.0 * zoneEnd));
+                    // Inside the zone the player sees a distance map: how far each point is from their eyes.
+                    // The same distance gives the same shade whichever hand lit it, so two zones join without a line.
+                    float camDist = distance(ws, _DO_CamPos.xyz);
+                    float t = 1.0 - saturate((camDist - _DO_DepthRange.x) / max(_DO_DepthRange.y - _DO_DepthRange.x, 0.01));
+                    t = pow(t, _DO_DepthRange.z);
                     float lap = abs(EyeAt(px + int2(1, 0)) + EyeAt(px - int2(1, 0)) + EyeAt(px + int2(0, 1)) + EyeAt(px - int2(0, 1)) - 4.0 * eye);
                     float edge = saturate(lap / max(eye, 0.05) * 25.0) * _DO_Look.z;
                     float ring = _DO_RingParams.y * smoothstep(0.85, 1.0, frac(dist / max(_DO_RingParams.x, 0.005))) * saturate(1.0 - dist / zoneEnd);
-                    half3 depthMap = lerp(_DO_DepthFar.rgb, _DO_DepthNear.rgb, t) * lerp(0.55, 1.0, facing);
+                    half3 depthMap = lerp(_DO_DepthFar.rgb, _DO_DepthNear.rgb, t) * lerp(1.0 - _DO_DepthRange.w, 1.0, facing);
                     depthMap += (edge + ring) * _DO_DepthNear.rgb;
                     col = lerp(col, depthMap, w);
                 }
