@@ -182,9 +182,9 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier:
   _hurtClips:
-  - {fileID: 8300000, guid: 2cdcc58e6bfe498ba21655f6a311a67f, type: 3}
-  - {fileID: 8300000, guid: d08d219152af4d868554999c6493302b, type: 3}
-  - {fileID: 8300000, guid: 4db3a8487a594b0488da095465e3f5b8, type: 3}
+  - {fileID: 8300000, guid: 450a242ce9187844d808222b8af2c7fd, type: 3}
+  - {fileID: 8300000, guid: 89f257d713d7a5645bb86ece8ac07212, type: 3}
+  - {fileID: 8300000, guid: 16efb6df6a169b54bb36a9bd87e9d52f, type: 3}
 --- !u!114 &8616685848737228384
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -209,8 +209,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 293e945b6d8b431bb026c78f9c3346c9, type: 3}
   m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::CarX.Gameplay.PlayerCriticalCondition
-  _heartbeatClip: {fileID: 8300000, guid: 3f8709375a2a4fc4821c979d3efcb00a, type: 3}
-  _breathingClip: {fileID: 8300000, guid: 1890bdcca0c145f3a7e8762908f25361, type: 3}
+  _heartbeatClip: {fileID: 8300000, guid: 1b7b2601f8713df4c89ff2293e321b87, type: 3}
+  _breathingClip: {fileID: 8300000, guid: dab4c81beaf791845af61168516cddd7, type: 3}
 --- !u!114 &8616685848737228390
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -223,7 +223,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7289192b88024914b7fe429fd2dd262b, type: 3}
   m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::CarX.Gameplay.PlayerDeathFall
-  _impactClip: {fileID: 8300000, guid: 008e3428d1204112a73974415f2be71e, type: 3}
+  _impactClip: {fileID: 8300000, guid: 2aa250fc052cad04f908c5687fee0ec2, type: 3}
 --- !u!114 &8616685848737228385
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -289,6 +289,7 @@ MonoBehaviour:
   _magazineIcon: {fileID: 21300000, guid: c2f45fe5a40b437e9a48dbf15f244487, type: 3}
   _droppedMagazinePrefab: {fileID: 5944682720475498611, guid: 3ab0785ee108a445a8331f007538944c, type: 3}
   _pickupShader: {fileID: 4800000, guid: 650dd9526735d5b46b79224bc6e94025, type: 3}
+  _keyInspectionHand: {fileID: 7587116857460698448, guid: 31e13240cf99343bfa6ec02e6a11fbf9, type: 3}
 --- !u!114 &8616685848737228388
 MonoBehaviour:
   m_ObjectHideFlags: 0

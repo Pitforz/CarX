@@ -41,6 +41,12 @@ namespace CarX.Gameplay
         internal void ConsiderIntimidation() =>
             Say(_intimidationVoice, "А может, попробовать припугнуть его?", important: true);
 
+        internal void CommentOnBrokenFlashlight(string subtitle, string voicePath)
+        {
+            if (!IsSpeaking && (_menus == null || !_menus.IsNpcSpeaking))
+                Say(DialogueVoice.GetStoryClip(voicePath), subtitle, important: true);
+        }
+
         internal void ReadClue(AudioClip clip, string subtitle = null) =>
             Say(clip, subtitle, important: true);
 

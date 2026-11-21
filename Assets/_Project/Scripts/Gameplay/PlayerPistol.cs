@@ -312,7 +312,7 @@ namespace CarX.Gameplay
             }
         }
 
-        internal bool TryLowerForFlashlight(float duration, out float switchDelay)
+        internal bool TryLowerForHandAction(float duration, out float switchDelay)
         {
             switchDelay = 0f;
             if (!_equipped || !isActiveAndEnabled)

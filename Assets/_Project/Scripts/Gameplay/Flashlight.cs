@@ -55,6 +55,7 @@ namespace CarX.Gameplay
         PlayerPistol _pistol;
         PlayerInventory _inventory;
         PlayerStatusHud _hud;
+        PlayerInnerVoice _innerVoice;
         Transform _view;
         Vector3 _viewOffset;
         Quaternion _viewRotation;
@@ -89,6 +90,7 @@ namespace CarX.Gameplay
                 _pistol = player.GetComponent<PlayerPistol>();
                 _inventory = player.GetComponent<PlayerInventory>();
                 _hud = player.GetComponent<PlayerStatusHud>();
+                _innerVoice = player.GetComponent<PlayerInnerVoice>();
             }
 
             if (_switchClip != null)
@@ -210,7 +212,7 @@ namespace CarX.Gameplay
                 return;
 
             float switchDelay = 0f;
-            if (_pistol != null && !_pistol.TryLowerForFlashlight(ToggleInterval, out switchDelay))
+            if (_pistol != null && !_pistol.TryLowerForHandAction(ToggleInterval, out switchDelay))
                 return;
             _toggleQueued = false;
             _nextToggleAt = now + ToggleInterval;
@@ -222,13 +224,16 @@ namespace CarX.Gameplay
 
         void ShowBrokenFlashlightSubtitle()
         {
-            string text = _health.FlashlightBreakCause switch
+            var (text, voicePath) = _health.FlashlightBreakCause switch
             {
-                PlayerHealth.DamageSource.Gunfire => "Вот скотина, прострелил фонарь.",
-                PlayerHealth.DamageSource.Melee => "Вот скотина, фонарь сломал.",
-                _ => "Чёрт, фонарь накрылся."
+                PlayerHealth.DamageSource.Gunfire => ("Вот скотина, прострелил фонарь.", "Alexey/Thought_FlashlightShot"),
+                PlayerHealth.DamageSource.Melee => ("Вот скотина, фонарь сломал.", "Alexey/Thought_FlashlightSmashed"),
+                _ => ("Чёрт, фонарь накрылся.", "Alexey/Thought_FlashlightBroke")
             };
-            _hud?.ShowSubtitle(text);
+            if (_innerVoice != null)
+                _innerVoice.CommentOnBrokenFlashlight(text, voicePath);
+            else
+                _hud?.ShowSubtitle(text);
         }
 
         void SwitchLight()

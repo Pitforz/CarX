@@ -74,3 +74,9 @@ desktop.ini
 
 # local tooling
 /.codegraph/
+
+# Toolbox textures and their Unity metadata are distributed separately.
+/Assets/_Project/Models/Toolbox/Textures/Tool_box_Albedo.png
+/Assets/_Project/Models/Toolbox/Textures/Tool_box_Albedo.png.meta
+/Assets/_Project/Models/Toolbox/Textures/Tool_box_Normal.png
+/Assets/_Project/Models/Toolbox/Textures/Tool_box_Normal.png.meta

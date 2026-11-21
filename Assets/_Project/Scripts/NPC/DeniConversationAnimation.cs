@@ -61,7 +61,6 @@ namespace CarX.NPC
             _lookRight = Shape(_eyes, "LookRight");
             _lookUp = Shape(_eyes, "LookUp");
             _lookDown = Shape(_eyes, "LookDown");
-            _blinkTimes = new System.Random();
             _nextBlink = Time.time + BlinkDelay();
             enabled = _head != null;
         }
@@ -246,7 +245,7 @@ namespace CarX.NPC
             SetShape(_lashes, _lashBlink, weight);
         }
 
-        float BlinkDelay() => 2.6f + (float)_blinkTimes.NextDouble() * 2.55f;
+        float BlinkDelay() => 2.6f + (float)(_blinkTimes ??= new System.Random()).NextDouble() * 2.55f;
 
         void RestorePose()
         {

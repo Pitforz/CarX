@@ -58,6 +58,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CarX.Gameplay.FinalEncounter
   _banditPrefab: {fileID: 1172137951, guid: ba057f707421414ba628d8293a1531ae, type: 3}
+  _bossModel: {fileID: 5960950638764755839, guid: 9745f2231520948e89570e2a9e52a749, type: 3}
+  _fatherModel: {fileID: 8049121700377071065, guid: 1828b92622dfd46e381377d432653108, type: 3}
+  _fatherPistol: {fileID: 1382142288692174989, guid: 6858a5cf89bd041a9a265c111d98d265, type: 3}
+  _fatherLocomotion: {fileID: 9100000, guid: b5b24336229c7412595fae5f1e6aaa23, type: 2}
   _actorMaterial: {fileID: 2100000, guid: 9ed41ec72b03048c5a3b6c8b4ef453dc, type: 2}
   _executionShot: {fileID: 8300000, guid: b8c23b7d26564e43a17e0f3bc38f2dd3, type: 3}
   _entrance:

@@ -832,6 +832,22 @@ PrefabInstance:
       propertyPath: m_LocalRotation.z
       value: 0.99916184
       objectReference: {fileID: 0}
+    - target: {fileID: -5738929356375114689, guid: f8b3dca6f416a4846b3fb68e2069908b, type: 3}
+      propertyPath: m_CastShadows
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2321523695958950486, guid: f8b3dca6f416a4846b3fb68e2069908b, type: 3}
+      propertyPath: m_CastShadows
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2321523695958950486, guid: f8b3dca6f416a4846b3fb68e2069908b, type: 3}
+      propertyPath: m_ReceiveShadows
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2321523695958950486, guid: f8b3dca6f416a4846b3fb68e2069908b, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 72c4c64254bb42478e309525f0eea7e2, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []

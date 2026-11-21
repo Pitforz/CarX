@@ -45,7 +45,8 @@ namespace CarX.NPC
         const float PreferredCoverDistance = 10f;
         const float AssaultStoppingDistance = 5f;
         const float EyeHeight = 1.55f;
-        const float LeanAngle = 26f;
+        const float LeanAngle = 10f;
+        const float LeanPivotHeight = 0.98f;
         const float ReloadRetreatTimeout = 3.5f;
         const float VisibleHitChance = 0.60f;
         const float ShotRange = 36f;
@@ -77,6 +78,7 @@ namespace CarX.NPC
         readonly Vector3[] _targetPoints = new Vector3[5];
         int _targetPointCount;
         HostileNpc _npc;
+        CombatHumanoidAnimation _stagedModel;
         BanditSquad _squad;
         PlayerHealth _player;
         PlayerStatusHud _hud;
@@ -87,9 +89,11 @@ namespace CarX.NPC
         Quaternion _leftRest;
         Quaternion _rightRest;
         Quaternion _leanRest = Quaternion.identity;
+        Vector3 _leanRestPosition;
         GameObject _effects;
         AudioSource _shotAudio;
         AudioSource _reloadAudio;
+        AudioSource _shoutAudio;
         Light _flash;
         Vector3 _initialFacing;
         Vector3 _lastAimPoint;
@@ -129,6 +133,7 @@ namespace CarX.NPC
         float _flashUntil;
         float _armAngle;
         float _leanProgress;
+        float _leanSide;
         PeekPhase _peekPhase;
         CoverAction _coverAction;
         State _state;
@@ -138,8 +143,15 @@ namespace CarX.NPC
 
         Transform WeaponPivot => _leanPivot != null ? _leanPivot : transform;
         Vector3 ChestPosition => WeaponPivot.TransformPoint(ChestPivot);
-        internal Vector3 StagedMuzzlePosition => _weapon != null
-            ? _weapon.TransformPoint(MuzzlePosition) : transform.TransformPoint(new Vector3(0f, 1.45f, 0.5f));
+        internal Vector3 StagedMuzzlePosition => _stagedModel != null ? _stagedModel.Muzzle.position :
+            _weapon != null ? _weapon.TransformPoint(MuzzlePosition) : transform.TransformPoint(new Vector3(0f, 1.45f, 0.5f));
+
+        internal void AttachStagedModel(CombatHumanoidAnimation model)
+        {
+            _stagedModel = model;
+            if (_weapon != null)
+                _weapon.gameObject.SetActive(false);
+        }
 
         internal void ConfigureGrip(Transform leftShoulder, Quaternion leftRest, Transform rightShoulder,
             Quaternion rightRest)
@@ -151,7 +163,10 @@ namespace CarX.NPC
             if (_weapon != null && _weapon.parent != WeaponPivot)
                 _weapon.SetParent(WeaponPivot, false);
             if (_leanPivot != null)
+            {
                 _leanRest = _leanPivot.localRotation;
+                _leanRestPosition = _leanPivot.localPosition;
+            }
             SetWeaponAngle(0f);
         }
 
@@ -172,29 +187,49 @@ namespace CarX.NPC
         void EnsureWeaponEffects()
         {
             if (_effects != null)
+            {
+                if (_stagedModel != null && _effects.transform.parent != _stagedModel.Muzzle)
+                    _effects.transform.SetParent(_stagedModel.Muzzle, false);
                 return;
+            }
 
             _effects = new GameObject("Bandit Weapon Effects");
-            _effects.transform.SetParent(_weapon != null ? _weapon : transform, false);
-            _effects.transform.localPosition = _weapon != null ? MuzzlePosition : new Vector3(0f, 1.45f, 0.5f);
+            if (_stagedModel != null)
+                _effects.transform.SetParent(_stagedModel.Muzzle, false);
+            else
+            {
+                _effects.transform.SetParent(_weapon != null ? _weapon : transform, false);
+                _effects.transform.localPosition = _weapon != null ? MuzzlePosition : new Vector3(0f, 1.45f, 0.5f);
+            }
             _shotAudio = AddAudioSource(ShotRange + 8f);
         }
 
         internal void SetStagedWeaponVisible(bool visible)
         {
-            if (_weapon != null)
+            if (_stagedModel != null)
+                _stagedModel.SetWeaponVisible(visible);
+            else if (_weapon != null)
                 _weapon.gameObject.SetActive(visible);
         }
 
-        internal void PlayStagedShot()
+        internal void PlayStagedShot(bool playAudio = true)
         {
             EnsureWeaponEffects();
-            PlayShotEffects(Time.time);
+            PlayShotEffects(Time.time, playAudio);
         }
 
-        internal void AimStagedWeapon(Vector3 target, bool smooth = false) => PoseStagedWeapon(GetAimAngle(target), smooth);
+        internal void AimStagedWeapon(Vector3 target, bool smooth = false,
+            float raiseDuration = CombatHumanoidAnimation.DefaultAimRaiseTime)
+        {
+            PoseStagedWeapon(GetAimAngle(target), smooth);
+            _stagedModel?.TrackAim(target, raiseDuration: raiseDuration);
+        }
 
-        internal void LowerStagedWeapon(bool smooth = false) => PoseStagedWeapon(0f, smooth);
+        internal void LowerStagedWeapon(bool smooth = false, bool relaxed = false)
+        {
+            PoseStagedWeapon(0f, smooth);
+            _stagedModel?.TrackAim(null, relaxed);
+        }
 
         void PoseStagedWeapon(float angle, bool smooth)
         {
@@ -217,6 +252,7 @@ namespace CarX.NPC
             _fireAt = holdCover ? now + AimTime : now;
             _nextRoundAt = now;
             _nextCoverTryAt = holdCover ? now : now + 2f;
+            SetStagedWeaponVisible(true);
             AimStagedWeapon(target);
         }
 
@@ -637,10 +673,26 @@ namespace CarX.NPC
             _fireAt = Mathf.Max(_fireAt, now + AimTime);
         }
 
-        internal void Shout(string subtitle)
+        internal void Shout(string subtitle, string voicePath)
         {
+            const float subtitleDuration = 3f;
             if (_hud != null)
-                _hud.ShowSubtitle(subtitle);
+                _hud.ShowSubtitle(subtitle, duration: subtitleDuration);
+
+            var clip = DialogueVoice.GetStoryClip(voicePath);
+            string spoken = NpcSpeechState.SpokenText(subtitle);
+            var speech = NpcSpeechState.GetOrAdd(this);
+            if (clip == null)
+            {
+                speech.BeginLine(spoken, subtitleDuration);
+                return;
+            }
+
+            if (_shoutAudio == null)
+                _shoutAudio = DialogueVoice.CreateSource(transform, "Bandit Voice", minDistance: 4f, maxDistance: 42f);
+            _shoutAudio.clip = clip;
+            _shoutAudio.Play();
+            speech.BeginLine(spoken, clip.length, _shoutAudio, clip);
         }
 
         void UpdateFiringSupport(float now)
@@ -1013,6 +1065,10 @@ namespace CarX.NPC
                     if (AtPosition(_peekPosition, 0.22f))
                     {
                         _npc.StopMoving();
+                        Vector3 facing = Vector3.ProjectOnPlane(_lastAimPoint - transform.position, Vector3.up);
+                        Vector3 right = facing.sqrMagnitude > 0.0025f
+                            ? Vector3.Cross(Vector3.up, facing.normalized) : transform.right;
+                        _leanSide = GetPeekSide(_peekPosition - _hidePosition, right);
                         _peekPhase = PeekPhase.Opening;
                     }
                     else if (now >= _coverActionAt && !TryWidenPeek(now))
@@ -1101,14 +1157,17 @@ namespace CarX.NPC
         {
             Vector3 facing = Vector3.ProjectOnPlane(aimPoint - peek, Vector3.up);
             Quaternion rotation = facing.sqrMagnitude > 0.0025f ? Quaternion.LookRotation(facing) : transform.rotation;
-            float roll = lean ? GetPeekRoll(peek - hide, rotation * Vector3.right) : 0f;
-            Quaternion pose = rotation * _leanRest * Quaternion.AngleAxis(roll, Vector3.forward);
-            Vector3 eye = peek + pose * (Vector3.up * EyeHeight);
+            float side = lean ? GetPeekSide(peek - hide, rotation * Vector3.right) : 0f;
+            Quaternion rest = rotation * _leanRest;
+            Quaternion pose = rest * Quaternion.AngleAxis(-LeanAngle * side, Vector3.forward);
+            Vector3 waist = Vector3.up * LeanPivotHeight;
+            Vector3 feet = peek + rest * waist - pose * waist;
+            Vector3 eye = feet + pose * (Vector3.up * EyeHeight);
             if ((lean && !_npc.HasClearLine(peek + Vector3.up * EyeHeight, eye)) ||
                 !_npc.HasClearLine(eye, aimPoint))
                 return false;
 
-            Vector3 chest = peek + pose * ChestPivot;
+            Vector3 chest = feet + pose * ChestPivot;
             float aimAngle = AimAngleFromOffset(Quaternion.Inverse(pose) * (aimPoint - chest));
             Vector3 muzzle = chest + pose * (WeaponRotation(aimAngle) * (GripReach + MuzzlePosition));
             return (aimPoint - muzzle).sqrMagnitude <= ShotRange * ShotRange &&
@@ -1127,12 +1186,19 @@ namespace CarX.NPC
 
             _leanProgress = Mathf.MoveTowards(_leanProgress, exposed ? 1f : 0f,
                 Time.deltaTime / (exposed ? LeanOutTime : LeanInTime));
-            float roll = GetPeekRoll(_peekPosition - _hidePosition, transform.right) * Mathf.SmoothStep(0f, 1f, _leanProgress);
-            _leanPivot.localRotation = _leanRest * Quaternion.AngleAxis(roll, Vector3.forward);
+            ApplyCoverLean(_leanSide * Mathf.SmoothStep(0f, 1f, _leanProgress));
         }
 
-        static float GetPeekRoll(Vector3 outward, Vector3 right) =>
-            -LeanAngle * Mathf.Clamp(Vector3.Dot(outward.normalized, right) * 1.4f, -1f, 1f);
+        void ApplyCoverLean(float side)
+        {
+            Quaternion rotation = _leanRest * Quaternion.AngleAxis(-LeanAngle * side, Vector3.forward);
+            Vector3 waist = Vector3.up * LeanPivotHeight;
+            _leanPivot.SetLocalPositionAndRotation(_leanRestPosition + _leanRest * waist - rotation * waist, rotation);
+            _stagedModel?.SetCoverLean(side);
+        }
+
+        static float GetPeekSide(Vector3 outward, Vector3 right) =>
+            Mathf.Clamp(Vector3.Dot(outward.normalized, right) * 1.4f, -1f, 1f);
 
         bool HasClearShot()
         {
@@ -1175,7 +1241,7 @@ namespace CarX.NPC
         void AimAt(Vector3 aimPoint)
         {
             _npc.Face(aimPoint - transform.position);
-            RaiseWeapon(GetAimAngle(aimPoint));
+            AimStagedWeapon(aimPoint, smooth: true);
         }
 
         float GetAimAngle(Vector3 target) => AimAngleFromOffset(WeaponPivot.InverseTransformPoint(target) - ChestPivot);
@@ -1283,9 +1349,10 @@ namespace CarX.NPC
             _player.AddBleeding(Bleeding);
         }
 
-        void PlayShotEffects(float now)
+        void PlayShotEffects(float now, bool playAudio = true)
         {
-            if (_shotClip != null)
+            _stagedModel?.Recoil();
+            if (playAudio && _shotClip != null)
                 _shotAudio.PlayOneShot(_shotClip, 0.8f);
             Flash(now);
         }
@@ -1322,6 +1389,8 @@ namespace CarX.NPC
         {
             Vector3 neutralEye = transform.position + Vector3.up * EyeHeight;
             Vector3 eye = _leanPivot != null ? _leanPivot.TransformPoint(Vector3.up * EyeHeight) : neutralEye;
+            if (_leanProgress > 0f && _stagedModel != null)
+                eye = _stagedModel.HeadPosition - Vector3.up * 0.035f;
             if (_leanProgress > 0f && !_npc.HasClearLine(neutralEye, eye))
             {
                 target = default;
@@ -1377,6 +1446,11 @@ namespace CarX.NPC
 
             Quaternion rotation = WeaponRotation(angle);
             _weapon.SetLocalPositionAndRotation(ChestPivot + rotation * GripReach, rotation);
+            if (_stagedModel != null)
+            {
+                _stagedModel.TrackAim(angle >= 65f ? _weapon.position + _weapon.forward * ShotRange : null);
+                return;
+            }
             AimShoulderAtGrip(_leftShoulder, _leftRest, _weapon.TransformPoint(LeftGripPosition));
             AimShoulderAtGrip(_rightShoulder, _rightRest, _weapon.TransformPoint(RightGripPosition));
         }
@@ -1438,8 +1512,8 @@ namespace CarX.NPC
             _squadPeekUntil = float.NegativeInfinity;
             _reloadEndsAt = 0f;
             _leanProgress = 0f;
-            if (_leanPivot != null && _npc != null)
-                _leanPivot.localRotation = _leanRest;
+            if (_leanPivot != null)
+                ApplyCoverLean(0f);
             LowerStagedWeapon();
             if (_npc != null)
                 _npc.StopMoving();
@@ -1449,6 +1523,8 @@ namespace CarX.NPC
                 _shotAudio.Stop();
             if (_reloadAudio != null)
                 _reloadAudio.Stop();
+            if (_shoutAudio != null)
+                _shoutAudio.Stop();
         }
 
         void OnDisable() => StopCombat();
