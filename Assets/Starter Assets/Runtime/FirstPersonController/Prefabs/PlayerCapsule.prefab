@@ -161,6 +161,7 @@ GameObject:
   - component: {fileID: 8616685848737228388}
   - component: {fileID: 8616685848737228389}
   - component: {fileID: 8616685848737228390}
+  - component: {fileID: 8616685848737228391}
   m_Layer: 8
   m_Name: PlayerCapsule
   m_TagString: Player
@@ -181,9 +182,9 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier:
   _hurtClips:
-  - {fileID: 8300000, guid: 2cdcc58e6bfe498ba21655f6a311a67f, type: 3}
-  - {fileID: 8300000, guid: d08d219152af4d868554999c6493302b, type: 3}
-  - {fileID: 8300000, guid: 4db3a8487a594b0488da095465e3f5b8, type: 3}
+  - {fileID: 8300000, guid: 450a242ce9187844d808222b8af2c7fd, type: 3}
+  - {fileID: 8300000, guid: 89f257d713d7a5645bb86ece8ac07212, type: 3}
+  - {fileID: 8300000, guid: 16efb6df6a169b54bb36a9bd87e9d52f, type: 3}
 --- !u!114 &8616685848737228384
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -208,8 +209,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 293e945b6d8b431bb026c78f9c3346c9, type: 3}
   m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::CarX.Gameplay.PlayerCriticalCondition
-  _heartbeatClip: {fileID: 8300000, guid: 3f8709375a2a4fc4821c979d3efcb00a, type: 3}
-  _breathingClip: {fileID: 8300000, guid: 1890bdcca0c145f3a7e8762908f25361, type: 3}
+  _heartbeatClip: {fileID: 8300000, guid: 1b7b2601f8713df4c89ff2293e321b87, type: 3}
+  _breathingClip: {fileID: 8300000, guid: dab4c81beaf791845af61168516cddd7, type: 3}
 --- !u!114 &8616685848737228390
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -222,7 +223,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7289192b88024914b7fe429fd2dd262b, type: 3}
   m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::CarX.Gameplay.PlayerDeathFall
-  _impactClip: {fileID: 8300000, guid: 008e3428d1204112a73974415f2be71e, type: 3}
+  _impactClip: {fileID: 8300000, guid: 2aa250fc052cad04f908c5687fee0ec2, type: 3}
 --- !u!114 &8616685848737228385
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -239,6 +240,12 @@ MonoBehaviour:
   _weaponShader: {fileID: 4800000, guid: 933532a4fcc9baf4fa0491de14d08ed7, type: 3}
   _berettaPrefab: {fileID: 7976680450834729709, guid: b4a9d2663df31471995ce5807cd29a31, type: 3}
   _aimTransitionTime: 0.24
+  _upwardRecoilDegrees: {x: 0.9, y: 1.4}
+  _sidewaysRecoilDegrees: 0.6
+  _aimedRecoilMultiplier: 0.6
+  _stressAimSwayDegrees: {x: 1.05, y: 0.75}
+  _stressHandRollDegrees: 2
+  _stressRecoilMultiplier: 1.45
   _shotClip: {fileID: 8300000, guid: b8c23b7d26564e43a17e0f3bc38f2dd3, type: 3}
   _reloadClip: {fileID: 8300000, guid: fc09dd5457484d0b9baa8df4662cf5ab, type: 3}
   _shotVolume: 0.8
@@ -282,6 +289,7 @@ MonoBehaviour:
   _magazineIcon: {fileID: 21300000, guid: c2f45fe5a40b437e9a48dbf15f244487, type: 3}
   _droppedMagazinePrefab: {fileID: 5944682720475498611, guid: 3ab0785ee108a445a8331f007538944c, type: 3}
   _pickupShader: {fileID: 4800000, guid: 650dd9526735d5b46b79224bc6e94025, type: 3}
+  _keyInspectionHand: {fileID: 7587116857460698448, guid: 31e13240cf99343bfa6ec02e6a11fbf9, type: 3}
 --- !u!114 &8616685848737228388
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -294,6 +302,24 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e39fd41471194208848eb89c471b9c6a, type: 3}
   m_Name:
   m_EditorClassIdentifier:
+  _clueBlur: {fileID: 2100000, guid: 484cf90908311467c9ba53ffc464098c, type: 2}
+--- !u!114 &8616685848737228391
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8616685848737228372}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2fa0be4bf3114c8c809c38121c87cb85, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::CarX.Gameplay.PlayerInnerVoice
+  _civilianWarningVoice: {fileID: 8300000, guid: b3d65898ac7c47529df3a67285efc31e, type: 3}
+  _keepPistolVoice: {fileID: 8300000, guid: 2916439ec028433c8119fb03b02cd182, type: 3}
+  _intimidationVoice: {fileID: 8300000, guid: ab768aa25a5d40e48bbdca36d292f77e, type: 3}
+  _volume: 0.35
+  _hintRepeatDelay: 8
 --- !u!4 &8997996947095583982
 Transform:
   m_ObjectHideFlags: 0
@@ -362,8 +388,8 @@ MonoBehaviour:
   _crouchCameraDrop: 0.35
   _crouchTransitionTime: 0.28
   _capsuleModel: {fileID: 5393215578589016641}
-  _leanDistance: 0.62
-  _leanAngle: 30
+  _leanDistance: 0.53
+  _leanAngle: 24.5
   _leanTransitionTime: 0.5
   _leanRollSmoothTime: 0.08
   Grounded: 1

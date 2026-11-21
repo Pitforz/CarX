@@ -1,0 +1,86 @@
+# Exported from Fuse 1.3.0
+
+newmtl Shoes
+illum 4
+Kd 1.00 1.00 1.00
+Ka 0.00 0.00 0.00
+Tf 1.00 1.00 1.00
+Ni 1.00
+Ks 1.00 1.00 1.00
+map_Kd Textures/Andrey_Shoes_diffuse.png
+map_Ks Textures/Andrey_Shoes_specular.png
+bump Textures/Andrey_Shoes_normal.png
+map_Ns Textures/Andrey_Shoes_gloss.png
+
+newmtl Hair
+illum 4
+Kd 1.00 1.00 1.00
+Ka 0.00 0.00 0.00
+Tf 1.00 1.00 1.00
+Ni 1.00
+Ks 1.00 1.00 1.00
+map_Kd Textures/Andrey_Hair_diffuse.png
+map_Ks Textures/Andrey_Hair_specular.png
+bump Textures/Andrey_Hair_normal.png
+map_Ns Textures/Andrey_Hair_gloss.png
+
+newmtl Beard
+illum 4
+Kd 1.00 1.00 1.00
+Ka 0.00 0.00 0.00
+Tf 1.00 1.00 1.00
+Ni 1.00
+Ks 1.00 1.00 1.00
+map_Kd Textures/Andrey_Beard_diffuse.png
+map_Ks Textures/Andrey_Beard_specular.png
+bump Textures/Andrey_Beard_normal.png
+map_Ns Textures/Andrey_Beard_gloss.png
+
+newmtl Top
+illum 4
+Kd 1.00 1.00 1.00
+Ka 0.00 0.00 0.00
+Tf 1.00 1.00 1.00
+Ni 1.00
+Ks 1.00 1.00 1.00
+map_Kd Textures/Andrey_Top_diffuse.png
+map_Ks Textures/Andrey_Top_specular.png
+bump Textures/Andrey_Top_normal.png
+map_Ns Textures/Andrey_Top_gloss.png
+
+newmtl Body
+illum 4
+Kd 1.00 1.00 1.00
+Ka 0.00 0.00 0.00
+Tf 1.00 1.00 1.00
+Ni 1.00
+Ks 1.00 1.00 1.00
+map_Kd Textures/Andrey_Body_diffuse.png
+map_Ks Textures/Andrey_Body_specular.png
+bump Textures/Andrey_Body_normal.png
+map_Ns Textures/Andrey_Body_gloss.png
+
+newmtl Glove
+illum 4
+Kd 1.00 1.00 1.00
+Ka 0.00 0.00 0.00
+Tf 1.00 1.00 1.00
+Ni 1.00
+Ks 1.00 1.00 1.00
+map_Kd Textures/Andrey_Glove_diffuse.png
+map_Ks Textures/Andrey_Glove_specular.png
+bump Textures/Andrey_Glove_normal.png
+map_Ns Textures/Andrey_Glove_gloss.png
+
+newmtl Bottom
+illum 4
+Kd 1.00 1.00 1.00
+Ka 0.00 0.00 0.00
+Tf 1.00 1.00 1.00
+Ni 1.00
+Ks 1.00 1.00 1.00
+map_Kd Textures/Andrey_Bottom_diffuse.png
+map_Ks Textures/Andrey_Bottom_specular.png
+bump Textures/Andrey_Bottom_normal.png
+map_Ns Textures/Andrey_Bottom_gloss.png
+

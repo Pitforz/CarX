@@ -66,10 +66,21 @@ desktop.ini
 # Archives prepared for sharing via cloud drive
 /_ForDrive/
 
-# Asset packs shared separately from the Unity project
+# Heavy third-party packs (tree pack 325 MB, trash pack 252 MB): shared as an archive with .meta files so GUIDs match
+/[Aa]ssets/TreePackVol.1/
+/[Aa]ssets/TreePackVol.1.meta
+/[Aa]ssets/URP_WasteOvergrowth_SA/
+/[Aa]ssets/URP_WasteOvergrowth_SA.meta
+
+# local tooling
+/.codegraph/
+
+# Toolbox textures and their Unity metadata are distributed separately.
+/Assets/_Project/Models/Toolbox/Textures/Tool_box_Albedo.png
+/Assets/_Project/Models/Toolbox/Textures/Tool_box_Albedo.png.meta
+/Assets/_Project/Models/Toolbox/Textures/Tool_box_Normal.png
+/Assets/_Project/Models/Toolbox/Textures/Tool_box_Normal.png.meta
+
+# Asset packs shared separately (from carx-scenes-integration)
 /Assets/Abandoned World/
 /Assets/Abandoned World.meta
-/Assets/TreePackVol.1/
-/Assets/TreePackVol.1.meta
-/Assets/URP_WasteOvergrowth_SA/
-/Assets/URP_WasteOvergrowth_SA.meta

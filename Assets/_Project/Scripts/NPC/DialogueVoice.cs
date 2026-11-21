@@ -48,10 +48,13 @@ namespace CarX.NPC
             {
                 yield return null;
             }
-            while (voice != null && (voice.isPlaying || AudioListener.pause));
+            while (voice != null && (voice.isPlaying || (AudioListener.pause && !voice.ignoreListenerPause)));
         }
 
         internal static AudioClip GetClip(AudioClip[] clips, int index) =>
             clips != null && index < clips.Length ? clips[index] : null;
+
+        internal static AudioClip GetStoryClip(string path) =>
+            string.IsNullOrEmpty(path) ? null : Resources.Load<AudioClip>("CarX/Voice/" + path);
     }
 }

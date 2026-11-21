@@ -18,7 +18,8 @@ namespace CarX.Gameplay
         readonly RectTransform _wheel;
         readonly UnityEngine.UI.Text _controlHints;
         readonly UnityEngine.UI.Image[] _selectionOverlays = new UnityEngine.UI.Image[PlayerInventory.SlotCount];
-        readonly GameObject _occupiedMagazine;
+        readonly UnityEngine.UI.Image[] _occupiedSectors = new UnityEngine.UI.Image[PlayerInventory.SlotCount];
+        readonly UnityEngine.UI.Image[] _clueIcons = new UnityEngine.UI.Image[PlayerInventory.SlotCount];
         readonly GameObject _magazineIcon;
         readonly UnityEngine.UI.Text[] _numbers = new UnityEngine.UI.Text[PlayerInventory.SlotCount];
         readonly UnityEngine.UI.Text[] _captions = new UnityEngine.UI.Text[PlayerInventory.SlotCount];
@@ -26,6 +27,7 @@ namespace CarX.Gameplay
         readonly UnityEngine.UI.Text _centerSlot;
         readonly UnityEngine.UI.Text _centerItem;
         readonly UnityEngine.UI.Text _centerHint;
+        readonly UnityEngine.UI.Image _keyIcon;
         readonly Font _font;
         int _selectedSlot;
 
@@ -46,10 +48,13 @@ namespace CarX.Gameplay
             var baseImage = CreateImage(_root, "Wheel Base", wheelBase, dimensions, Vector2.zero);
             baseImage.color = new Color32(255, 255, 255, 226);
             _wheel = baseImage.rectTransform;
-            var occupied = CreateImage(_wheel, "Occupied Magazine Sector", occupiedSector, dimensions, Vector2.zero);
-            occupied.color = new Color32(255, 255, 255, 208);
-            occupied.rectTransform.localRotation = Quaternion.Euler(0f, 0f, -SectorDegrees);
-            _occupiedMagazine = occupied.gameObject;
+            for (int i = PlayerInventory.MagazineSlot; i < _occupiedSectors.Length; i++)
+            {
+                var occupied = CreateImage(_wheel, $"Occupied Slot {i + 1}", occupiedSector, dimensions, Vector2.zero);
+                occupied.color = new Color32(255, 255, 255, 208);
+                occupied.rectTransform.localRotation = Quaternion.Euler(0f, 0f, -i * SectorDegrees);
+                _occupiedSectors[i] = occupied;
+            }
             // Fixed overlays keep the outlines aligned with their sectors during a crossfade.
             for (int i = 0; i < _selectionOverlays.Length; i++)
             {
@@ -78,13 +83,25 @@ namespace CarX.Gameplay
                 if (i == PlayerInventory.MagazineSlot)
                     _magazineIcon = CreateImage(_wheel, "Magazine Icon", magazineIcon,
                         new Vector2(26f, 40f), center - Vector2.up).gameObject;
+                if (i == PlayerInventory.LowerFloorKeySlot)
+                {
+                    _keyIcon = CreateImage(_wheel, "Key Icon", null, new Vector2(49f, 36f), center - Vector2.up);
+                    _keyIcon.preserveAspect = true;
+                }
+                else if (i >= PlayerInventory.FirstClueSlot)
+                {
+                    var icon = CreateImage(_wheel, "Clue Icon", null, new Vector2(52f, 36f), center - Vector2.up);
+                    icon.preserveAspect = true;
+                    icon.rectTransform.localRotation = Quaternion.Euler(0f, 0f, i % 2 == 0 ? 7f : -7f);
+                    _clueIcons[i] = icon;
+                }
             }
 
             _centerSlot = CreateText(_wheel, "Selected Slot Number", "", 12,
                 new Vector2(0f, 28f), new Vector2(176f, 18f));
             _centerSlot.fontStyle = FontStyle.Bold;
             _centerSlot.color = Amber;
-            _centerItem = CreateText(_wheel, "Selected Item Name", "", 25, Vector2.zero, new Vector2(188f, 34f));
+            _centerItem = CreateText(_wheel, "Selected Item Name", "", 25, Vector2.zero, new Vector2(188f, 44f));
             _centerItem.fontStyle = FontStyle.Bold;
             _centerHint = CreateText(_wheel, "Selected Item Detail", "", 13,
                 new Vector2(0f, -31f), new Vector2(172f, 20f));
@@ -114,24 +131,42 @@ namespace CarX.Gameplay
             }
         }
 
-        internal void Refresh(int selected, int? spareRounds, bool pistolEquipped, bool magazineHeld)
+        internal void Refresh(int selected, int? spareRounds, bool pistolEquipped, bool magazineHeld,
+            ClueNote[] clues, bool carryingToolbox, bool hasLowerFloorKey, Sprite lowerFloorKeyIcon)
         {
             bool magazinePresent = spareRounds.HasValue;
             _selectedSlot = selected;
-            _occupiedMagazine.SetActive(magazinePresent);
             _magazineIcon.SetActive(magazinePresent);
+            _keyIcon.sprite = lowerFloorKeyIcon;
+            _keyIcon.enabled = hasLowerFloorKey && lowerFloorKeyIcon != null;
 
             for (int i = 0; i < PlayerInventory.SlotCount; i++)
             {
-                string name = GetItemName(i, magazinePresent);
+                var clue = clues[i];
+                string name = GetItemName(i, magazinePresent, clue, hasLowerFloorKey);
                 _captions[i].text = name;
                 _emptyMarks[i].enabled = string.IsNullOrEmpty(name);
+                if (_occupiedSectors[i] != null)
+                    _occupiedSectors[i].enabled = !string.IsNullOrEmpty(name);
+                if (_clueIcons[i] != null)
+                {
+                    _clueIcons[i].sprite = clue != null ? clue.Paper : null;
+                    _clueIcons[i].enabled = clue != null;
+                }
             }
 
+            var selectedClue = clues[selected];
+            bool keySelected = selected == PlayerInventory.LowerFloorKeySlot && hasLowerFloorKey;
             _centerSlot.text = $"СЛОТ {selected + 1}";
-            string selectedName = GetItemName(selected, magazinePresent);
-            _centerItem.text = string.IsNullOrEmpty(selectedName) ? "Пусто" : selectedName;
-            if (selected == PlayerInventory.PistolSlot)
+            string selectedName = GetItemName(selected, magazinePresent, selectedClue, hasLowerFloorKey);
+            _centerItem.fontSize = keySelected ? 17 : 25;
+            _centerItem.text = keySelected ? "Ключ от\nвторого этажа" :
+                string.IsNullOrEmpty(selectedName) ? "Пусто" : selectedName;
+            _controlHints.text = carryingToolbox ? "Q — поставить ящик" :
+                selectedClue != null || keySelected ? "" : "Q — выбросить предмет";
+            if (keySelected)
+                _centerHint.text = "ЛКМ — осмотреть";
+            else if (selected == PlayerInventory.PistolSlot)
                 _centerHint.text = pistolEquipped ? "ЛКМ — убрать" : "ЛКМ — достать";
             else if (selected == PlayerInventory.MagazineSlot && magazinePresent)
             {
@@ -139,7 +174,7 @@ namespace CarX.Gameplay
                 _centerHint.text = $"{spareRounds.Value}/{PlayerPistol.MagazineSize} · {action}";
             }
             else
-                _centerHint.text = "";
+                _centerHint.text = selectedClue != null ? "ЛКМ — прочитать" : "";
         }
 
         internal void UpdateVisuals(float deltaTime)
@@ -203,10 +238,14 @@ namespace CarX.Gameplay
             hintsRect.localScale = new Vector3(hintScale, hintScale, 1f);
         }
 
-        static string GetItemName(int slot, bool magazinePresent)
+        static string GetItemName(int slot, bool magazinePresent, ClueNote clue, bool keyPresent)
         {
             if (slot == PlayerInventory.PistolSlot)
                 return "Пистолет";
+            if (slot == PlayerInventory.LowerFloorKeySlot)
+                return keyPresent ? "Ключ" : "";
+            if (clue != null)
+                return clue.Title;
             return slot == PlayerInventory.MagazineSlot && magazinePresent ? "Магазин" : "";
         }
 

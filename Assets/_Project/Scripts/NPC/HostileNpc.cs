@@ -1,5 +1,6 @@
 using System.Collections;
 using CarX.Gameplay;
+using StarterAssets;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -19,11 +20,11 @@ namespace CarX.NPC
         const float AttackWindup = 0.32f;
         const float AttackRecovery = 0.24f;
         const float ShotHearingDistance = 15f;
+        const float BanditShotHearingDistance = 36f;
+        const float FootstepHearingDistance = 6f;
         const float CloseDetectionDistance = 3f;
         const float SightDistance = 18f;
         const float SightHalfAngle = 55f;
-        const float LightFringeWidth = 0.85f;
-        const float VisibleLightLevel = 0.12f;
         const float LostSightDelay = 7f;
         const float AlertMemoryDuration = 40f;
         const float RepathInterval = 0.18f;
@@ -31,23 +32,30 @@ namespace CarX.NPC
         const float MinSearchStep = 0.45f;
         const float SearchStallDelay = 0.7f;
         static readonly float[] SearchTurnAngles = { 45f, 70f, 90f, 110f };
+        static readonly float[] FiringPositionAngles = { 90f, -90f, 135f, -135f, 180f };
 
         [SerializeField, Min(0.1f)] float _chaseSpeed = 3.3f;
         [SerializeField] Transform _leftShoulder;
         [SerializeField] Transform _rightShoulder;
+        [SerializeField] BoxCollider _bodyHitbox;
+        [SerializeField] Collider _headHitbox;
+        [SerializeField] GameObject _combatModel;
+        [SerializeField] GameObject _combatPistol;
+        [SerializeField] RuntimeAnimatorController _combatLocomotion;
 
         enum State { Idle, Alerted, Returning, Watching, Dead }
 
         readonly RaycastHit[] _sightHits = new RaycastHit[12];
+        NavMeshPath _combatPath;
         State _state;
         BanditPistol _bandit;
+        CombatHumanoidAnimation _encounterAnimation;
         NavMeshAgent _agent;
-        BoxCollider _hitbox;
         PlayerHealth _player;
         PlayerPistol _pistol;
+        PlayerStatusHud _playerHud;
+        FirstPersonController _playerMovement;
         CharacterController _playerCollider;
-        Flashlight[] _playerFlashlights;
-        Light[] _sceneLights;
         TextMesh _alertMark;
         Vector3 _home;
         Vector3 _homeFacing;
@@ -74,8 +82,15 @@ namespace CarX.NPC
         float _attackStartedAt;
         bool _attacking;
         bool _strikeDelivered;
+        bool _stagedDamageEnabled;
 
         float AttackRange => _hasKnife ? KnifeAttackRange : UnarmedAttackRange;
+        internal bool IsEngaged => isActiveAndEnabled && _state != State.Dead &&
+            (_bandit != null ? _bandit.IsEngaged : _state == State.Alerted);
+        internal bool IsAlive => _state != State.Dead;
+        internal Vector3 HeadPosition => _encounterAnimation != null ? _encounterAnimation.HeadPosition :
+            _headHitbox is SphereCollider head ? head.transform.TransformPoint(head.center) :
+            _headHitbox != null ? _headHitbox.bounds.center : transform.position + Vector3.up * 1.7f;
 
         void Awake()
         {
@@ -91,14 +106,22 @@ namespace CarX.NPC
                 _rightRest = _rightShoulder.localRotation;
                 _hasKnife = _rightShoulder.Find("RightArm/KnifePlaceholder") != null;
             }
+            _bandit?.ConfigureGrip(_leftShoulder, _leftRest, _rightShoulder, _rightRest);
 
-            _hitbox = gameObject.AddComponent<BoxCollider>();
-            _hitbox.center = new Vector3(0f, 0.9f, 0f);
-            _hitbox.size = new Vector3(0.60f, 1.8f, 0.42f);
+            if (_bodyHitbox == null)
+            {
+                _bodyHitbox = gameObject.AddComponent<BoxCollider>();
+                _bodyHitbox.center = new Vector3(0f, 0.9f, 0f);
+                _bodyHitbox.size = new Vector3(0.60f, 1.8f, 0.42f);
+            }
         }
 
         void Start()
         {
+            if (_state == State.Dead)
+                return;
+
+            AttachCombatModel();
             InitializeNavigation();
 
             foreach (var player in FindObjectsByType<PlayerHealth>())
@@ -108,16 +131,20 @@ namespace CarX.NPC
 
                 _player = player;
                 _playerCollider = player.GetComponent<CharacterController>();
-                _playerFlashlights = player.GetComponentsInChildren<Flashlight>(true);
+                _playerHud = player.GetComponent<PlayerStatusHud>();
+                if (_playerHud != null)
+                    _playerHud.RegisterHostile(this);
+                _playerMovement = player.GetComponent<FirstPersonController>();
+                if (_playerMovement != null)
+                    _playerMovement.AudibleFootstep += HearFootstep;
                 _pistol = player.GetComponent<PlayerPistol>();
                 if (_pistol != null)
                     _pistol.ShotFired += HearShot;
                 if (_bandit != null)
-                    _bandit.Initialize(this, player, _playerCollider, _rightShoulder);
+                    _bandit.Initialize(this, player, _playerCollider);
                 break;
             }
 
-            _sceneLights = FindObjectsByType<Light>();
             var mark = new GameObject("NPC Alert");
             mark.transform.SetParent(transform, false);
             mark.transform.localPosition = Vector3.up * 2.06f;
@@ -174,22 +201,18 @@ namespace CarX.NPC
             Vector3 playerFeet = _player.transform.position;
             Vector3 playerCenter = _playerCollider != null
                 ? _playerCollider.bounds.center : playerFeet + Vector3.up * 0.9f;
-            float distance = Vector3.Distance(transform.position, playerFeet);
             if (_bandit != null)
             {
                 if (_bandit.isActiveAndEnabled)
-                    _bandit.Tick(HitByPlayerBeam(), playerCenter);
+                    _bandit.Tick(playerCenter);
                 return;
             }
 
-            bool hitByBeam = HitByPlayerBeam();
-            if (hitByBeam)
-                SetState(State.Alerted);
-
+            float distance = Vector3.Distance(transform.position, playerFeet);
             float timeSinceContact = Time.time - _lastContactAt;
             bool remembersPlayer = timeSinceContact < AlertMemoryDuration &&
                 (_state == State.Alerted || _state == State.Returning || _state == State.Watching);
-            bool visible = hitByBeam || (remembersPlayer && CanSeePlayer(playerCenter, distance));
+            bool visible = CanSeePlayer(playerCenter, distance);
             if (visible)
             {
                 SetState(State.Alerted);
@@ -277,70 +300,38 @@ namespace CarX.NPC
 
         bool IsVisibleToPlayer(Camera camera)
         {
-            Bounds bounds = _hitbox.bounds;
+            Bounds bounds = _bodyHitbox.bounds;
             Vector3 upperBodyOffset = Vector3.up * (bounds.extents.y * 0.72f);
-            return CanSeeLitPoint(bounds.center) || CanSeeLitPoint(bounds.center + upperBodyOffset) ||
-                CanSeeLitPoint(bounds.center - upperBodyOffset);
+            return IsPointVisible(bounds.center) || IsPointVisible(bounds.center + upperBodyOffset) ||
+                IsPointVisible(bounds.center - upperBodyOffset) ||
+                (_headHitbox != null && IsPointVisible(_headHitbox.bounds.center));
 
-            bool CanSeeLitPoint(Vector3 point)
+            bool IsPointVisible(Vector3 point)
             {
                 Vector3 viewport = camera.WorldToViewportPoint(point);
                 return viewport.z >= camera.nearClipPlane && viewport.z <= camera.farClipPlane &&
                     viewport.x >= 0f && viewport.x <= 1f && viewport.y >= 0f && viewport.y <= 1f &&
-                    HasClearLine(camera.transform.position, point) &&
-                    IsLitByScene(point, includePlayerLights: true, fringe: 0f);
+                    HasClearLine(camera.transform.position, point);
             }
         }
 
         bool CanSeePlayer(Vector3 playerCenter, float distance)
         {
-            if (distance <= CloseDetectionDistance)
-                return CanSeePlayerBody(playerCenter, requireLight: false);
-
             Vector3 eye = transform.position + Vector3.up * 1.55f;
-            return IsInSightCone(playerCenter - eye) && CanSeePlayerBody(playerCenter, requireLight: true);
-        }
+            if (distance > CloseDetectionDistance && !IsInSightCone(playerCenter - eye))
+                return false;
 
-        internal bool CanSeePlayerPoint(Vector3 eye, Vector3 point) =>
-            IsInSightCone(point - eye) && HasClearLine(eye, point) && IsPlayerLit(point);
-
-        bool IsInSightCone(Vector3 offset) => offset.sqrMagnitude <= SightDistance * SightDistance &&
-            Vector3.Angle(transform.forward, Vector3.ProjectOnPlane(offset, Vector3.up)) <= SightHalfAngle;
-
-        bool CanSeePlayerBody(Vector3 center, bool requireLight)
-        {
-            Vector3 eye = transform.position + Vector3.up * 1.55f;
             float height = _playerCollider != null ? _playerCollider.bounds.extents.y * 0.65f : 0.5f;
-            return CanSeePoint(center) || CanSeePoint(center + Vector3.up * height) ||
-                CanSeePoint(center - Vector3.up * height);
-
-            bool CanSeePoint(Vector3 point) =>
-                HasClearLine(eye, point) && (!requireLight || IsPlayerLit(point));
+            Vector3 offset = Vector3.up * height;
+            return HasClearLine(eye, playerCenter) || HasClearLine(eye, playerCenter + offset) ||
+                HasClearLine(eye, playerCenter - offset);
         }
 
-        bool HitByPlayerBeam()
-        {
-            Vector3 center = _hitbox.bounds.center;
-            float halfHeight = _hitbox.bounds.extents.y * 0.8f;
-            foreach (var flashlight in _playerFlashlights)
-            {
-                if (flashlight == null || !flashlight.IsOn)
-                    continue;
+        internal bool CanSeePlayerPoint(Vector3 eye, Vector3 point, float sightDistance) =>
+            IsInSightCone(point - eye, sightDistance) && HasClearLine(eye, point);
 
-                // Include the edge closest to the beam axis as well as the torso and ends.
-                Vector3 origin = flashlight.transform.position;
-                Vector3 direction = flashlight.transform.forward;
-                float depth = Mathf.Max(0f, Vector3.Dot(center - origin, direction));
-                Vector3 edge = _hitbox.ClosestPoint(origin + direction * depth);
-                if (BeamReaches(center) || BeamReaches(center + Vector3.up * halfHeight) ||
-                    BeamReaches(center - Vector3.up * halfHeight) || BeamReaches(edge))
-                    return true;
-
-                bool BeamReaches(Vector3 point) =>
-                    flashlight.IsPointInMainBeam(point) && HasClearLine(origin, point);
-            }
-            return false;
-        }
+        bool IsInSightCone(Vector3 offset, float sightDistance = SightDistance) => offset.sqrMagnitude <= sightDistance * sightDistance &&
+            Vector3.Angle(transform.forward, Vector3.ProjectOnPlane(offset, Vector3.up)) <= SightHalfAngle;
 
         void BeginSearch(Vector3 direction)
         {
@@ -357,16 +348,13 @@ namespace CarX.NPC
             MoveTo(_lastKnownPosition, _chaseSpeed, 0.16f);
         }
 
-        internal void BeginSearchAt(Vector3 position, Vector3 direction)
-        {
-            _lastKnownPosition = position;
-            BeginSearch(direction);
-        }
-
-        internal void SearchForPlayer()
+        void SearchForPlayer()
         {
             if (_agent == null || !_agent.isOnNavMesh)
+            {
+                Face(_lastKnownPosition - transform.position);
                 return;
+            }
 
             if ((transform.position - _searchProgressPosition).sqrMagnitude >= 0.04f)
             {
@@ -382,7 +370,8 @@ namespace CarX.NPC
                 if (!reachedPathEnd && !stalled)
                 {
                     MoveTo(_lastKnownPosition, _chaseSpeed, 0.16f);
-                    FaceMovement();
+                    if (!FaceMovement())
+                        Face(_lastKnownPosition - transform.position);
                     return;
                 }
                 _searchingBeyondLastKnown = true;
@@ -402,8 +391,8 @@ namespace CarX.NPC
             Vector3 start = _agent.nextPosition;
             if (!TrySearchStep(start, _searchDirection, filter, out var destination, stalled))
             {
-                bool left = TrySearchTurn(start, -1f, filter, out var leftDestination);
-                bool right = TrySearchTurn(start, 1f, filter, out var rightDestination);
+                bool left = TrySearchTurn(start, _searchDirection, -1f, filter, out var leftDestination);
+                bool right = TrySearchTurn(start, _searchDirection, 1f, filter, out var rightDestination);
                 if (!left && !right)
                 {
                     _hasSearchStep = false;
@@ -426,11 +415,11 @@ namespace CarX.NPC
             Face(_searchDirection);
         }
 
-        bool TrySearchTurn(Vector3 start, float side, NavMeshQueryFilter filter, out Vector3 destination)
+        bool TrySearchTurn(Vector3 start, Vector3 forward, float side, NavMeshQueryFilter filter, out Vector3 destination)
         {
             foreach (float angle in SearchTurnAngles)
             {
-                Vector3 direction = Quaternion.AngleAxis(angle * side, Vector3.up) * _searchDirection;
+                Vector3 direction = Quaternion.AngleAxis(angle * side, Vector3.up) * forward;
                 if (TrySearchStep(start, direction, filter, out destination))
                     return true;
             }
@@ -439,14 +428,117 @@ namespace CarX.NPC
             return false;
         }
 
+        internal bool TryRepositionForShot(Vector3 aimPoint, System.Predicate<Vector3> canShootFrom,
+            float stepLength = SearchStepLength)
+        {
+            if (_agent == null || !_agent.isOnNavMesh)
+                return false;
+
+            var filter = new NavMeshQueryFilter { agentTypeID = _agent.agentTypeID, areaMask = _agent.areaMask };
+            Vector3 start = _agent.nextPosition;
+            Vector3 direction = Vector3.ProjectOnPlane(aimPoint - start, Vector3.up).normalized;
+            if (direction == Vector3.zero)
+                direction = transform.forward;
+
+            foreach (float angle in FiringPositionAngles)
+            {
+                Vector3 step = Quaternion.AngleAxis(angle, Vector3.up) * direction;
+                if (TrySearchStep(start, step, filter, out var destination, accept: CanFireFromDistance,
+                    stepLength: stepLength) &&
+                    TryMoveToFiringPosition(destination))
+                    return true;
+            }
+
+            return false;
+
+            bool CanFireFromDistance(Vector3 destination) =>
+                Vector3.Dot(destination - start, direction) <= 0.15f && canShootFrom(destination);
+        }
+
+        internal bool TryGetCoverRoute(Vector3 hide, Vector3 peek, out Vector3 hidePosition, out Vector3 peekPosition)
+        {
+            hidePosition = peekPosition = default;
+            if (!TryGetReachablePosition(hide, 0.45f, out var walkableHide))
+                return false;
+
+            var filter = new NavMeshQueryFilter { agentTypeID = _agent.agentTypeID, areaMask = _agent.areaMask };
+            if (!NavMesh.SamplePosition(peek, out var peekHit, 0.45f, filter) ||
+                NavMesh.Raycast(walkableHide, peekHit.position, out _, filter))
+                return false;
+
+            hidePosition = walkableHide;
+            peekPosition = peekHit.position;
+            return true;
+        }
+
+        internal bool TryGetReachablePosition(Vector3 near, float radius, out Vector3 position)
+        {
+            position = default;
+            if (_agent == null || !_agent.isOnNavMesh)
+                return false;
+
+            var filter = new NavMeshQueryFilter { agentTypeID = _agent.agentTypeID, areaMask = _agent.areaMask };
+            if (!NavMesh.SamplePosition(near, out var hit, radius, filter))
+                return false;
+
+            _combatPath ??= new NavMeshPath();
+            if (!_agent.CalculatePath(hit.position, _combatPath) || _combatPath.status != NavMeshPathStatus.PathComplete)
+                return false;
+
+            position = hit.position;
+            return true;
+        }
+
+        internal bool TryRetreatFrom(Vector3 threat, out Vector3 destination)
+        {
+            destination = default;
+            if (_agent == null || !_agent.isOnNavMesh)
+                return false;
+
+            var filter = new NavMeshQueryFilter { agentTypeID = _agent.agentTypeID, areaMask = _agent.areaMask };
+            Vector3 start = _agent.nextPosition;
+            Vector3 away = Vector3.ProjectOnPlane(start - threat, Vector3.up).normalized;
+            if (away == Vector3.zero)
+                away = -transform.forward;
+
+            if (TrySearchStep(start, away, filter, out destination) ||
+                TrySearchTurn(start, away, -1f, filter, out destination) ||
+                TrySearchTurn(start, away, 1f, filter, out destination))
+                return TryMoveToFiringPosition(destination);
+
+            return false;
+        }
+
+        internal bool TryMoveToFiringPosition(Vector3 position, float speedScale = 1f)
+        {
+            if (_agent == null || !_agent.isOnNavMesh || !_agent.SetDestination(position))
+                return false;
+
+            _agent.speed = _chaseSpeed * speedScale;
+            _agent.stoppingDistance = 0.12f;
+            _agent.isStopped = false;
+            return true;
+        }
+
+        internal bool TryAdvanceOnPlayer(Vector3 position, float stoppingDistance)
+        {
+            if (_agent == null || !_agent.isOnNavMesh)
+                return false;
+
+            MoveTo(position, _chaseSpeed, stoppingDistance);
+            return !_agent.isStopped && (_agent.pathPending ||
+                (_agent.hasPath && _agent.pathStatus == NavMeshPathStatus.PathComplete && !HasArrived()));
+        }
+
         bool TrySearchStep(Vector3 start, Vector3 direction, NavMeshQueryFilter filter,
-            out Vector3 destination, bool skipDirection = false)
+            out Vector3 destination, bool skipDirection = false, System.Predicate<Vector3> accept = null,
+            float stepLength = SearchStepLength)
         {
             destination = default;
             if (skipDirection)
                 return false;
 
-            Vector3 ahead = start + direction * SearchStepLength;
+            Vector3 ahead = start + direction * stepLength;
             if (NavMesh.Raycast(start, ahead, out var edge, filter))
             {
                 float clearance = Vector3.Dot(edge.position - start, direction) - 0.12f;
@@ -461,7 +553,8 @@ namespace CarX.NPC
                 if (NavMesh.SamplePosition(ahead, out var end, 0.7f, filter) &&
                     Vector3.Dot(end.position - start, direction) >= MinSearchStep &&
                     !NavMesh.Raycast(start, end.position, out _, filter) &&
-                    HasClearLine(start + chest, end.position + chest))
+                    HasClearLine(start + chest, end.position + chest) &&
+                    (accept == null || accept(end.position)))
                 {
                     destination = end.position;
                     return true;
@@ -470,61 +563,6 @@ namespace CarX.NPC
             }
 
             return false;
-        }
-
-        bool IsPlayerLit(Vector3 position)
-        {
-            foreach (var flashlight in _playerFlashlights)
-                if (flashlight != null && flashlight.IsOn)
-                    return true;
-
-            return IsLitByScene(position, includePlayerLights: false, fringe: LightFringeWidth);
-        }
-
-        bool IsLitByScene(Vector3 position, bool includePlayerLights, float fringe)
-        {
-            foreach (var light in _sceneLights)
-            {
-                if (light == null || light.gameObject.scene != gameObject.scene ||
-                    !light.isActiveAndEnabled || light.intensity <= 0f ||
-                    (uint)light.renderingLayerMask == PlayerPistol.WeaponRenderingLayer ||
-                    (uint)light.renderingLayerMask == Flashlight.WeaponSpillRenderingLayer ||
-                    (!includePlayerLights && light.transform.IsChildOf(_player.transform.root)))
-                    continue;
-                if (light.type != LightType.Point && light.type != LightType.Spot)
-                    continue;
-
-                if (LightAtPoint(light, position, fringe) >= VisibleLightLevel &&
-                    HasClearLine(light.transform.position, position))
-                    return true;
-            }
-            return false;
-        }
-
-        static float LightAtPoint(Light light, Vector3 position, float fringe)
-        {
-            Vector3 offset = position - light.transform.position;
-            float distance = offset.magnitude;
-            float rangeWeight = 1f - Mathf.SmoothStep(0f, 1f,
-                Mathf.InverseLerp(light.range * 0.85f, light.range + fringe, distance));
-            if (rangeWeight <= 0f)
-                return 0f;
-
-            float coneWeight = 1f;
-            if (light.type == LightType.Spot)
-            {
-                Vector3 direction = light.transform.forward;
-                float depth = Vector3.Dot(direction, offset);
-                if (depth <= 0f)
-                    return 0f;
-
-                float beamRadius = depth * Mathf.Tan(light.spotAngle * 0.5f * Mathf.Deg2Rad);
-                float radius = (offset - direction * depth).magnitude;
-                coneWeight = 1f - Mathf.SmoothStep(0f, 1f,
-                    Mathf.InverseLerp(beamRadius * 0.8f, beamRadius + fringe, radius));
-            }
-
-            return light.intensity * rangeWeight * coneWeight / Mathf.Max(1f, distance * distance);
         }
 
         internal bool HasClearLine(Vector3 from, Vector3 to)
@@ -552,15 +590,29 @@ namespace CarX.NPC
             return true;
         }
 
-        void HearShot(Vector3 position)
+        void HearFootstep(Vector3 position, Vector3 velocity)
         {
-            if (!isActiveAndEnabled || _state == State.Dead ||
-                (transform.position - position).sqrMagnitude > ShotHearingDistance * ShotHearingDistance)
+            float range = FootstepHearingDistance;
+            if (_bandit != null && velocity.sqrMagnitude >= BanditPistol.LoudStepSpeed * BanditPistol.LoudStepSpeed)
+                range = velocity.sqrMagnitude >= 25f ? 18f : 13f;
+            HearNoise(position, range, footstepVelocity: velocity);
+        }
+
+        void HearShot(Vector3 position) =>
+            HearNoise(position, _bandit != null ? BanditShotHearingDistance : ShotHearingDistance, isShot: true);
+
+        void HearNoise(Vector3 position, float range, bool isShot = false, Vector3 footstepVelocity = default)
+        {
+            if (!isActiveAndEnabled || _state == State.Dead || _player == null || _player.IsDead ||
+                (transform.position - position).sqrMagnitude > range * range)
                 return;
 
             if (_bandit != null)
             {
-                _bandit.HearNoise(position);
+                if (isShot)
+                    _bandit.HearShot(position);
+                else
+                    _bandit.HearNoise(position, footstepVelocity);
                 return;
             }
 
@@ -627,9 +679,16 @@ namespace CarX.NPC
             if (direction.sqrMagnitude < 0.0025f)
                 return false;
 
-            transform.rotation = Quaternion.RotateTowards(transform.rotation,
-                Quaternion.LookRotation(direction), 560f * Time.deltaTime);
+            TurnTowards(Quaternion.LookRotation(direction), 420f);
             return true;
+        }
+
+        void TurnTowards(Quaternion facing, float turnSpeed)
+        {
+            float dt = Time.deltaTime;
+            float ease = 1f - Mathf.Exp(-10f * dt);
+            Quaternion eased = Quaternion.Slerp(transform.rotation, facing, ease);
+            transform.rotation = Quaternion.RotateTowards(transform.rotation, eased, turnSpeed * dt);
         }
 
         internal void StopMoving()
@@ -675,7 +734,7 @@ namespace CarX.NPC
             if (elapsed >= AttackWindup && !_strikeDelivered)
             {
                 _strikeDelivered = true;
-                if (visible && distance <= AttackRange && CanSeePlayerBody(playerCenter, requireLight: false))
+                if (visible && distance <= AttackRange)
                 {
                     _player.TakeAttackDamage(_hasKnife ? KnifeHitDamage : UnarmedHitDamage);
                     if (_hasKnife)
@@ -705,27 +764,170 @@ namespace CarX.NPC
             return true;
         }
 
-        internal void TakeDamage(int damage)
+        internal void TakeShot(RaycastHit hit, int bodyDamage, Vector3 shotOrigin)
         {
-            if (_state == State.Dead)
+            if ((!isActiveAndEnabled && !_stagedDamageEnabled) || _state == State.Dead)
                 return;
 
-            _health = Mathf.Max(0, _health - damage);
+            bool headshot = _headHitbox != null && hit.collider == _headHitbox;
+            _health = headshot ? 0 : Mathf.Max(0, _health - bodyDamage);
             if (_health > 0)
+            {
+                _encounterAnimation?.Flinch();
+                _bandit?.ReactToHitInCover(shotOrigin, hit.point);
+                return;
+            }
+
+            TakeFatalShot();
+        }
+
+        internal void TakeFatalShot()
+        {
+            if (!IsAlive)
                 return;
 
+            _health = 0;
+            EnterDeadState();
+            if (_encounterAnimation != null)
+                _encounterAnimation.Fall(immediately: false);
+            else
+                StartCoroutine(Fall());
+        }
+
+        void EnterDeadState()
+        {
             StopMoving();
             SetState(State.Dead);
+            if (TryGetComponent<NpcSpeechState>(out var speech))
+                speech.SetTalking(false);
             if (_bandit != null)
                 _bandit.StopCombat();
             if (_agent != null)
                 _agent.enabled = false;
-            _hitbox.enabled = false;
-            if (_leftShoulder != null)
-                _leftShoulder.localRotation = _leftRest;
-            if (_rightShoulder != null)
+            _bodyHitbox.enabled = false;
+            if (_headHitbox != null)
+                _headHitbox.enabled = false;
+            if (_bandit == null)
+            {
+                if (_leftShoulder != null)
+                    _leftShoulder.localRotation = _leftRest;
+                if (_rightShoulder != null)
+                    _rightShoulder.localRotation = _rightRest;
+            }
+        }
+
+        internal void LeaveBodyForEncounter()
+        {
+            if (_state == State.Dead)
+                return;
+
+            _health = 0;
+            EnterDeadState();
+            if (_encounterAnimation != null)
+                _encounterAnimation.Fall(immediately: true);
+            else
+                SetFallenPose(transform.position, transform.rotation, 90f);
+        }
+
+        internal void StageForEncounter(Color headColor, Material fallbackMaterial)
+        {
+            enabled = false;
+            foreach (var renderer in GetComponentsInChildren<Renderer>(true))
+                if (renderer.sharedMaterial == null)
+                    renderer.sharedMaterial = fallbackMaterial;
+            if (_headHitbox == null || !_headHitbox.TryGetComponent<Renderer>(out var head))
+                return;
+
+            if (fallbackMaterial != null)
+                head.sharedMaterial = fallbackMaterial;
+            var properties = new MaterialPropertyBlock();
+            head.GetPropertyBlock(properties);
+            properties.SetColor("_BaseColor", headColor);
+            properties.SetColor("_Color", headColor);
+            head.SetPropertyBlock(properties);
+        }
+
+        internal void AttachCombatModel(GameObject modelPrefab = null, GameObject pistolPrefab = null,
+            RuntimeAnimatorController locomotion = null)
+        {
+            if (_encounterAnimation != null || _bandit == null)
+                return;
+
+            modelPrefab ??= _combatModel;
+            pistolPrefab ??= _combatPistol;
+            locomotion ??= _combatLocomotion;
+            if (modelPrefab == null || pistolPrefab == null || locomotion == null)
+                return;
+
+            var placeholders = GetComponentsInChildren<Renderer>(true);
+            var model = Instantiate(modelPrefab, transform, false);
+            var animation = model.AddComponent<CombatHumanoidAnimation>();
+            if (!animation.Bind(transform, _headHitbox as SphereCollider, pistolPrefab, locomotion))
+            {
+                Debug.LogWarning($"{name} requires a humanoid model and a pistol muzzle.", this);
+                Destroy(model);
+                return;
+            }
+
+            foreach (var placeholder in placeholders)
+                placeholder.enabled = false;
+            _encounterAnimation = animation;
+            _bandit.AttachStagedModel(animation);
+            animation.SetWeaponVisible(true);
+        }
+
+        internal void SetStagedWeaponVisible(bool visible) => _bandit.SetStagedWeaponVisible(visible);
+
+        internal CombatHumanoidAnimation EncounterAnimation => _encounterAnimation;
+
+        internal void SetStagedDamageEnabled(bool enabled) => _stagedDamageEnabled = enabled;
+
+        internal void PlayStagedShot(bool playAudio = true) => _bandit.PlayStagedShot(playAudio);
+
+        internal void ReactToStagedShot() => _encounterAnimation?.Flinch();
+
+        internal void LowerStagedWeapon()
+        {
+            if (_bandit != null)
+                _bandit.LowerStagedWeapon();
+            else if (_rightShoulder != null)
                 _rightShoulder.localRotation = _rightRest;
-            StartCoroutine(Fall());
+        }
+
+        internal void AimForEncounter(Vector3 target, bool smooth = false,
+            float raiseDuration = CombatHumanoidAnimation.DefaultAimRaiseTime)
+        {
+            FaceForEncounter(target, smooth);
+            _bandit?.AimStagedWeapon(target, smooth, raiseDuration);
+        }
+
+        internal void SpeakAtForEncounter(Vector3 target)
+        {
+            FaceForEncounter(target, smooth: true);
+            _bandit?.LowerStagedWeapon(smooth: true, relaxed: true);
+        }
+
+        internal void FaceForEncounter(Vector3 target, bool smooth = false)
+        {
+            Vector3 offset = target - transform.position;
+            Vector3 direction = Vector3.ProjectOnPlane(offset, Vector3.up);
+            if (direction.sqrMagnitude > 0.001f)
+            {
+                Quaternion aim = Quaternion.LookRotation(direction);
+                if (smooth)
+                    TurnTowards(aim, 360f);
+                else
+                    transform.rotation = aim;
+            }
+        }
+
+        internal void BeginEncounterCombat(Vector3 target, float? visibleHitChance, bool holdCover)
+        {
+            _stagedDamageEnabled = false;
+            _home = transform.position;
+            _homeFacing = transform.forward;
+            _bandit.BeginEncounterCombat(target, visibleHitChance, holdCover);
+            enabled = true;
         }
 
         IEnumerator Fall()
@@ -735,21 +937,25 @@ namespace CarX.NPC
             Quaternion startRotation = transform.rotation;
             for (float elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime)
             {
-                FallPose(Mathf.SmoothStep(0f, 90f, elapsed / duration));
+                SetFallenPose(startPosition, startRotation, Mathf.SmoothStep(0f, 90f, elapsed / duration));
                 yield return null;
             }
-            FallPose(90f);
+            SetFallenPose(startPosition, startRotation, 90f);
+        }
 
-            void FallPose(float angle)
-            {
-                transform.SetPositionAndRotation(
-                    startPosition + Vector3.up * (0.205f * Mathf.Sin(angle * Mathf.Deg2Rad)),
-                    startRotation * Quaternion.Euler(angle, 0f, 0f));
-            }
+        void SetFallenPose(Vector3 startPosition, Quaternion startRotation, float angle)
+        {
+            transform.SetPositionAndRotation(
+                startPosition + Vector3.up * (0.205f * Mathf.Sin(angle * Mathf.Deg2Rad)),
+                startRotation * Quaternion.Euler(angle, 0f, 0f));
         }
 
         void OnDestroy()
         {
+            if (_playerHud != null)
+                _playerHud.UnregisterHostile(this);
+            if (_playerMovement != null)
+                _playerMovement.AudibleFootstep -= HearFootstep;
             if (_pistol != null)
                 _pistol.ShotFired -= HearShot;
         }

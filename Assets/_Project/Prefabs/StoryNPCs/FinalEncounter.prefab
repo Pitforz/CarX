@@ -1,0 +1,88 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &100100001
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 100100002}
+  - component: {fileID: 100100003}
+  - component: {fileID: 100100004}
+  m_Layer: 0
+  m_Name: FinalEncounter
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &100100002
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 100100001}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &100100003
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 100100001}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a6c1ed949c6b4680921617b2e1196952, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CarX.NPC.BanditSquad
+--- !u!114 &100100004
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 100100001}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 452cae71b94e41718dac0d8c6f65fa9d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CarX.Gameplay.FinalEncounter
+  _banditPrefab: {fileID: 1172137951, guid: ba057f707421414ba628d8293a1531ae, type: 3}
+  _bossModel: {fileID: 5960950638764755839, guid: 9745f2231520948e89570e2a9e52a749, type: 3}
+  _fatherModel: {fileID: 8049121700377071065, guid: 1828b92622dfd46e381377d432653108, type: 3}
+  _fatherPistol: {fileID: 1382142288692174989, guid: 6858a5cf89bd041a9a265c111d98d265, type: 3}
+  _fatherLocomotion: {fileID: 9100000, guid: b5b24336229c7412595fae5f1e6aaa23, type: 2}
+  _actorMaterial: {fileID: 2100000, guid: 9ed41ec72b03048c5a3b6c8b4ef453dc, type: 2}
+  _executionShot: {fileID: 8300000, guid: b8c23b7d26564e43a17e0f3bc38f2dd3, type: 3}
+  _entrance:
+    m_Center: {x: 0, y: 1.5, z: 1.6}
+    m_Extent: {x: 8, y: 2, z: 1.5}
+  _center: {x: 0, y: 0, z: 18}
+  _centerRadius: 1.35
+  _bossPosition: {x: 0, y: 0, z: 25.8}
+  _bossGuardPosition: {x: -3.2, y: 0, z: 25.3}
+  _rearLeftPosition: {x: -3, y: 0, z: 2.6}
+  _rearRightPosition: {x: 3, y: 0, z: 2.6}
+  _fatherEntrance: {x: 12.4, y: 0, z: 28.35}
+  _escortEntrance: {x: 10.25, y: 0, z: 27.45}
+  _fatherBodyPosition: {x: 12.65, y: 0, z: 26.9}
+  _escortFightEntry: {x: 8.1, y: 0, z: 26.95}
+  _fatherPosition: {x: 2.25, y: 0, z: 24.6}
+  _escortPosition: {x: 4.3, y: 0, z: 26.1}
+  _fatherCellPeek: {x: 9.45, y: 0, z: 27.35}
+  _fatherCellCover: {x: 10.55, y: 0, z: 28.65}
+  _holsterTime: 8
+  _redrawHolsterTime: 10
+  _walkTime: 20
+  _choiceTime: 60
+  _openingDelay: 1

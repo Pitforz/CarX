@@ -21,17 +21,32 @@ namespace CarX.Gameplay
         const float SilentReloadDuration = 0.55f;
         const float AimFovReduction = 0.2808f;
         const float AimLookSensitivity = 0.7f;
+        const float EncounterAimSmoothTime = 0.03f;
         const float ShotInterval = 0.25f;
-        const float LeanFovBonus = 2f;
+        const float LeanFovBonus = 1f;
         const float ShotRange = 100f;
-        const float HipSpread = 0.045f;
         const int MaxImpactMarks = 80;
-        const string PeacefulNpcSubtitle = "Опусти ствол, Лёша. Ты сюда за отцом пришёл.";
+        const float StressRiseTime = 0.35f;
+        const float StressSettleTime = 0.55f;
 
         [SerializeField] Shader _placeholderShader;
         [SerializeField] Shader _weaponShader;
         [SerializeField] BerettaView _berettaPrefab;
         [SerializeField, Min(0.01f)] float _aimTransitionTime = 0.24f;
+        [Header("Camera recoil")]
+        [Tooltip("Minimum (X) and maximum (Y) upward kick per shot in degrees.")]
+        [SerializeField] Vector2 _upwardRecoilDegrees = new(0.9f, 1.4f);
+        [Tooltip("Maximum sideways kick in either direction per shot in degrees.")]
+        [SerializeField, Min(0f)] float _sidewaysRecoilDegrees = 0.6f;
+        [Tooltip("Fraction of the hip-fire camera kick when fully aimed.")]
+        [SerializeField, Range(0f, 1f)] float _aimedRecoilMultiplier = 0.6f;
+        [Header("Combat stress")]
+        [Tooltip("Maximum horizontal (X) and vertical (Y) aim sway in degrees.")]
+        [SerializeField] Vector2 _stressAimSwayDegrees = new(1.05f, 0.75f);
+        [Tooltip("Maximum hand roll in degrees when holding the pistol at the hip.")]
+        [SerializeField, Min(0f)] float _stressHandRollDegrees = 2f;
+        [Tooltip("Multiplier for camera recoil at full combat stress.")]
+        [SerializeField, Min(1f)] float _stressRecoilMultiplier = 1.45f;
         [Header("Pistol audio")]
         [SerializeField] AudioClip _shotClip;
         [SerializeField] AudioClip _reloadClip;
@@ -51,6 +66,8 @@ namespace CarX.Gameplay
         CinemachineCamera _followCamera;
         PlayerStatusHud _hud;
         PlayerInventory _inventory;
+        PlayerMenus _menus;
+        PlayerInnerVoice _innerVoice;
         Transform _view;
         BerettaView _beretta;
         PistolWallClearance _wallClearance;
@@ -60,11 +77,11 @@ namespace CarX.Gameplay
         Material _placeholderMaterial;
         Material _weaponMaterial;
         readonly Queue<GameObject> _impactMarks = new();
-        readonly HashSet<NPC.HostileNpc> _warnedHostiles = new();
         int _loaded = MagazineSize;
         int _reserve = MagazineSize;
         bool _equipped;
         bool _aiming;
+        bool _scriptedEncounterAim;
         bool _shotPending;
         bool _aimedTriggerPending;
         float _reloadRemaining;
@@ -76,12 +93,16 @@ namespace CarX.Gameplay
         float _nextShotTime;
         float _aimBlend;
         float _aimVelocity;
-        float _recoil;
-        float _recoilVelocity;
+        float _placeholderRecoil;
+        float _placeholderRecoilVelocity;
         float _normalFov;
+        float _stressBlend;
+        Vector2 _stressTremor;
 
         internal Camera ViewCamera => _camera;
         internal bool IsEquipped => _equipped;
+        internal bool IsEncounterAiming => _scriptedEncounterAim && _aiming;
+        public bool CombatStressActive { get; private set; }
         /// <summary>Set by another system (dark orientation): true puts the pistol and its arms away, it stays equipped.</summary>
         internal System.Func<bool> HideQuery;
         /// <summary>Set by another system: true means no aiming, firing or reloading.</summary>
@@ -90,6 +111,10 @@ namespace CarX.Gameplay
         internal Vector3 GripLightPosition => _beretta != null ? _beretta.GripLightPosition : _view.position;
         internal event System.Action<Vector3> ShotFired;
         int ReserveRounds => _inventory != null ? _inventory.ReserveRounds : _reserve;
+        float StressAmount => Mathf.SmoothStep(0f, 1f, _stressBlend);
+
+        // The final encounter can use the same control as the prototype key.
+        public void SetCombatStress(bool active) => CombatStressActive = active;
 
         void Start()
         {
@@ -115,6 +140,8 @@ namespace CarX.Gameplay
 
             _hud = GetComponent<PlayerStatusHud>();
             _inventory = GetComponent<PlayerInventory>();
+            _menus = GetComponent<PlayerMenus>();
+            _innerVoice = GetComponent<PlayerInnerVoice>();
             _muzzleFlash = GetComponent<PlayerMuzzleFlash>();
             _shotAudio = CreateAudioSource("Pistol Shot Audio", _shotVolume);
             _reloadAudio = CreateAudioSource("Pistol Reload Audio", _reloadVolume);
@@ -136,20 +163,35 @@ namespace CarX.Gameplay
             var mouse = Mouse.current;
             bool equipPressed = keyboard?.digit1Key.wasPressedThisFrame == true;
             bool reloadPressed = keyboard?.rKey.wasPressedThisFrame == true;
-            bool firePressed = mouse?.leftButton.wasPressedThisFrame == true;
+            bool firePressed = mouse?.leftButton.wasPressedThisFrame == true ||
+                keyboard?.pKey.wasPressedThisFrame == true;
             bool aimHeld = mouse?.rightButton.isPressed == true;
+            bool stressPressed = keyboard?.bKey.wasPressedThisFrame == true;
 #else
             bool equipPressed = Input.GetKeyDown(KeyCode.Alpha1);
             bool reloadPressed = Input.GetKeyDown(KeyCode.R);
-            bool firePressed = Input.GetMouseButtonDown(0);
+            bool firePressed = Input.GetMouseButtonDown(0) || Input.GetKeyDown(KeyCode.P);
             bool aimHeld = Input.GetMouseButton(1);
+            bool stressPressed = Input.GetKeyDown(KeyCode.B);
 #endif
             UpdateReload();
 
-            if (_inventory != null && _inventory.BlocksWeaponInput)
+            bool gameplayBlocked = _inventory != null ? _inventory.BlocksGameplayInput :
+                _menus != null && _menus.BlocksGameplayInput;
+            if (stressPressed && !gameplayBlocked)
+            {
+                SetCombatStress(!CombatStressActive);
+                _hud.ShowSubtitle(CombatStressActive ? "Мандраж включён" : "Мандраж выключен", duration: 1.5f);
+            }
+
+            bool weaponInputBlocked = _inventory?.BlocksWeaponInput ?? gameplayBlocked;
+            bool encounterAllowsWeapon = _menus?.AllowsEncounterWeaponInput == true &&
+                _inventory?.IsCarryingTools != true;
+            if (weaponInputBlocked && !encounterAllowsWeapon)
                 equipPressed = reloadPressed = firePressed = aimHeld = false;
             IsHiddenExternally = HideQuery != null && HideQuery();
-            if (BlockQuery != null && BlockQuery())
+            bool weaponBlockedExternally = BlockQuery != null && BlockQuery();
+            if (weaponBlockedExternally)
                 equipPressed = reloadPressed = firePressed = aimHeld = false;
 
             if (equipPressed)
@@ -168,10 +210,11 @@ namespace CarX.Gameplay
             }
             bool canUsePistol = _equipped && !loweredForFlashlight && Time.time >= _flashlightRestoredAt &&
                 !(_beretta != null && _beretta.IsDrawing);
-            if (canUsePistol && reloadPressed && ReserveRounds > 0 && _reloadRemaining <= 0f)
+            bool reloadForEncounter = _scriptedEncounterAim && _loaded == 0;
+            if (canUsePistol && (reloadPressed || reloadForEncounter) && ReserveRounds > 0 && _reloadRemaining <= 0f)
                 StartReload();
 
-            _aiming = canUsePistol && aimHeld && _reloadRemaining <= 0f;
+            _aiming = canUsePistol && (aimHeld || _scriptedEncounterAim) && _reloadRemaining <= 0f;
             _aimedTriggerPending = _aiming && firePressed;
             _shotPending = canUsePistol && firePressed && _loaded > 0 && _reloadRemaining <= 0f &&
                 Time.time >= _nextShotTime;
@@ -180,8 +223,9 @@ namespace CarX.Gameplay
             if (Time.deltaTime > 0f)
             {
                 float aimTarget = _aiming ? 1f : 0f;
+                float aimSmoothTime = _scriptedEncounterAim ? EncounterAimSmoothTime : _aimTransitionTime * 0.5f;
                 _aimBlend = Mathf.SmoothDamp(_aimBlend, aimTarget, ref _aimVelocity,
-                    _aimTransitionTime * 0.5f);
+                    aimSmoothTime);
                 if (Mathf.Abs(_aimBlend - aimTarget) < 0.0001f && Mathf.Abs(_aimVelocity) < 0.001f)
                 {
                     _aimBlend = aimTarget;
@@ -189,6 +233,8 @@ namespace CarX.Gameplay
                 }
             }
             float zoom = _aimBlend;
+            UpdateCombatStress(canUsePistol && (!gameplayBlocked || encounterAllowsWeapon || _scriptedEncounterAim) &&
+                !IsHiddenExternally && !weaponBlockedExternally);
             if (_player != null)
             {
                 _player.LookSensitivityMultiplier = Mathf.Lerp(1f, AimLookSensitivity, zoom);
@@ -200,11 +246,38 @@ namespace CarX.Gameplay
             _hud.ShowPistol(_equipped, _aiming, _loaded, ReserveRounds, _reloadRemaining > 0f);
         }
 
+        internal bool TryPrepareEncounterShot()
+        {
+            if (_view == null || !isActiveAndEnabled || (_inventory != null && !_inventory.TryPutDownToolbox()))
+                return false;
+
+            if (_beretta != null && _beretta.IsHolstering)
+            {
+                _beretta.ResetPose();
+                _view.gameObject.SetActive(false);
+            }
+            return true;
+        }
+
+        internal void BeginEncounterShot()
+        {
+            _scriptedEncounterAim = true;
+            SetEquipped(true);
+        }
+
+        internal void EndEncounterShot() => _scriptedEncounterAim = false;
+
+        internal void FireEncounterShot()
+        {
+            Fire(applyCameraRecoil: false);
+            EndEncounterShot();
+            _hud.ShowPistol(_equipped, _aiming, _loaded, ReserveRounds, false);
+        }
+
         internal void SetEquipped(bool equipped)
         {
             if (_view == null || !isActiveAndEnabled || _equipped == equipped)
                 return;
-
             if (equipped && _inventory != null && _inventory.IsCarryingTools)
             {
                 _hud.ShowSubtitle(PlayerInventory.HandsFullSubtitle);
@@ -239,7 +312,7 @@ namespace CarX.Gameplay
             }
         }
 
-        internal bool TryLowerForFlashlight(float duration, out float switchDelay)
+        internal bool TryLowerForHandAction(float duration, out float switchDelay)
         {
             switchDelay = 0f;
             if (!_equipped || !isActiveAndEnabled)
@@ -278,15 +351,17 @@ namespace CarX.Gameplay
                 return;
 
             bool canFire = _shotPending;
-            bool aimed = _aimedTriggerPending;
             _shotPending = false;
             _aimedTriggerPending = false;
-            bool hasHit = FindTargetHit(aimed, out var hit);
+            // The target can lean between physics steps. Use the same pose that is rendered this frame.
+            if (canFire)
+                Physics.SyncTransforms();
+            Ray shotRay = CenterRay();
+            bool hasHit = FindShotHit(shotRay, out var hit);
             var enemy = hasHit ? hit.collider.GetComponentInParent<NPC.HostileNpc>() : null;
-            if (hasHit && (IsProtectedNpc(hit.collider) ||
-                (canFire && enemy != null && _warnedHostiles.Add(enemy))))
+            if (hasHit && IsProtectedNpc(hit.collider))
             {
-                _hud.ShowSubtitle(PeacefulNpcSubtitle);
+                _innerVoice?.WarnAboutCivilian();
                 return;
             }
 
@@ -295,7 +370,7 @@ namespace CarX.Gameplay
 
             Fire();
             if (enemy != null)
-                enemy.TakeDamage(ShotDamage);
+                enemy.TakeShot(hit, ShotDamage, shotRay.origin);
             else if (hasHit)
                 PlaceImpactMark(hit);
             _hud.ShowPistol(_equipped, _aiming, _loaded, ReserveRounds, _reloadRemaining > 0f);
@@ -307,28 +382,6 @@ namespace CarX.Gameplay
         internal bool IsAimingAt(Transform target, float range) => _aiming && IsLookingAt(target, range);
 
         Ray CenterRay() => _camera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
-
-        bool FindTargetHit(bool aimed, out RaycastHit hit)
-        {
-            bool centerHasHit = FindShotHit(CenterRay(), out hit);
-            if (aimed)
-                return centerHasHit;
-
-            Vector2 spread = Random.insideUnitCircle * HipSpread;
-            var ray = _camera.ViewportPointToRay(
-                new Vector3(0.5f + spread.x / _camera.aspect, 0.5f + spread.y, 0f));
-            if (!FindShotHit(ray, out var spreadHit))
-                return false;
-
-            // Keep the center hit if the spread turns a wall shot into a floor or ceiling shot.
-            if (Mathf.Abs(spreadHit.normal.y) >= 0.7f &&
-                (!centerHasHit || spreadHit.collider != hit.collider ||
-                 Vector3.Dot(spreadHit.normal, hit.normal) <= 0.8f))
-                return centerHasHit;
-
-            hit = spreadHit;
-            return true;
-        }
 
         bool FindShotHit(Ray ray, out RaycastHit closestHit, float range = ShotRange)
         {
@@ -445,23 +498,70 @@ namespace CarX.Gameplay
                 (_loaded, _reserve) = (_reserve, _loaded);
         }
 
-        void Fire()
+        void Fire(bool applyCameraRecoil = true)
         {
             _nextShotTime = Time.time + ShotInterval;
-            _loaded--;
+            _loaded = Mathf.Max(0, _loaded - 1);
             if (_beretta != null)
                 _beretta.Fire(_loaded == 0, ShotInterval);
-            _recoil = Mathf.Min(_recoil + 0.65f, 1f);
-            _recoilVelocity = 0f;
+            else
+            {
+                _placeholderRecoil = Mathf.Min(_placeholderRecoil + 0.65f, 1f);
+                _placeholderRecoilVelocity = 0f;
+            }
+            if (applyCameraRecoil)
+                ApplyCameraRecoil();
             _muzzleFlash.Play();
             ShotFired?.Invoke(transform.position);
             if (_shotClip != null)
                 _shotAudio.PlayOneShot(_shotClip);
         }
 
+        void ApplyCameraRecoil()
+        {
+            if (_player == null)
+                return;
+
+            float minPitch = Mathf.Max(0f, Mathf.Min(_upwardRecoilDegrees.x, _upwardRecoilDegrees.y));
+            float maxPitch = Mathf.Max(minPitch, Mathf.Max(_upwardRecoilDegrees.x, _upwardRecoilDegrees.y));
+            float scale = Mathf.Lerp(1f, _aimedRecoilMultiplier, _aimBlend);
+            scale *= Mathf.Lerp(1f, _stressRecoilMultiplier, StressAmount);
+            float upward = Random.Range(minPitch, maxPitch);
+            float sideways = Random.Range(-_sidewaysRecoilDegrees, _sidewaysRecoilDegrees);
+            _player.AddLookRecoil(upward * scale, sideways * scale);
+        }
+
+        void UpdateCombatStress(bool canTremble)
+        {
+            bool buildStress = CombatStressActive && canTremble;
+            float duration = buildStress ? StressRiseTime : StressSettleTime;
+            _stressBlend = Mathf.MoveTowards(_stressBlend, buildStress ? 1f : 0f, Time.deltaTime / duration);
+            if (_stressBlend > 0f)
+            {
+                float time = Time.time;
+                _stressTremor = new Vector2(SampleTremor(time, 3.17f), SampleTremor(time, 8.63f)) * StressAmount;
+            }
+            else
+                _stressTremor = Vector2.zero;
+
+            if (_player != null)
+            {
+                // The shot ray follows the resulting camera orientation, including this offset.
+                Vector2 lookOffset = Vector2.Scale(_stressTremor, _stressAimSwayDegrees) *
+                    Mathf.Lerp(0.35f, 1f, _aimBlend);
+                _player.SetAimSway(lookOffset);
+            }
+        }
+
+        static float SampleTremor(float time, float channel)
+        {
+            float drift = Mathf.Clamp01(Mathf.PerlinNoise(time * 2.1f, channel));
+            float tremor = Mathf.Clamp01(Mathf.PerlinNoise(time * 7.3f, channel + 20f));
+            return 2f * (drift * 0.58f + tremor * 0.42f) - 1f;
+        }
+
         void UpdatePose(float aimBlend, bool loweredForFlashlight)
         {
-            _recoil = Mathf.SmoothDamp(_recoil, 0f, ref _recoilVelocity, 0.07f);
             float reloadDip = _reloadRemaining > 0f
                 ? Mathf.Sin(Mathf.PI * Mathf.Clamp01(_reloadRemaining / _reloadDuration))
                 : 0f;
@@ -478,12 +578,20 @@ namespace CarX.Gameplay
             }
             else
             {
+                _placeholderRecoil = Mathf.SmoothDamp(_placeholderRecoil, 0f, ref _placeholderRecoilVelocity, 0.07f);
                 _view.localPosition = Vector3.Lerp(HipPosition, AimPosition, aimBlend)
-                    - Vector3.forward * (_recoil * 0.04f)
+                    - Vector3.forward * (_placeholderRecoil * 0.04f)
                     - Vector3.up * (reloadDip * 0.18f + flashlightDip * 0.65f);
                 _view.localRotation =
-                    Quaternion.Euler(reloadDip * 24f + flashlightDip * 35f - _recoil * 6f, 0f, 0f);
+                    Quaternion.Euler(reloadDip * 24f + flashlightDip * 35f - _placeholderRecoil * 6f, 0f, 0f);
             }
+
+            // Keep the sights near the shot ray while retaining some visible hand movement.
+            float handTremor = Mathf.Lerp(1f, 0.25f, aimBlend) * (1f - flashlightDip);
+            _view.localPosition += new Vector3(_stressTremor.x * 0.006f, _stressTremor.y * 0.004f, 0f) * handTremor;
+            _view.localRotation *= Quaternion.AngleAxis(_stressTremor.x * _stressHandRollDegrees * handTremor,
+                Vector3.forward);
+
             bool showView = _beretta != null
                 ? _beretta.IsHolstering || (_equipped && !loweredForFlashlight)
                 : _equipped && flashlightDip < 1f;
@@ -506,6 +614,11 @@ namespace CarX.Gameplay
         void OnDisable()
         {
             CancelReload();
+            SetCombatStress(false);
+            _stressBlend = 0f;
+            _stressTremor = Vector2.zero;
+            if (_player != null)
+                _player.SetAimSway(Vector2.zero);
             if (_shotAudio != null)
                 _shotAudio.Stop();
             if (_view == null)
@@ -513,6 +626,7 @@ namespace CarX.Gameplay
 
             _equipped = false;
             _aiming = false;
+            _scriptedEncounterAim = false;
             _flashlightRaiseAt = 0f;
             _flashlightRestoredAt = 0f;
             _shotPending = false;
