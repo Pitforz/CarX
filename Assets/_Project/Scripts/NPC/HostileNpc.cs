@@ -39,6 +39,9 @@ namespace CarX.NPC
         [SerializeField] Transform _rightShoulder;
         [SerializeField] BoxCollider _bodyHitbox;
         [SerializeField] Collider _headHitbox;
+        [SerializeField] GameObject _combatModel;
+        [SerializeField] GameObject _combatPistol;
+        [SerializeField] RuntimeAnimatorController _combatLocomotion;
 
         enum State { Idle, Alerted, Returning, Watching, Dead }
 
@@ -46,6 +49,7 @@ namespace CarX.NPC
         NavMeshPath _combatPath;
         State _state;
         BanditPistol _bandit;
+        CombatHumanoidAnimation _encounterAnimation;
         NavMeshAgent _agent;
         PlayerHealth _player;
         PlayerPistol _pistol;
@@ -84,9 +88,9 @@ namespace CarX.NPC
         internal bool IsEngaged => isActiveAndEnabled && _state != State.Dead &&
             (_bandit != null ? _bandit.IsEngaged : _state == State.Alerted);
         internal bool IsAlive => _state != State.Dead;
-        internal Vector3 HeadPosition => _headHitbox is SphereCollider head
-            ? head.transform.TransformPoint(head.center)
-            : _headHitbox != null ? _headHitbox.bounds.center : transform.position + Vector3.up * 1.7f;
+        internal Vector3 HeadPosition => _encounterAnimation != null ? _encounterAnimation.HeadPosition :
+            _headHitbox is SphereCollider head ? head.transform.TransformPoint(head.center) :
+            _headHitbox != null ? _headHitbox.bounds.center : transform.position + Vector3.up * 1.7f;
 
         void Awake()
         {
@@ -117,6 +121,7 @@ namespace CarX.NPC
             if (_state == State.Dead)
                 return;
 
+            AttachCombatModel();
             InitializeNavigation();
 
             foreach (var player in FindObjectsByType<PlayerHealth>())
@@ -674,9 +679,16 @@ namespace CarX.NPC
             if (direction.sqrMagnitude < 0.0025f)
                 return false;
 
-            transform.rotation = Quaternion.RotateTowards(transform.rotation,
-                Quaternion.LookRotation(direction), 560f * Time.deltaTime);
+            TurnTowards(Quaternion.LookRotation(direction), 420f);
             return true;
+        }
+
+        void TurnTowards(Quaternion facing, float turnSpeed)
+        {
+            float dt = Time.deltaTime;
+            float ease = 1f - Mathf.Exp(-10f * dt);
+            Quaternion eased = Quaternion.Slerp(transform.rotation, facing, ease);
+            transform.rotation = Quaternion.RotateTowards(transform.rotation, eased, turnSpeed * dt);
         }
 
         internal void StopMoving()
@@ -761,6 +773,7 @@ namespace CarX.NPC
             _health = headshot ? 0 : Mathf.Max(0, _health - bodyDamage);
             if (_health > 0)
             {
+                _encounterAnimation?.Flinch();
                 _bandit?.ReactToHitInCover(shotOrigin, hit.point);
                 return;
             }
@@ -775,13 +788,18 @@ namespace CarX.NPC
 
             _health = 0;
             EnterDeadState();
-            StartCoroutine(Fall());
+            if (_encounterAnimation != null)
+                _encounterAnimation.Fall(immediately: false);
+            else
+                StartCoroutine(Fall());
         }
 
         void EnterDeadState()
         {
             StopMoving();
             SetState(State.Dead);
+            if (TryGetComponent<NpcSpeechState>(out var speech))
+                speech.SetTalking(false);
             if (_bandit != null)
                 _bandit.StopCombat();
             if (_agent != null)
@@ -805,7 +823,10 @@ namespace CarX.NPC
 
             _health = 0;
             EnterDeadState();
-            SetFallenPose(transform.position, transform.rotation, 90f);
+            if (_encounterAnimation != null)
+                _encounterAnimation.Fall(immediately: true);
+            else
+                SetFallenPose(transform.position, transform.rotation, 90f);
         }
 
         internal void StageForEncounter(Color headColor, Material fallbackMaterial)
@@ -826,11 +847,44 @@ namespace CarX.NPC
             head.SetPropertyBlock(properties);
         }
 
+        internal void AttachCombatModel(GameObject modelPrefab = null, GameObject pistolPrefab = null,
+            RuntimeAnimatorController locomotion = null)
+        {
+            if (_encounterAnimation != null || _bandit == null)
+                return;
+
+            modelPrefab ??= _combatModel;
+            pistolPrefab ??= _combatPistol;
+            locomotion ??= _combatLocomotion;
+            if (modelPrefab == null || pistolPrefab == null || locomotion == null)
+                return;
+
+            var placeholders = GetComponentsInChildren<Renderer>(true);
+            var model = Instantiate(modelPrefab, transform, false);
+            var animation = model.AddComponent<CombatHumanoidAnimation>();
+            if (!animation.Bind(transform, _headHitbox as SphereCollider, pistolPrefab, locomotion))
+            {
+                Debug.LogWarning($"{name} requires a humanoid model and a pistol muzzle.", this);
+                Destroy(model);
+                return;
+            }
+
+            foreach (var placeholder in placeholders)
+                placeholder.enabled = false;
+            _encounterAnimation = animation;
+            _bandit.AttachStagedModel(animation);
+            animation.SetWeaponVisible(true);
+        }
+
         internal void SetStagedWeaponVisible(bool visible) => _bandit.SetStagedWeaponVisible(visible);
+
+        internal CombatHumanoidAnimation EncounterAnimation => _encounterAnimation;
 
         internal void SetStagedDamageEnabled(bool enabled) => _stagedDamageEnabled = enabled;
 
-        internal void PlayStagedShot() => _bandit.PlayStagedShot();
+        internal void PlayStagedShot(bool playAudio = true) => _bandit.PlayStagedShot(playAudio);
+
+        internal void ReactToStagedShot() => _encounterAnimation?.Flinch();
 
         internal void LowerStagedWeapon()
         {
@@ -840,16 +894,31 @@ namespace CarX.NPC
                 _rightShoulder.localRotation = _rightRest;
         }
 
-        internal void AimForEncounter(Vector3 target, bool smooth = false)
+        internal void AimForEncounter(Vector3 target, bool smooth = false,
+            float raiseDuration = CombatHumanoidAnimation.DefaultAimRaiseTime)
+        {
+            FaceForEncounter(target, smooth);
+            _bandit?.AimStagedWeapon(target, smooth, raiseDuration);
+        }
+
+        internal void SpeakAtForEncounter(Vector3 target)
+        {
+            FaceForEncounter(target, smooth: true);
+            _bandit?.LowerStagedWeapon(smooth: true, relaxed: true);
+        }
+
+        internal void FaceForEncounter(Vector3 target, bool smooth = false)
         {
             Vector3 offset = target - transform.position;
             Vector3 direction = Vector3.ProjectOnPlane(offset, Vector3.up);
             if (direction.sqrMagnitude > 0.001f)
             {
                 Quaternion aim = Quaternion.LookRotation(direction);
-                transform.rotation = smooth ? Quaternion.RotateTowards(transform.rotation, aim, 360f * Time.deltaTime) : aim;
+                if (smooth)
+                    TurnTowards(aim, 360f);
+                else
+                    transform.rotation = aim;
             }
-            _bandit?.AimStagedWeapon(target, smooth);
         }
 
         internal void BeginEncounterCombat(Vector3 target, float? visibleHitChance, bool holdCover)

@@ -130,7 +130,7 @@ namespace CarX.NPC
             yield return SpeakCaretaker(3, "Так всё-таки полицейский?");
             yield return SpeakPlayer(3, "Младший офицер полиции.");
             yield return SpeakCaretaker(4, "Большая честь. Чем обязан, офицеру…");
-            yield return SpeakPlayer(4, "Алексею Александровичу.");
+            yield return SpeakPlayer(4, "Алексею Александровичу.", "Alexey/Mark_FullName");
             yield return SpeakCaretaker(5, "Эмигрант?");
             yield return SpeakPlayer(5, "Подростком переехал.");
             yield return SpeakCaretaker(6, "А я Марк. За порядком присматриваю.");
@@ -177,8 +177,9 @@ namespace CarX.NPC
             Finish();
         }
 
-        IEnumerator SpeakPlayer(int number, string text) =>
-            Speak(text, Color.white, _playerVoice, DialogueVoice.GetClip(_mainAlexeyClips, number - 1));
+        IEnumerator SpeakPlayer(int number, string text, string fallbackVoice = null) =>
+            Speak(text, Color.white, _playerVoice,
+                DialogueVoice.GetClip(_mainAlexeyClips, number - 1) ?? DialogueVoice.GetStoryClip(fallbackVoice));
 
         IEnumerator SpeakCaretaker(int number, string text) =>
             Speak(text, CaretakerColor, _voice, DialogueVoice.GetClip(_mainMarkClips, number - 1), npcSpeaking: true);
@@ -190,11 +191,15 @@ namespace CarX.NPC
 
             _speech.SetTalking(npcSpeaking);
             _hud.SetStorySubtitle(text, color);
-            if (voice != null && clip != null)
+            float duration = Mathf.Clamp(1f + text.Length / 17f, 2.4f, 8f);
+            bool voiced = voice != null && clip != null;
+            if (npcSpeaking)
+                _speech.BeginLine(NpcSpeechState.SpokenText(text), duration, voiced ? voice : null, voiced ? clip : null);
+            if (voiced)
                 yield return DialogueVoice.Play(voice, clip);
             else
             {
-                float remaining = Mathf.Clamp(1f + text.Length / 17f, 2.4f, 8f);
+                float remaining = duration;
                 while (remaining > 0f)
                 {
                     yield return null;

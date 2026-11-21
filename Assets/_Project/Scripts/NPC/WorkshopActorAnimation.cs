@@ -10,6 +10,7 @@ namespace CarX.NPC
         [SerializeField] Transform _crowbar;
         [SerializeField, Min(0.1f)] float _raiseDuration = 1.05f;
         Transform _arm, _elbow, _hand;
+        Transform _threatTarget;
         Transform _indexBase, _indexMiddle, _indexTip;
         Transform _leftThigh, _leftKnee, _leftFoot, _rightThigh, _rightKnee, _rightFoot;
         Transform[] _bones;
@@ -38,7 +39,11 @@ namespace CarX.NPC
             _pose = new Quaternion[_bones.Length];
         }
 
-        internal void Threaten() => _threatening = true;
+        internal void Threaten(Transform target)
+        {
+            _threatTarget = target;
+            _threatening = true;
+        }
 
         internal void Surrender()
         {
@@ -101,6 +106,13 @@ namespace CarX.NPC
 
         void PoseCrowbar(float dt)
         {
+            if (_threatening && _threatTarget != null)
+            {
+                Vector3 facing = Vector3.ProjectOnPlane(_threatTarget.position - transform.position, Vector3.up);
+                if (facing.sqrMagnitude > 0.01f)
+                    transform.rotation = Quaternion.RotateTowards(transform.rotation, Quaternion.LookRotation(facing), 125f * dt);
+            }
+
             // Blend out of the current lift, even when the pistol interrupts it halfway.
             if (!_surrendered)
                 _threat = Mathf.MoveTowards(_threat, _threatening ? 1f : 0f, dt / Mathf.Max(0.1f, _raiseDuration));
@@ -109,19 +121,25 @@ namespace CarX.NPC
             float turn = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.09f, 1f, _threat));
             float hide = Mathf.SmoothStep(0f, 1f, _surrender);
 
-            Vector3 shaft = Vector3.Slerp(new Vector3(0.12f, -0.54f, 0.83f).normalized,
-                Vector3.up, turn * (1f - hide));
-            shaft = Vector3.Slerp(shaft, new Vector3(0.07f, -0.95f, -0.30f).normalized, hide);
-            Quaternion barRotation = transform.rotation *
-                Quaternion.LookRotation(Vector3.ProjectOnPlane(Vector3.left, shaft), shaft);
-            Quaternion wristRotation = barRotation * Quaternion.Inverse(_crowbar.localRotation);
-            Vector3 palmOffset = Quaternion.Inverse(_hand.rotation) * (_crowbar.position - _hand.position);
-
             // Keep the upper arm against the torso. Only the forearm comes forward.
             float upperLength = Vector3.Distance(_arm.position, _elbow.position);
             float forearmLength = Vector3.Distance(_elbow.position, _hand.position);
             Vector3 readyWrist = _arm.position - transform.up * (upperLength + 0.38f * forearmLength) +
                 transform.forward * (0.92f * forearmLength) + transform.right * 0.018f;
+            Vector3 towardPlayer = _threatTarget != null
+                ? transform.InverseTransformDirection(_threatTarget.position - transform.up * 0.23f - readyWrist)
+                : Vector3.forward;
+            Vector3 pointed = Vector3.RotateTowards(Vector3.forward, towardPlayer.normalized,
+                30f * Mathf.Deg2Rad, 0f);
+            float presentation = turn * (1f - hide);
+            Vector3 shaft = Vector3.Slerp(new Vector3(0.12f, -0.54f, 0.83f).normalized, pointed, presentation);
+            shaft = Vector3.Slerp(shaft, new Vector3(0.07f, -0.95f, -0.30f).normalized, hide);
+            Vector3 face = Vector3.Slerp(Vector3.left, Vector3.up, presentation);
+            Quaternion barRotation = transform.rotation *
+                Quaternion.LookRotation(Vector3.ProjectOnPlane(face, shaft), shaft);
+            Quaternion wristRotation = barRotation * Quaternion.Inverse(_crowbar.localRotation);
+            Vector3 palmOffset = Quaternion.Inverse(_hand.rotation) * (_crowbar.position - _hand.position);
+
             Vector3 lowWrist = transform.TransformPoint(new Vector3(0.30f, -0.17f, 0.09f)) -
                 wristRotation * palmOffset;
             Vector3 hiddenWrist = transform.TransformPoint(new Vector3(0.18f, -0.07f, -0.26f)) -
@@ -130,7 +148,7 @@ namespace CarX.NPC
             wrist += transform.right * (0.48f * hide * (1f - hide));
             Vector3 pole = Vector3.Lerp(transform.right * 0.72f - transform.forward,
                 -transform.up + transform.right * 0.08f, lift * (1f - hide));
-            Reach(_arm, _elbow, _hand, wrist, pole);
+            HumanoidLimbPose.Reach(_arm, _elbow, _hand, wrist, pole);
             _hand.rotation = wristRotation;
 
             // Danny's rig has one articulated finger chain for the right-hand grip.
@@ -149,25 +167,8 @@ namespace CarX.NPC
             Quaternion rotation = foot.rotation;
             float lift = Mathf.Min(0.065f, offset.magnitude * 0.2f) * Mathf.Sin(progress * Mathf.PI);
             Vector3 target = start + offset * Mathf.SmoothStep(0f, 1f, progress) + transform.up * lift;
-            Reach(thigh, knee, foot, target, transform.forward);
+            HumanoidLimbPose.Reach(thigh, knee, foot, target, transform.forward);
             foot.rotation = rotation;
-        }
-
-        static void Reach(Transform joint, Transform elbowJoint, Transform tip, Vector3 target, Vector3 pole)
-        {
-            Vector3 origin = joint.position;
-            float upper = Vector3.Distance(origin, elbowJoint.position);
-            float lower = Vector3.Distance(elbowJoint.position, tip.position);
-            Vector3 direction = (target - origin).normalized;
-            float distance = Mathf.Clamp(Vector3.Distance(origin, target), Mathf.Abs(upper - lower) + 0.001f,
-                upper + lower - 0.001f);
-            float along = (upper * upper + distance * distance - lower * lower) / (2f * distance);
-            float height = Mathf.Sqrt(Mathf.Max(0f, upper * upper - along * along));
-            Vector3 bend = Vector3.ProjectOnPlane(pole, direction).normalized;
-            Vector3 elbow = origin + direction * along + bend * height;
-            Vector3 hand = origin + direction * distance;
-            joint.rotation = Quaternion.FromToRotation(elbowJoint.position - origin, elbow - origin) * joint.rotation;
-            elbowJoint.rotation = Quaternion.FromToRotation(tip.position - elbowJoint.position, hand - elbowJoint.position) * elbowJoint.rotation;
         }
 
         void Restore()

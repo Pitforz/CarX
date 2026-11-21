@@ -353,6 +353,9 @@ MonoBehaviour:
   _rightShoulder: {fileID: 763889095}
   _bodyHitbox: {fileID: 7727488198192498762}
   _headHitbox: {fileID: 8714661355599216641}
+  _combatModel: {fileID: 2526532867417812062, guid: 85c4ba6af14634728b63fef3d34abcf1, type: 3}
+  _combatPistol: {fileID: 1382142288692174989, guid: 6858a5cf89bd041a9a265c111d98d265, type: 3}
+  _combatLocomotion: {fileID: 9100000, guid: b5b24336229c7412595fae5f1e6aaa23, type: 2}
 --- !u!114 &1172137950
 MonoBehaviour:
   m_ObjectHideFlags: 0

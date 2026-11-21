@@ -12,6 +12,10 @@ namespace CarX.Gameplay
     public sealed class FinalEncounter : MonoBehaviour
     {
         [SerializeField] HostileNpc _banditPrefab;
+        [SerializeField] GameObject _bossModel;
+        [SerializeField] GameObject _fatherModel;
+        [SerializeField] GameObject _fatherPistol;
+        [SerializeField] RuntimeAnimatorController _fatherLocomotion;
         [SerializeField] Material _actorMaterial;
         [SerializeField] AudioClip _executionShot;
         [SerializeField] Bounds _entrance = new(new Vector3(0f, 1.5f, 1.6f), new Vector3(16f, 4f, 3f));
@@ -41,8 +45,11 @@ namespace CarX.Gameplay
         const float EarlyFightHitChance = 0.8f;
         const float PersuasionFightHitChance = 1f;
         const float FatherEscapeDelay = 1f;
+        const float FatherDialogueRaiseTime = 0.90f;
         const float FatherRunSpeed = 5.4f;
         const float FatherPeekSpeed = 2.6f;
+        const float FatherPeekLookTime = 0.32f;
+        const float FatherPeekShotTime = 0.15f;
         const float FatherCoverSearchRadius = 12f;
         const float FatherSafeDistance = 6f;
         const float FatherRescueWindow = 1f;
@@ -71,6 +78,9 @@ namespace CarX.Gameplay
         BanditPistol _fatherGun;
         BanditCover _fatherSupportCover;
         AudioSource _shotAudio;
+        AudioSource _dialogueVoice;
+        HostileNpc _dialogueSpeaker;
+        float _spokenUntil;
         float _deadline;
         float _redrawDeadline = float.PositiveInfinity;
         int _shownSeconds;
@@ -79,12 +89,18 @@ namespace CarX.Gameplay
         bool _stressBeforeEncounter;
         bool _encounterStressStarted;
         bool _readyForChoice;
+        bool _fatherAtMark;
+        bool _escortStaged;
+        bool _escortThreateningFather;
         bool _fatherWasExecuted;
         bool _fatherShotByPlayer;
         bool _fatherHelpsInFight;
         bool _fatherSavedInRescue;
 
         Vector3 PlayerChest => _player.transform.position + Vector3.up * 1.4f;
+        bool BossIsSpeaking => _dialogueSpeaker == _boss && (_dialogueVoice != null && _dialogueVoice.clip != null
+            ? _dialogueVoice.isPlaying || (AudioListener.pause && !_dialogueVoice.ignoreListenerPause)
+            : Time.time < _spokenUntil);
         Transform EncounterView => _movement.CinemachineCameraTarget != null
             ? _movement.CinemachineCameraTarget.transform : _pistol.ViewCamera.transform;
         Quaternion EncounterLookCenter => _movement.CinemachineCameraTarget != null
@@ -112,7 +128,7 @@ namespace CarX.Gameplay
                 return;
             }
 
-            _boss = Spawn(_bossPosition, BossColor, "Mafia Boss");
+            _boss = Spawn(_bossPosition, BossColor, "Mafia Boss", _bossModel);
             _bossGuard = Spawn(_bossGuardPosition, GuardColor, "Boss Guard");
             _escort = Spawn(_escortEntrance, GuardColor, "Escort Guard");
             _rearGuard = Spawn(_rearLeftPosition, GuardColor, "Entrance Guard Left");
@@ -122,9 +138,9 @@ namespace CarX.Gameplay
                 _bossGuard,
                 Spawn(_rearRightPosition, GuardColor, "Entrance Guard Right")
             };
-            _father = Spawn(_fatherEntrance, FatherColor, "Alexander");
+            _father = Spawn(_fatherEntrance, FatherColor, "Alexander", _fatherModel);
+            _father.EncounterAnimation?.KeepIdleStanceWithPistol();
             _fatherGun = _father.GetComponent<BanditPistol>();
-            _father.SetStagedWeaponVisible(false);
 
             _shotAudio = gameObject.AddComponent<AudioSource>();
             _shotAudio.playOnAwake = false;
@@ -141,6 +157,9 @@ namespace CarX.Gameplay
                     Finish();
                 return;
             }
+
+            if (_menus.IsPaused)
+                return;
 
             switch (_stage)
             {
@@ -167,7 +186,8 @@ namespace CarX.Gameplay
                         ExecutePlayer(_rearGuard);
                     break;
                 case Stage.Dialogue:
-                    if (!CheckRedrawnWeapon() && _readyForChoice && !_pistol.IsEquipped)
+                    if (!CheckRedrawnWeapon() && _readyForChoice && !_pistol.IsEquipped &&
+                        !_movement.IsSettlingEncounterEntry)
                         OpenChoice();
                     break;
                 case Stage.Choice:
@@ -185,12 +205,42 @@ namespace CarX.Gameplay
                             return;
                     Finish(wonFight: true);
                     if (_fatherWasExecuted)
-                        _hud.ShowSubtitle("Алексей: Камера справа. Надо найти отца.", duration: 5f);
+                        ShowVoicedSubtitle("Алексей: Камера справа. Надо найти отца.", 5f, "Alexey/Final_FindFather");
                     break;
+            }
+
+            if (_stage is Stage.Arrival or Stage.Holster or Stage.WalkToCenter or Stage.Dialogue or
+                Stage.Choice or Stage.ChoiceCinematic)
+                FaceStagedGuards();
+
+            bool fatherLookingAtPlayer = _fatherAtMark && _father.IsAlive && (_stage is Stage.Dialogue or Stage.Choice);
+            _father.EncounterAnimation?.LookAt(fatherLookingAtPlayer ? PlayerChest + Vector3.up * 0.24f : null);
+        }
+
+        void FaceStagedGuards()
+        {
+            foreach (var enemy in _enemies)
+            {
+                if (enemy == null || !enemy.IsAlive)
+                    continue;
+
+                if (enemy == _escort && _escortStaged)
+                {
+                    if (_escortThreateningFather)
+                        enemy.AimForEncounter(FatherTargetPoint(_father), smooth: true);
+                }
+                else
+                    enemy.FaceForEncounter(PlayerChest, smooth: true);
             }
         }
 
-        HostileNpc Spawn(Vector3 localPosition, Color tint, string actorName)
+        void LateUpdate()
+        {
+            if (_dialogueSpeaker != null && _dialogueVoice != null && _dialogueVoice.isPlaying)
+                _dialogueVoice.transform.position = _dialogueSpeaker.HeadPosition;
+        }
+
+        HostileNpc Spawn(Vector3 localPosition, Color tint, string actorName, GameObject model = null)
         {
             Vector3 position = transform.TransformPoint(localPosition);
             Vector3 facing = Vector3.ProjectOnPlane(transform.TransformPoint(_center) - position, Vector3.up);
@@ -198,16 +248,18 @@ namespace CarX.Gameplay
             var actor = Instantiate(_banditPrefab, position, rotation, transform);
             actor.name = actorName;
             actor.StageForEncounter(tint, _actorMaterial);
+            actor.AttachCombatModel(model, _fatherPistol, _fatherLocomotion);
+            actor.SetStagedWeaponVisible(false);
             return actor;
         }
 
         void GreetPlayer()
         {
-            const float duration = 4.5f;
             _stage = Stage.Arrival;
+            float duration = ShowVoicedSubtitle(
+                "Босс: Сына Александра я ждал. Не так скоро. Хочешь увидеть отца — входи. Один.",
+                4.5f, "Boss/Arrival", _boss);
             _deadline = Time.time + duration;
-            _hud.ShowSubtitle("Босс: Сына Александра я ждал. Не так скоро. Хочешь увидеть отца — входи. Один.",
-                duration: duration);
         }
 
         void DemandHolster()
@@ -221,8 +273,8 @@ namespace CarX.Gameplay
 
             _stage = Stage.Holster;
             _deadline = Time.time + _holsterTime;
-            _hud.ShowSubtitle("Босс: Покажи сначала, что умеешь слушать. Ствол вниз. [1 — убрать пистолет]",
-                duration: _holsterTime);
+            ShowVoicedSubtitle("Босс: Покажи сначала, что умеешь слушать. Ствол вниз. [1 — убрать пистолет]",
+                _holsterTime, "Boss/Holster", _boss);
         }
 
         void DemandApproach()
@@ -235,8 +287,9 @@ namespace CarX.Gameplay
         void ShowApproachInstruction(string prefix = "")
         {
             float remaining = Mathf.Max(0f, _deadline - Time.time);
-            _hud.ShowSubtitle($"Босс: {prefix}Подойди к центру зала. [{Mathf.CeilToInt(remaining)} сек.]",
-                duration: remaining);
+            string clipPath = string.IsNullOrEmpty(prefix) ? "Boss/ApproachRepeat" : "Boss/ApproachFirst";
+            ShowVoicedSubtitle($"Босс: {prefix}Подойди к центру зала. [{Mathf.CeilToInt(remaining)} сек.]",
+                remaining, clipPath, _boss);
         }
 
         bool CheckRedrawnWeapon()
@@ -248,7 +301,7 @@ namespace CarX.Gameplay
                     if (_stage == Stage.WalkToCenter)
                         ShowApproachInstruction();
                     else
-                        _hud.ShowSubtitle(string.Empty, duration: 0f);
+                        ShowDialogueSubtitle(string.Empty, 0f, null, null);
                 }
                 _redrawDeadline = float.PositiveInfinity;
                 return false;
@@ -257,8 +310,8 @@ namespace CarX.Gameplay
             if (float.IsPositiveInfinity(_redrawDeadline))
             {
                 _redrawDeadline = Time.time + _redrawHolsterTime;
-                _hud.ShowSubtitle($"Босс: Я сказал, убери пистолет. [1 — убрать, {_redrawHolsterTime:0} сек.]",
-                    duration: _redrawHolsterTime);
+                ShowVoicedSubtitle($"Босс: Я сказал, убери пистолет. [1 — убрать, {_redrawHolsterTime:0} сек.]",
+                    _redrawHolsterTime, "Boss/RedrawnWeapon", _boss);
             }
             if (Time.time < _redrawDeadline)
                 return false;
@@ -286,32 +339,37 @@ namespace CarX.Gameplay
             if (_readyForChoice)
                 return;
 
-            StopAllCoroutines();
+            StopEncounterPlayback();
             SetFatherAndEscortAtMarks();
+            _escort.SetStagedWeaponVisible(false);
             PrepareChoice();
+            _father.EncounterAnimation?.SettleAimPose();
             if (!_pistol.IsEquipped)
                 _hud.ShowSubtitle(string.Empty, duration: 0f);
         }
 
         IEnumerator PlayDialogue()
         {
-            yield return Line("Алексей: Выведи его.", 1.7f);
-            yield return Line("Босс: Выводи его сюда!", 1.8f);
+            yield return new WaitWhile(() => _movement.IsSettlingEncounterEntry);
+            yield return Line("Алексей: Выведи его.", 1.7f, "Alexey/Final_BringHimOut");
+            yield return Line("Босс: Выводи его сюда!", 1.8f, "Boss/BringHimOut", _boss);
             yield return BringOutFather();
-            yield return Line("Александр: Лёша…", 1.7f);
-            yield return Line("Алексей: Я здесь. Стой спокойно.", 2.2f);
-            yield return Line("Босс: Деньги проиграл. Груз возил. Потом решил, что полиция тебя от нас спрячет.", 4.9f);
-            yield return Line("Алексей: Я читал бумаги. Отпусти его.", 2.6f);
-            yield return Line("Босс: Он хотел сдать нас. Просто убить его — слишком легко.", 3.6f);
-            yield return Line("Александр: Что ты хочешь?", 1.9f);
-            _father.SetStagedWeaponVisible(true);
-            yield return Line("Босс: Убей сына — выйдешь отсюда.", 2.8f);
-            yield return Line("Алексей: Пап!", 1.3f);
-            yield return Line("Александр: Ты правда меня выпустишь?", 2.5f);
-            yield return Line("Босс: Дверь видишь? Через неё и уйдёшь.", 2.8f);
-            yield return Line("Александр: Лёша, я… Они меня здесь…", 2.7f);
-            _father.AimForEncounter(PlayerChest);
-            yield return Line("Алексей: Ты сейчас в меня целишься.", 2.5f);
+            yield return Line("Александр: Лёша…", 1.7f, "Alexander/Lyosha", _father);
+            yield return Line("Алексей: Я здесь. Стой спокойно.", 2.2f, "Alexey/Final_ImHere");
+            yield return Line("Босс: Деньги проиграл. Груз возил. Потом решил, что полиция тебя от нас спрячет.",
+                4.9f, "Boss/GamblingDebt", _boss);
+            yield return Line("Алексей: Я читал бумаги. Отпусти его.", 2.6f, "Alexey/Final_ReleaseHim");
+            yield return Line("Босс: Он хотел сдать нас. Просто убить его — слишком легко.",
+                3.6f, "Boss/Betrayal", _boss);
+            yield return Line("Александр: Что ты хочешь?", 1.9f, "Alexander/WhatDoYouWant", _father);
+            yield return Line("Босс: Убей сына — выйдешь отсюда.", 2.8f, "Boss/ShootYourSon", _boss);
+            yield return PassPistolToFather();
+            yield return Line("Алексей: Пап!", 1.3f, "Alexey/Final_Dad");
+            yield return Line("Александр: Ты правда меня выпустишь?", 2.5f, "Alexander/YouWillLetMeGo", _father);
+            yield return Line("Босс: Дверь видишь? Через неё и уйдёшь.", 2.8f, "Boss/Door", _boss);
+            yield return Line("Александр: Лёша, я… Они меня здесь…", 2.7f, "Alexander/TheyKeptMeHere", _father);
+            _father.AimForEncounter(PlayerChest, raiseDuration: FatherDialogueRaiseTime);
+            yield return Line("Алексей: Ты сейчас в меня целишься.", 2.5f, "Alexey/Final_AimingAtMe");
             PrepareChoice();
         }
 
@@ -332,7 +390,7 @@ namespace CarX.Gameplay
             }
 
             _stage = Stage.Choice;
-            _deadline = Time.unscaledTime + _choiceTime;
+            _deadline = _menus.UnpausedTime + _choiceTime;
             _shownSeconds = -1;
             UpdateChoice();
         }
@@ -347,23 +405,170 @@ namespace CarX.Gameplay
             _escort.transform.SetPositionAndRotation(fromEscort, Quaternion.LookRotation(toEscort - fromEscort));
             _father.gameObject.SetActive(true);
             _escort.gameObject.SetActive(true);
+            _escortStaged = true;
+            _escort.FaceForEncounter(FatherTargetPoint(_father));
+            yield return AnimateEscortPistol(drawing: true);
+            _escortThreateningFather = true;
 
-            const float duration = 2.4f;
+            const float walkSpeed = 2.1f;
+            float duration = Mathf.Max(Vector3.Distance(fromFather, toFather), Vector3.Distance(fromEscort, toEscort)) /
+                walkSpeed;
             for (float elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime)
             {
-                float progress = Mathf.SmoothStep(0f, 1f, elapsed / duration);
+                float progress = WalkProgress(elapsed / duration);
                 _father.transform.position = Vector3.Lerp(fromFather, toFather, progress);
                 _escort.transform.position = Vector3.Lerp(fromEscort, toEscort, progress);
                 yield return null;
             }
 
-            SetFatherAndEscortAtMarks();
+            _father.transform.position = toFather;
+            _escort.transform.position = toEscort;
+            _escortThreateningFather = false;
+            _escort.SpeakAtForEncounter(FatherTargetPoint(_father));
+            yield return TurnFatherTowards(PlayerChest, 0.3f);
+            _fatherAtMark = true;
+            yield return AnimateEscortPistol(drawing: false);
+            _escortStaged = false;
         }
+
+        IEnumerator PassPistolToFather()
+        {
+            var giver = _escort.EncounterAnimation;
+            var receiver = _father.EncounterAnimation;
+            if (giver == null || receiver == null)
+            {
+                _father.SetStagedWeaponVisible(true);
+                yield break;
+            }
+
+            _escortStaged = true;
+            Transform escort = _escort.transform;
+            Transform father = _father.transform;
+            Vector3 from = escort.position;
+            Vector3 mark = father.position + father.right * 0.88f + father.forward * 0.35f;
+            mark.y = from.y;
+            Vector3 behind = father.position + father.right * 0.70f - father.forward * 1.27f;
+            behind.y = from.y;
+            Quaternion escortStart = escort.rotation;
+            Quaternion escortFacing = Quaternion.LookRotation(Vector3.ProjectOnPlane(father.position - mark, Vector3.up));
+            float routeLength = Vector3.Distance(from, behind) + Vector3.Distance(behind, mark);
+            float approachTime = Mathf.Max(0.66f, routeLength / 2.45f);
+            for (float t = 0f; t < 1f; t += Time.deltaTime / approachTime)
+            {
+                MoveEscortAlongHandoff(Ease(t));
+                if (t >= 0.56f)
+                    PoseEscortDraw(giver, Mathf.InverseLerp(0.56f, 1f, t));
+                yield return null;
+            }
+            escort.SetPositionAndRotation(mark, escortFacing);
+            PoseEscortDraw(giver, 1f);
+
+            Pose lowered = receiver.LoweredPistolPose;
+            Vector3 position = lowered.position + father.right * 0.16f + father.forward * 0.15f + father.up * 0.11f;
+            var offered = new Pose(position, father.rotation * Quaternion.Euler(64f, -22f, -12f));
+            Pose giverLow = giver.LoweredPistolPose;
+            const float offerTime = 0.28f;
+            for (float t = 0f; t < 1f; t += Time.deltaTime / offerTime)
+            {
+                giver.StageGrip(BlendPose(giverLow, offered, Ease(t)), 1f, 1f, Ease(t));
+                float reach = Ease(Mathf.InverseLerp(0.10f, 0.93f, t));
+                receiver.StageGrip(offered, reach, Ease(Mathf.InverseLerp(0.72f, 1f, t)));
+                yield return null;
+            }
+            giver.StageGrip(offered, 1f, 1f, presentation: 1f);
+            receiver.StageGrip(offered, 1f, 1f);
+            yield return null;
+            Pose contact = giver.HeldPistolPose;
+            receiver.StageGrip(contact, 1f, 1f);
+            yield return null;
+            if (_menus.IsPaused)
+                yield return new WaitWhile(() => _menus.IsPaused);
+            giver.PassPistolTo(receiver);
+
+            float returnTime = 0.10f + Mathf.Max(0.45f, routeLength / 1.85f);
+            const float withdrawTime = 0.24f;
+            giver.SetBackpedaling(true);
+            for (float elapsed = 0f; elapsed < returnTime; elapsed += Time.deltaTime)
+            {
+                float retract = Ease(elapsed / withdrawTime);
+                if (elapsed < withdrawTime)
+                    giver.StageGrip(offered, 1f - retract, 1f - Ease(elapsed / 0.08f), presentation: 1f);
+                else
+                    giver.ClearStagedGrip();
+
+                MoveEscortAlongHandoff(1f - Ease(Mathf.InverseLerp(0.10f, returnTime, elapsed)));
+                receiver.StageGrip(contact, 1f - retract, 1f);
+                yield return null;
+            }
+            escort.SetPositionAndRotation(from, escortStart);
+            giver.SetBackpedaling(false);
+            giver.ClearStagedGrip();
+            receiver.ClearStagedGrip(holdAtSide: true);
+            _escortStaged = false;
+
+            void MoveEscortAlongHandoff(float progress)
+            {
+                Vector3 approach = Vector3.Lerp(from, behind, progress);
+                Vector3 reach = Vector3.Lerp(behind, mark, progress);
+                Vector3 direction = reach - approach;
+                Quaternion walking = direction.sqrMagnitude > 0.0001f
+                    ? Quaternion.LookRotation(direction) : escortFacing;
+                Quaternion facing = Quaternion.Slerp(escortStart, walking, Ease(progress / 0.18f));
+                facing = Quaternion.Slerp(facing, escortFacing, Ease(Mathf.InverseLerp(0.78f, 1f, progress)));
+                escort.SetPositionAndRotation(Vector3.Lerp(approach, reach, progress), facing);
+            }
+        }
+
+        IEnumerator AnimateEscortPistol(bool drawing)
+        {
+            var animation = _escort.EncounterAnimation;
+            if (animation == null)
+            {
+                _escort.SetStagedWeaponVisible(drawing);
+                yield break;
+            }
+
+            const float duration = 0.43f;
+            for (float elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime)
+            {
+                float progress = drawing ? elapsed / duration : 1f - elapsed / duration;
+                PoseEscortDraw(animation, progress);
+                yield return null;
+            }
+            _escort.SetStagedWeaponVisible(drawing);
+            animation.ClearStagedGrip(holdAtSide: drawing);
+        }
+
+        void PoseEscortDraw(CombatHumanoidAnimation animation, float progress)
+        {
+            Transform actor = _escort.transform;
+            Pose holster = new(actor.TransformPoint(new Vector3(0.245f, 1.0f, -0.085f)),
+                actor.rotation * Quaternion.Euler(86f, 0f, -10f));
+            float grip = Ease(Mathf.InverseLerp(0f, 0.40f, progress));
+            float lift = Ease(Mathf.InverseLerp(0.40f, 1f, progress));
+            animation.StageGrip(BlendPose(holster, animation.LoweredPistolPose, lift), grip, grip);
+            _escort.SetStagedWeaponVisible(progress >= 0.40f);
+        }
+
+        static float Ease(float value) => Mathf.SmoothStep(0f, 1f, value);
+
+        static float WalkProgress(float time)
+        {
+            const float ramp = 0.16f;
+            float half = Mathf.Min(time, 1f - time);
+            float distance = half < ramp ? half * half / (2f * ramp) : half - ramp * 0.5f;
+            float progress = distance / (1f - ramp);
+            return time < 0.5f ? progress : 1f - progress;
+        }
+
+        static Pose BlendPose(Pose from, Pose to, float t) =>
+            new(Vector3.Lerp(from.position, to.position, t), Quaternion.Slerp(from.rotation, to.rotation, t));
 
         void SetFatherAndEscortAtMarks()
         {
             PlaceFacingPlayer(_father, _fatherPosition);
             PlaceFacingPlayer(_escort, _escortPosition);
+            _fatherAtMark = true;
         }
 
         void PlaceFacingPlayer(HostileNpc actor, Vector3 localPosition)
@@ -375,8 +580,9 @@ namespace CarX.Gameplay
             actor.gameObject.SetActive(true);
         }
 
-        IEnumerator Line(string text, float duration)
+        IEnumerator Line(string text, float duration, string clipPath = null, HostileNpc speaker = null)
         {
+            AudioClip clip = DialogueVoice.GetStoryClip(clipPath);
             bool visible = false;
             for (float remaining = duration; remaining > 0f;)
             {
@@ -385,7 +591,7 @@ namespace CarX.Gameplay
                 else
                 {
                     if (!visible)
-                        _hud.ShowSubtitle(text, duration: remaining);
+                        remaining = ShowDialogueSubtitle(text, remaining, clip, speaker);
                     visible = true;
                     remaining -= Time.deltaTime;
                 }
@@ -393,9 +599,69 @@ namespace CarX.Gameplay
             }
         }
 
+        float ShowVoicedSubtitle(string text, float duration, string clipPath, HostileNpc speaker = null) =>
+            ShowDialogueSubtitle(text, duration, DialogueVoice.GetStoryClip(clipPath), speaker);
+
+        float ShowDialogueSubtitle(string text, float duration, AudioClip clip, HostileNpc speaker)
+        {
+            StopDialogueVoice();
+            if (clip != null)
+            {
+                if (_dialogueVoice == null)
+                    _dialogueVoice = DialogueVoice.CreateSource(transform, "Final Encounter Voice",
+                        minDistance: 6f, maxDistance: 40f);
+                _dialogueVoice.spatialBlend = speaker != null ? 1f : 0f;
+                if (speaker != null)
+                    _dialogueVoice.transform.position = speaker.HeadPosition;
+                _dialogueVoice.clip = clip;
+                _dialogueVoice.Play();
+                duration = Mathf.Max(duration, clip.length + 0.12f);
+            }
+            if (speaker != null && speaker.IsAlive && duration > 0f)
+            {
+                string spoken = NpcSpeechState.SpokenText(text);
+                float speechDuration = clip != null ? clip.length :
+                    Mathf.Min(duration, Mathf.Clamp(0.6f + spoken.Length / 16f, 1.1f, 8f));
+                _dialogueSpeaker = speaker;
+                _spokenUntil = Time.time + speechDuration;
+                NpcSpeechState.GetOrAdd(speaker).BeginLine(spoken, speechDuration, clip != null ? _dialogueVoice : null, clip);
+            }
+            _hud.ShowSubtitle(text, duration: duration);
+            return duration;
+        }
+
+        void StopDialogueVoice()
+        {
+            bool hasVoice = _dialogueVoice != null && _dialogueVoice.clip != null;
+            if (_dialogueSpeaker != null && _dialogueSpeaker.TryGetComponent<NpcSpeechState>(out var speech))
+                speech.EndLine(hasVoice ? _dialogueVoice : null);
+            if (hasVoice)
+            {
+                _dialogueVoice.Stop();
+                _dialogueVoice.clip = null;
+            }
+            _dialogueSpeaker = null;
+            _spokenUntil = 0f;
+        }
+
+        void StopEncounterPlayback()
+        {
+            StopAllCoroutines();
+            StopDialogueVoice();
+            _escortStaged = false;
+            _escortThreateningFather = false;
+            if (_escort != null && _escort.EncounterAnimation is { } escortAnimation)
+            {
+                escortAnimation.SetBackpedaling(false);
+                escortAnimation.ClearStagedGrip();
+            }
+            if (_father != null)
+                _father.EncounterAnimation?.ClearStagedGrip();
+        }
+
         void UpdateChoice()
         {
-            int seconds = Mathf.Max(0, Mathf.CeilToInt(_deadline - Time.unscaledTime));
+            int seconds = Mathf.Max(0, Mathf.CeilToInt(_deadline - _menus.UnpausedTime));
             if (seconds == 0)
             {
                 ExecutePlayer(_father);
@@ -413,7 +679,7 @@ namespace CarX.Gameplay
         {
             if (_stage != Stage.Choice)
                 return;
-            if (Time.unscaledTime >= _deadline)
+            if (_menus.UnpausedTime >= _deadline)
             {
                 ExecutePlayer(_father);
                 return;
@@ -451,6 +717,8 @@ namespace CarX.Gameplay
             Quaternion aim = LookAtFatherHead();
             SetEncounterLook(aim, 0f);
             yield return null;
+            if (_menus.IsPaused)
+                yield return new WaitWhile(() => _menus.IsPaused);
             _pistol.FireEncounterShot();
             _fatherShotByPlayer = true;
             _father.TakeFatalShot();
@@ -458,8 +726,7 @@ namespace CarX.Gameplay
             const float recoilTime = 0.22f;
             Quaternion kick = aim * Quaternion.Euler(-2f, 0.45f, 0f);
             yield return TurnEncounterCamera(kick, aim, recoilTime, startInputWeight: 0f);
-            const float farewellDuration = 1.1f;
-            _hud.ShowSubtitle("Александр: Лёша…", duration: farewellDuration);
+            float farewellDuration = ShowVoicedSubtitle("Александр: Лёша…", 1.1f, "Alexander/Lyosha", _father);
             yield return new WaitForSeconds(farewellDuration);
             ShowCombatTutorial(fatherHelps: false);
         }
@@ -490,17 +757,20 @@ namespace CarX.Gameplay
         IEnumerator PlayFatherPersuasion()
         {
             _movement.AllowFreeEncounterLook();
-            yield return Line("Алексей: Помнишь кошелёк у магазина? Я говорил: никто не видел.", 4.3f);
-            yield return Line("Александр: Лёша, не надо…", 1.6f);
-            yield return Line("Алексей: Ты сказал: закон для всех один. И для нас тоже.", 3.6f);
-            yield return Line("Александр: Я хотел всё вернуть. Деньги, всё…", 2.8f);
-            yield return Line("Алексей: А сейчас хочешь заплатить мной.", 2.4f);
-            yield return Line("Босс: Хватит. Он тебе свободу не даст. Я дам.", 2.8f);
-            yield return Line("Александр: Если я не выстрелю, он нас обоих…", 2.7f);
+            yield return Line("Алексей: Помнишь кошелёк у магазина? Я говорил: никто не видел.",
+                4.3f, "Alexey/Final_RememberWallet");
+            yield return Line("Александр: Лёша, не надо…", 1.6f, "Alexander/Dont", _father);
+            yield return Line("Алексей: Ты сказал: закон для всех один. И для нас тоже.",
+                3.6f, "Alexey/Final_LawForEveryone");
+            yield return Line("Александр: Я хотел всё вернуть. Деньги, всё…", 2.8f, "Alexander/GiveItBack", _father);
+            yield return Line("Алексей: А сейчас хочешь заплатить мной.", 2.4f, "Alexey/Final_PayWithMe");
+            yield return Line("Босс: Хватит. Он тебе свободу не даст. Я дам.", 2.8f, "Boss/StopListening", _boss);
+            yield return Line("Александр: Если я не выстрелю, он нас обоих…", 2.7f, "Alexander/IfIDontShoot", _father);
             yield return Line("Алексей: Пока ты целишься в меня, ему спокойно. Посмотри на него.", 4.1f);
-            yield return Line("Александр: Ты меня выведешь?", 1.8f);
-            yield return Line("Алексей: Да. За сделанное ответишь. Но здесь не останешься.", 3.7f);
-            yield return Line("Охранник: Давай сюда.", 1.2f);
+            yield return Line("Александр: Ты меня выведешь?", 1.8f, "Alexander/WillYouGetMeOut", _father);
+            yield return Line("Алексей: Да. За сделанное ответишь. Но здесь не останешься.",
+                3.7f, "Alexey/Final_LeaveTogether");
+            yield return Line("Охранник: Давай сюда.", 1.2f, speaker: _escort);
             ShowCombatTutorial(fatherHelps: false, resume: BeginFatherRescue);
         }
 
@@ -509,7 +779,7 @@ namespace CarX.Gameplay
             if (_stage != Stage.ChoiceCinematic)
                 return;
 
-            StopAllCoroutines();
+            StopEncounterPlayback();
             _hud.ShowSubtitle(string.Empty, duration: 0f);
             ShowCombatTutorial(fatherHelps: false, resume: BeginFatherRescue);
         }
@@ -533,6 +803,8 @@ namespace CarX.Gameplay
             };
             HostileNpc first = victim == _boss ? _bossGuard : _boss;
             HostileNpc second = victim == _escort ? _bossGuard : _escort;
+            first.SetStagedWeaponVisible(true);
+            second.SetStagedWeaponVisible(true);
 
             Transform father = _father.transform;
             Vector3 victimPoint = FatherTargetPoint(victim);
@@ -542,7 +814,7 @@ namespace CarX.Gameplay
             _father.AimForEncounter(victimPoint);
             _father.PlayStagedShot();
             victim.TakeFatalShot();
-            _hud.ShowSubtitle(FatherCombatWarning, duration: 1.8f);
+            ShowVoicedSubtitle(FatherCombatWarning, 1.8f, "Alexander/GetAside", _father);
             yield return new WaitForSeconds(0.2f);
 
             Vector3 cellDoor = transform.TransformPoint(_fatherCellPeek);
@@ -586,9 +858,11 @@ namespace CarX.Gameplay
             }
 
             ResumeFight();
+            if (_fatherSavedInRescue)
+                StartCoroutine(FatherKeepsWatchFromCover(allowSupportShots: false));
         }
 
-        IEnumerator TurnFatherTowards(Vector3 point, float duration, System.Action updatePose)
+        IEnumerator TurnFatherTowards(Vector3 point, float duration, System.Action updatePose = null)
         {
             Transform father = _father.transform;
             Vector3 direction = Vector3.ProjectOnPlane(point - father.position, Vector3.up);
@@ -597,7 +871,7 @@ namespace CarX.Gameplay
             for (float elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime)
             {
                 father.rotation = Quaternion.Slerp(start, facing, Mathf.SmoothStep(0f, 1f, elapsed / duration));
-                updatePose();
+                updatePose?.Invoke();
                 yield return null;
             }
             father.rotation = facing;
@@ -614,8 +888,10 @@ namespace CarX.Gameplay
 
         void FireAtFather(HostileNpc shooter)
         {
+            shooter.SetStagedWeaponVisible(true);
             shooter.AimForEncounter(FatherTargetPoint(_father));
             shooter.PlayStagedShot();
+            _father.ReactToStagedShot();
         }
 
         void ShowCombatTutorial(bool fatherHelps, System.Action resume = null)
@@ -643,61 +919,81 @@ namespace CarX.Gameplay
             PrepareGuardsForFight(aimImmediately: !followsRescue);
             if (!followsRescue)
                 _pistol.SetEquipped(true);
-            _hud.ShowSubtitle(_boss.IsAlive ? "Босс: К двери не пускать!" : "Охранник: К двери не пускать!",
-                duration: 3f);
+            if (_boss.IsAlive)
+                ShowVoicedSubtitle("Босс: К двери не пускать!", 3f, "Boss/BlockExit", _boss);
+            else
+                ShowDialogueSubtitle("Охранник: К двери не пускать!", 3f, null,
+                    System.Array.Find(_enemies, enemy => enemy != null && enemy.IsAlive));
             if (_fatherShotByPlayer)
                 ReleaseGuards();
         }
 
         IEnumerator FatherSupportsPlayer()
         {
-            yield return new WaitForSecondsRealtime(FatherEscapeDelay);
+            float escapeAt = _menus.UnpausedTime + FatherEscapeDelay;
+            yield return new WaitUntil(() => !_menus.IsPaused && _menus.UnpausedTime >= escapeAt);
             yield return FatherReturnsToCell();
             yield return new WaitWhile(() => _stage == Stage.CombatTutorial);
-            const float aimTime = 0.25f;
-            float timeToDoor = Vector3.Distance(_father.transform.position, transform.TransformPoint(_fatherCellPeek)) /
-                FatherPeekSpeed;
-            yield return new WaitForSeconds(Mathf.Max(0f, Random.Range(2f, 3f) - timeToDoor - aimTime));
+            Vector3 peek = transform.TransformPoint(_fatherCellPeek);
+            Vector3 hide = transform.TransformPoint(_fatherCellCover);
+            float timeToDoor = Vector3.Distance(_father.transform.position, peek) / FatherPeekSpeed;
+            yield return new WaitForSeconds(Mathf.Max(0f, Random.Range(2f, 3f) - timeToDoor));
 
             _father.SetStagedWeaponVisible(true);
 
-            int shots = Random.Range(2, 5);
-            for (int shot = 1; shot <= shots; shot++)
+            int shotsLeft = Random.Range(2, 5);
+            int blockedPeeks = 0;
+            while (_escort.IsAlive && blockedPeeks < 3)
             {
-                yield return MoveFatherTo(_fatherCellPeek, FatherPeekSpeed);
-                _father.AimForEncounter(_escort.transform.position + Vector3.up * 1.4f);
-                yield return new WaitForSeconds(aimTime);
-                _father.PlayStagedShot();
-                if (shot == shots)
+                blockedPeeks++;
+                yield return FatherPeekFromCover(peek, hide, _escort, () =>
                 {
-                    _escort.TakeFatalShot();
-                    _hud.ShowSubtitle(FatherCombatWarning, duration: 1.8f);
-                }
-                else
-                {
-                    _escort.AimForEncounter(_father.transform.position + Vector3.up * 1.4f);
-                    _father.LowerStagedWeapon();
-                    yield return MoveFatherTo(_fatherCellCover, FatherPeekSpeed);
+                    blockedPeeks = 0;
+                    if (--shotsLeft == 0)
+                    {
+                        _escort.TakeFatalShot();
+                        ShowVoicedSubtitle(FatherCombatWarning, 1.8f, "Alexander/GetAside", _father);
+                    }
+                    else
+                    {
+                        _escort.SetStagedWeaponVisible(true);
+                        _escort.AimForEncounter(FatherTargetPoint(_father));
+                    }
+                });
+                if (_escort.IsAlive)
                     yield return new WaitForSeconds(Random.Range(0.65f, 1.1f));
-                }
             }
 
-            yield return new WaitForSeconds(0.12f);
-            yield return FatherReturnsToCell();
-            yield return FatherSupportsFromHall();
+            // Keep the encounter completable if a changed map blocks the scripted exchange.
+            if (_escort.IsAlive)
+            {
+                _fatherHelpsInFight = false;
+                if (_stage == Stage.Fight)
+                    _escort.BeginEncounterCombat(_openingTarget, _openingHitChance, holdCover: true);
+            }
+            yield return FatherKeepsWatchFromCover(allowSupportShots: true);
         }
 
-        IEnumerator FatherSupportsFromHall()
+        IEnumerator FatherKeepsWatchFromCover(bool allowSupportShots)
         {
             var path = new NavMeshPath();
             var retry = new WaitForSeconds(0.45f);
-            int shotsLeft = Random.Range(3, 5);
-            while (shotsLeft > 0)
+            Vector3 cellPeek = transform.TransformPoint(_fatherCellPeek);
+            Vector3 cellHide = transform.TransformPoint(_fatherCellCover);
+            int shotsLeft = allowSupportShots ? Random.Range(3, 5) : 0;
+            while (_father.IsAlive && (_stage is Stage.FightOpening or Stage.Fight))
             {
-                if (_stage != Stage.Fight || _boss.IsAlive || _bossGuard.IsAlive || _escort.IsAlive ||
+                if (shotsLeft == 0 || _stage != Stage.Fight || _boss.IsAlive || _bossGuard.IsAlive || _escort.IsAlive ||
                     !TryFindFatherCover(path, out var route, out var left, out var right))
                 {
-                    yield return retry;
+                    yield return new WaitForSeconds(Random.Range(3.5f, 5.5f));
+                    if (!FatherAt(cellHide))
+                        yield break;
+
+                    HostileNpc target = null;
+                    if (shotsLeft > 0 && _stage == Stage.Fight)
+                        TryGetFatherTarget(cellPeek + Vector3.up * 1.4f, out target);
+                    yield return FatherPeekFromCover(cellPeek, cellHide, target, () => shotsLeft--);
                     continue;
                 }
 
@@ -718,46 +1014,57 @@ namespace CarX.Gameplay
 
                 while (shotsLeft > 0 && _fatherSupportCover != null && _fatherSupportCover.IsReservedBy(_fatherGun))
                 {
-                    if (!TryFindFatherShot(hide, left, right, out var peek))
+                    if (!TryFindFatherShot(hide, left, right, out var peek, out var enemy))
                     {
                         yield return retry;
                         continue;
                     }
 
-                    yield return MoveFatherInWorld(peek, FatherPeekSpeed, requireSafeRoute: true);
-                    if (FatherAt(peek) && TryGetFatherTarget(peek + Vector3.up * 1.4f, out var enemy))
-                    {
-                        _father.AimForEncounter(FatherTargetPoint(enemy));
-                        yield return new WaitForSeconds(0.28f);
-                        if (FatherRouteIsSafe(peek, peek) && enemy.IsAlive)
-                        {
-                            Vector3 point = FatherTargetPoint(enemy);
-                            _father.AimForEncounter(point);
-                            Physics.SyncTransforms();
-                            Vector3 muzzle = _fatherGun.StagedMuzzlePosition;
-                            Vector3 chest = _father.transform.position + Vector3.up * 1.4f;
-                            if (!Physics.Linecast(chest, muzzle, Physics.DefaultRaycastLayers,
-                                QueryTriggerInteraction.Ignore) && FatherCanSee(muzzle, enemy))
-                            {
-                                _father.PlayStagedShot();
-                                shotsLeft--;
-                                yield return new WaitForSeconds(0.22f);
-                            }
-                        }
-                    }
-
-                    _father.LowerStagedWeapon();
-                    yield return MoveFatherInWorld(hide, FatherPeekSpeed);
+                    yield return FatherPeekFromCover(peek, hide, enemy, () => shotsLeft--, requireSafeRoute: true);
                     if (shotsLeft > 0)
                         yield return new WaitForSeconds(Random.Range(3.5f, 5.5f));
                 }
 
-                if (shotsLeft > 0)
-                {
-                    ReleaseFatherCover();
-                    yield return FatherReturnsToCell(fromHallCover: true);
-                }
+                if (shotsLeft == 0)
+                    yield break;
+
+                ReleaseFatherCover();
+                yield return FatherReturnsToCell(fromHallCover: true);
             }
+        }
+
+        IEnumerator FatherPeekFromCover(Vector3 peek, Vector3 hide, HostileNpc target, System.Action onShot,
+            bool requireSafeRoute = false)
+        {
+            if (!_father.IsAlive)
+                yield break;
+
+            yield return MoveFatherInWorld(peek, FatherPeekSpeed, requireSafeRoute, aimAt: target);
+            if (FatherAt(peek) && (!requireSafeRoute || FatherRouteIsSafe(peek, peek)))
+            {
+                bool fired = false;
+                if (target != null && target.IsAlive)
+                {
+                    Physics.SyncTransforms();
+                    Vector3 muzzle = _fatherGun.StagedMuzzlePosition;
+                    Vector3 chest = FatherTargetPoint(_father);
+                    if (FatherCanSee(_father.HeadPosition, target) &&
+                        !Physics.Linecast(chest, muzzle, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore) &&
+                        FatherCanSee(muzzle, target))
+                    {
+                        _father.PlayStagedShot();
+                        onShot();
+                        fired = true;
+                    }
+                }
+                else
+                    yield return TurnFatherTowards(transform.TransformPoint(_center), 0.19f);
+
+                yield return new WaitForSeconds(fired ? FatherPeekShotTime : FatherPeekLookTime);
+            }
+
+            _father.LowerStagedWeapon();
+            yield return MoveFatherInWorld(hide, FatherPeekSpeed);
         }
 
         bool TryFindFatherCover(NavMeshPath path, out Vector3[] route, out Vector3? left, out Vector3? right)
@@ -870,16 +1177,16 @@ namespace CarX.Gameplay
             return true;
         }
 
-        bool TryFindFatherShot(Vector3 hide, Vector3? left, Vector3? right, out Vector3 peek)
+        bool TryFindFatherShot(Vector3 hide, Vector3? left, Vector3? right, out Vector3 peek, out HostileNpc target)
         {
-            peek = default;
-            return CheckEdge(left, out peek) || CheckEdge(right, out peek);
+            return CheckEdge(left, out peek, out target) || CheckEdge(right, out peek, out target);
 
-            bool CheckEdge(Vector3? edge, out Vector3 position)
+            bool CheckEdge(Vector3? edge, out Vector3 position, out HostileNpc enemy)
             {
                 position = edge.GetValueOrDefault();
+                enemy = null;
                 return edge.HasValue && FatherRouteIsSafe(hide, position) &&
-                    TryGetFatherTarget(position + Vector3.up * 1.4f, out _);
+                    TryGetFatherTarget(position + Vector3.up * 1.4f, out enemy);
             }
         }
 
@@ -915,19 +1222,27 @@ namespace CarX.Gameplay
         IEnumerator MoveFatherTo(Vector3 localPosition, float speed) =>
             MoveFatherInWorld(transform.TransformPoint(localPosition), speed);
 
-        IEnumerator MoveFatherInWorld(Vector3 destination, float speed, bool requireSafeRoute = false)
+        IEnumerator MoveFatherInWorld(Vector3 destination, float speed, bool requireSafeRoute = false,
+            HostileNpc aimAt = null)
         {
             Transform actor = _father.transform;
             Vector3 direction = Vector3.ProjectOnPlane(destination - actor.position, Vector3.up);
             Quaternion facing = direction.sqrMagnitude > 0.001f ? Quaternion.LookRotation(direction) : actor.rotation;
+            float stepSpeed = 0f;
 
             while ((actor.position - destination).sqrMagnitude > 0.0001f)
             {
                 if (requireSafeRoute && !FatherRouteIsSafe(actor.position, destination))
                     yield break;
                 float deltaTime = Time.deltaTime;
-                actor.rotation = Quaternion.RotateTowards(actor.rotation, facing, 600f * deltaTime);
-                actor.position = Vector3.MoveTowards(actor.position, destination, speed * deltaTime);
+                if (aimAt != null && aimAt.IsAlive)
+                    _father.AimForEncounter(FatherTargetPoint(aimAt), smooth: true);
+                else
+                    _father.FaceForEncounter(actor.position + facing * Vector3.forward, smooth: true);
+                float remaining = Vector3.Distance(actor.position, destination);
+                float arrivalSpeed = Mathf.Min(speed, Mathf.Sqrt(2f * FatherEscapeAcceleration * remaining));
+                stepSpeed = Mathf.MoveTowards(stepSpeed, arrivalSpeed, FatherEscapeAcceleration * deltaTime);
+                actor.position = Vector3.MoveTowards(actor.position, destination, stepSpeed * deltaTime);
                 yield return null;
             }
 
@@ -981,7 +1296,7 @@ namespace CarX.Gameplay
 
         void StartEarlyFight(Vector3 shotPosition)
         {
-            StopAllCoroutines();
+            StopEncounterPlayback();
             _fatherWasExecuted = true;
 
             _father.transform.SetPositionAndRotation(transform.TransformPoint(_fatherBodyPosition),
@@ -997,7 +1312,7 @@ namespace CarX.Gameplay
             PrepareGuardsForFight();
             GetComponent<BanditSquad>().ReportShot(shotPosition, Time.time);
             ReleaseGuards(EarlyFightHitChance);
-            _hud.ShowSubtitle("Босс: Убейте Александра! Огонь!", duration: 3f);
+            ShowVoicedSubtitle("Босс: Убейте Александра! Огонь!", 3f, "Boss/EarlyFight", _boss);
         }
 
         void StartCombatStress()
@@ -1022,8 +1337,18 @@ namespace CarX.Gameplay
         void AimGuardsAtOpeningTarget(bool smooth)
         {
             foreach (var enemy in _enemies)
+            {
                 if (enemy != null && enemy.IsAlive)
-                    enemy.AimForEncounter(_openingTarget, smooth);
+                {
+                    if (enemy == _escort && _fatherHelpsInFight)
+                        continue;
+                    enemy.SetStagedWeaponVisible(true);
+                    if (enemy == _boss && BossIsSpeaking)
+                        enemy.SpeakAtForEncounter(_openingTarget);
+                    else
+                        enemy.AimForEncounter(_openingTarget, smooth);
+                }
+            }
         }
 
         void ReleaseGuards(float? visibleHitChance = null)
@@ -1042,7 +1367,10 @@ namespace CarX.Gameplay
 
         void ExecutePlayer(HostileNpc shooter)
         {
+            shooter.SetStagedWeaponVisible(true);
             shooter.AimForEncounter(PlayerChest);
+            if (shooter == _father)
+                shooter.PlayStagedShot(playAudio: false);
             Finish();
             PlayExecutionShot();
             _player.TakeDamage(PlayerHealth.MaxHealth);
@@ -1059,7 +1387,7 @@ namespace CarX.Gameplay
             if (_encounterStressStarted)
                 _pistol.SetCombatStress(_stressBeforeEncounter);
             _stage = Stage.Finished;
-            StopAllCoroutines();
+            StopEncounterPlayback();
             _pistol.EndEncounterShot();
             foreach (var enemy in _enemies)
                 if (enemy != null)
@@ -1082,7 +1410,7 @@ namespace CarX.Gameplay
             if (_player != null && _stage != Stage.AwaitingPlayer && _stage != Stage.Finished)
                 Finish();
             else
-                StopAllCoroutines();
+                StopEncounterPlayback();
         }
 
         void OnDestroy()

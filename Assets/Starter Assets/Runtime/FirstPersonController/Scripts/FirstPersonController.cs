@@ -93,6 +93,7 @@ namespace StarterAssets
 		private Vector2 _pendingLookRotation;
 		private Vector2 _lookVelocity;
 		private bool _controlsFrozen;
+		private bool _movementLocked;
 		private int _controlsResumedFrame = -1;
 		private bool _encounterLookActive;
 		private bool _limitEncounterLook;
@@ -100,6 +101,13 @@ namespace StarterAssets
 		private float _encounterLookCenterYaw;
 		private float _encounterLookCenterPitch;
 		private float _encounterLookInputWeight = 1f;
+		private Vector3 _encounterEntryFocus;
+		private Vector3 _encounterEntryVelocity;
+		private Quaternion _encounterEntryRotation;
+		private float _encounterEntryPitch;
+		private float _encounterEntryElapsed;
+		private const float EncounterEntryDuration = 0.55f;
+		private const float EncounterBrakeDuration = 0.24f;
 		private const float EncounterLookYawLimit = 42f;
 		private const float EncounterLookPitchLimit = 18f;
 		private float _verticalVelocity;
@@ -143,6 +151,7 @@ namespace StarterAssets
 		public bool IsAiming { get; set; }
 		public bool IsWalkingQuietly { get; private set; }
 		public bool LookInputBlocked { get; set; }
+		public bool IsSettlingEncounterEntry => _encounterLookActive && _encounterEntryElapsed < EncounterEntryDuration;
 		public Quaternion EncounterLookCenterRotation => transform.rotation *
 			Quaternion.Euler(_encounterLookCenterPitch, _encounterLookCenterYaw, 0f);
 		public event System.Action<Vector3, Vector3> AudibleFootstep;
@@ -158,30 +167,38 @@ namespace StarterAssets
 				_controlsResumedFrame = Time.frameCount;
 		}
 
+		public void SetMovementLocked(bool locked)
+		{
+			_movementLocked = locked;
+			if (!locked)
+				return;
+
+			_planarVelocity = _planarAcceleration = Vector2.zero;
+			_crouchVelocity = 0f;
+			_audibleStepDistance = 0f;
+		}
+
 		public void BeginEncounterLook(Vector3 point)
 		{
 			_encounterLookActive = true;
 			_limitEncounterLook = true;
-			_encounterLookYaw = _encounterLookCenterYaw = 0f;
+			_encounterLookCenterYaw = 0f;
+			_encounterLookYaw = ClampEncounterYaw(_aimSwayDegrees.x);
 			_encounterLookInputWeight = 1f;
+			_encounterEntryFocus = point;
+			_encounterEntryRotation = transform.rotation;
+			_encounterEntryVelocity = Vector3.ProjectOnPlane(_controller.velocity, Vector3.up);
+			_encounterEntryElapsed = 0f;
 			_pendingLookRotation = _lookVelocity = Vector2.zero;
 			_planarVelocity = _planarAcceleration = Vector2.zero;
+			_audibleStepDistance = 0f;
 			_remainingLookRecoil = Vector2.zero;
 			_lookRecoilTimeRemaining = 0f;
-			_encounterLookCenterPitch = _cinemachineTargetPitch;
-			if (CinemachineCameraTarget == null)
-				return;
-
-			_leanProgress = _leanVelocity = _leanRoll = _leanRollVelocity = 0f;
-			UpdateCameraPose(0f);
-			var offset = point - CinemachineCameraTarget.transform.position;
-			var forward = Vector3.ProjectOnPlane(offset, Vector3.up);
-			if (forward.sqrMagnitude > 0.001f)
-				transform.rotation = Quaternion.LookRotation(forward);
-			_cinemachineTargetPitch = Mathf.Clamp(-Mathf.Atan2(offset.y, forward.magnitude) * Mathf.Rad2Deg,
+			_cinemachineTargetPitch = Mathf.Clamp(_cinemachineTargetPitch + _aimSwayDegrees.y,
 				_lookUpLimit, _lookDownLimit);
-			_encounterLookCenterPitch = _cinemachineTargetPitch;
-			CinemachineCameraTarget.transform.localRotation = GetViewRotation(LeanRollRotation);
+			_encounterEntryPitch = _encounterLookCenterPitch = _cinemachineTargetPitch;
+			if (CinemachineCameraTarget != null)
+				CinemachineCameraTarget.transform.localRotation = GetViewRotation(LeanRollRotation);
 		}
 
 		public void EndEncounterLook()
@@ -206,6 +223,7 @@ namespace StarterAssets
 			if (!_encounterLookActive || CinemachineCameraTarget == null)
 				return;
 
+			_encounterEntryElapsed = EncounterEntryDuration;
 			Vector3 forward = Quaternion.Inverse(transform.rotation) * (worldRotation * Vector3.forward);
 			float yawOffset = _encounterLookYaw - _encounterLookCenterYaw;
 			float pitchOffset = _cinemachineTargetPitch - _encounterLookCenterPitch;
@@ -343,10 +361,10 @@ namespace StarterAssets
 
 			if (_encounterLookActive)
 			{
+				UpdateEncounterEntry(Time.deltaTime);
 				ApplyPendingLookRecoil(Time.deltaTime);
 				CameraRotation();
-				if (CinemachineCameraTarget != null)
-					CinemachineCameraTarget.transform.localRotation = GetViewRotation(LeanRollRotation);
+				UpdateCameraPose(0f);
 				return;
 			}
 
@@ -360,14 +378,52 @@ namespace StarterAssets
 			bool leanLeft = Input.GetKey(KeyCode.Z);
 			bool jumpPressed = Input.GetKeyDown(KeyCode.Space);
 #endif
-			float desiredLean = (leanRight ? 1f : 0f) - (leanLeft ? 1f : 0f);
-			UpdateCrouch();
+			float desiredLean = _movementLocked ? 0f : (leanRight ? 1f : 0f) - (leanLeft ? 1f : 0f);
+			if (!_movementLocked)
+				UpdateCrouch();
 			GroundedCheck();
-			UpdateVerticalVelocity(jumpPressed && !LookInputBlocked);
+			UpdateVerticalVelocity(jumpPressed && !_movementLocked && !LookInputBlocked);
 			ApplyPendingLookRecoil(Time.deltaTime);
 			CameraRotation();
 			Move(leanRight || leanLeft || Mathf.Abs(_leanProgress) > 0.01f);
 			UpdateCameraPose(desiredLean);
+		}
+
+		private void UpdateEncounterEntry(float deltaTime)
+		{
+			GroundedCheck();
+			UpdateVerticalVelocity(false);
+
+			float previous = _encounterEntryElapsed;
+			_encounterEntryElapsed = Mathf.Min(previous + deltaTime, EncounterEntryDuration);
+			float coast = EncounterBrakeDistance(_encounterEntryElapsed) - EncounterBrakeDistance(previous);
+			CollisionFlags collisions = _controller.Move(_encounterEntryVelocity * coast +
+				Vector3.up * (_verticalVelocity * deltaTime));
+			if ((collisions & CollisionFlags.Above) != 0 && _verticalVelocity > 0f)
+				_verticalVelocity = 0f;
+
+			if (previous >= EncounterEntryDuration || CinemachineCameraTarget == null)
+				return;
+
+			Vector3 offset = _encounterEntryFocus - CinemachineCameraTarget.transform.position;
+			Vector3 forward = Vector3.ProjectOnPlane(offset, Vector3.up);
+			if (forward.sqrMagnitude < 0.001f)
+				return;
+
+			float weight = Mathf.SmoothStep(0f, 1f, _encounterEntryElapsed / EncounterEntryDuration);
+			transform.rotation = Quaternion.Slerp(_encounterEntryRotation, Quaternion.LookRotation(forward), weight);
+			float aimPitch = Mathf.Clamp(-Mathf.Atan2(offset.y, forward.magnitude) * Mathf.Rad2Deg,
+				_lookUpLimit, _lookDownLimit);
+			float pitchOffset = _cinemachineTargetPitch - _encounterLookCenterPitch;
+			_encounterLookCenterPitch = Mathf.Lerp(_encounterEntryPitch, aimPitch, weight);
+			_cinemachineTargetPitch = Mathf.Clamp(_encounterLookCenterPitch + pitchOffset,
+				CurrentLookUp, CurrentLookDown);
+		}
+
+		private static float EncounterBrakeDistance(float elapsed)
+		{
+			float t = Mathf.Clamp01(elapsed / EncounterBrakeDuration);
+			return EncounterBrakeDuration * (t - t * t * t * (1f - 0.5f * t));
 		}
 
 		private void UpdateCameraPose(float desiredLean)
@@ -685,6 +741,8 @@ namespace StarterAssets
 			Vector2 moveInput = _input.analogMovement
 				? Vector2.ClampMagnitude(_input.move, 1f)
 				: _input.move.normalized;
+			if (_movementLocked)
+				moveInput = Vector2.zero;
 			if (moveInput.y < 0f)
 				targetSpeed *= _backwardSpeedMultiplier;
 			Vector2 targetVelocity = moveInput * (targetSpeed * MovementSpeedMultiplier);

@@ -51,10 +51,11 @@ namespace CarX.NPC
             if (canOrderAssault && CanRush(player) && float.IsPositiveInfinity(_assaultStartsAt))
             {
                 _assaultStartsAt = now + AssaultWarningTime;
-                observer.Shout(newContact ? "Бандит: Вон он! Вместе, вперёд!" : "Бандит: Вместе! Вперёд!");
+                observer.Shout(newContact ? "Бандит: Вон он! Вместе, вперёд!" : "Бандит: Вместе! Вперёд!",
+                    newContact ? "Bandit/SpottedRush" : "Bandit/Rush");
             }
             else if (newContact)
-                observer.Shout("Бандит: Вон он! Всем сюда!");
+                observer.Shout("Бандит: Вон он! Всем сюда!", "Bandit/Spotted");
         }
 
         internal bool HasAssaultOrder(PlayerHealth player, float now, out bool advance)

@@ -1,5 +1,6 @@
 using System.Collections;
 using CarX.Gameplay;
+using StarterAssets;
 using UnityEngine;
 
 namespace CarX.NPC
@@ -37,13 +38,17 @@ namespace CarX.NPC
         [SerializeField] AudioClip _checkLightVoice;
         [SerializeField] AudioClip _lightFixedVoice;
         [SerializeField] ToolboxPickup _toolbox;
+        [SerializeField] DoorKeyPickup _rewardKey;
         [SerializeField] DialogueLine[] _returnLines =
         {
             new(false, "Целый? Отлично."),
             new(true, "Отец говорил, к кому идёт?"),
-            new(false, "За деньгами. Нервный был. Всё проверял, не идёт ли кто следом."),
+            new(false, "За деньгами. Нервный был. Всё проверял, не идёт ли кто следом.")
+        };
+        [SerializeField] DialogueLine[] _keyLines =
+        {
             new(true, "Он спустился. Мне нужен ключ."),
-            new(false, "Знаешь, я тут недавно ключ нашёл. Может, он от двери на нижний этаж. Держи, попробуй."),
+            new(false, "Знаешь, я тут недавно ключ нашёл. Может, он от двери на нижний этаж."),
             new(true, "Спасибо.")
         };
 
@@ -54,13 +59,17 @@ namespace CarX.NPC
         AudioSource _playerVoice;
         NpcSpeechState _speech;
         DeniConversationAnimation _animation;
+        FirstPersonController _repairingPlayer;
         int _nextReturnLine;
 
         internal bool HasQuest { get; private set; }
         internal bool QuestCompleted { get; private set; }
         internal bool ToolsReturned { get; private set; }
+        internal bool KeyReady { get; private set; }
         internal bool HasGreetedForTools => _nextReturnLine > 0;
         internal bool HasReturnDialogueRemaining => _returnLines != null && _nextReturnLine < _returnLines.Length;
+        internal bool CanAskAboutKey => isActiveAndEnabled && ToolsReturned && !HasReturnDialogueRemaining &&
+            !KeyReady && !QuestCompleted && !IsSpeaking && _rewardKey != null;
         internal bool IsSpeaking => _conversation != null;
         internal bool HasWorkshopEncounter { get; set; }
 
@@ -86,9 +95,10 @@ namespace CarX.NPC
         }
 
         internal bool CanReturnTools(PlayerInventory inventory) =>
-            isActiveAndEnabled && HasQuest && !QuestCompleted && !IsSpeaking && inventory != null &&
+            isActiveAndEnabled && HasQuest && !QuestCompleted && !KeyReady && !IsSpeaking && inventory != null &&
             _returnLines != null && _returnLines.Length > 0 &&
-            (ToolsReturned || (_toolbox != null ? inventory.IsCarryingToolbox(_toolbox) : inventory.IsCarryingTools));
+            (ToolsReturned ? HasReturnDialogueRemaining :
+                (_toolbox != null ? inventory.IsCarryingToolbox(_toolbox) : inventory.IsCarryingTools));
 
         internal void GreetForTools(PlayerStatusHud hud)
         {
@@ -109,18 +119,46 @@ namespace CarX.NPC
                 return false;
 
             ToolsReturned = true;
-            void FinishReturn()
-            {
-                inventory.ReceiveLowerFloorKey();
-                QuestCompleted = true;
-                completed?.Invoke();
-                hud.ShowSubtitle("Получен ключ от нижнего этажа");
-            }
-
             if (HasReturnDialogueRemaining)
-                StartConversation(hud, ReturnTools(), _ => FinishReturn());
+                StartConversation(hud, ReturnTools(), _ =>
+                {
+                    SkipRemainingReturnDialogue();
+                    completed?.Invoke();
+                });
             else
-                FinishReturn();
+                completed?.Invoke();
+            return true;
+        }
+
+        internal bool TryAskAboutKey(PlayerStatusHud hud, System.Action updated)
+        {
+            if (!CanAskAboutKey)
+                return false;
+
+            StartConversation(hud, DiscussKey(), _ =>
+            {
+                KeyReady = true;
+                _rewardKey.Reveal(this);
+                updated?.Invoke();
+            });
+            return true;
+        }
+
+        IEnumerator DiscussKey()
+        {
+            foreach (var line in _keyLines)
+                yield return Line(line.Text, line.Alexey, line.Clip);
+        }
+
+        internal bool TryTakeKey(DoorKeyPickup key, PlayerInventory inventory)
+        {
+            if (!isActiveAndEnabled || !KeyReady || IsSpeaking || key != _rewardKey || inventory == null ||
+                !inventory.ReceiveLowerFloorKey(key))
+                return false;
+
+            KeyReady = false;
+            QuestCompleted = true;
+            key.gameObject.SetActive(false);
             return true;
         }
 
@@ -140,6 +178,8 @@ namespace CarX.NPC
                 !health.CanRepairFlashlight)
                 return false;
 
+            _repairingPlayer = hud.GetComponent<FirstPersonController>();
+            _repairingPlayer?.SetMovementLocked(true);
             StartConversation(hud, RepairFlashlight(health), skipped =>
             {
                 if (skipped && health.TryRepairFlashlight())
@@ -150,11 +190,13 @@ namespace CarX.NPC
 
         IEnumerator RepairFlashlight(PlayerHealth health)
         {
-            yield return Line("Проверишь свет?", alexey: true, clip: _askToCheckLightVoice);
-            yield return Line("Давай. Контакт тут капризный.", clip: _checkLightVoice);
+            yield return Line("Проверишь свет?", alexey: true,
+                clip: _askToCheckLightVoice ?? DialogueVoice.GetStoryClip("Alexey/Deni_CheckLight"));
+            yield return Line("Давай. Контакт тут капризный.",
+                clip: _checkLightVoice ?? DialogueVoice.GetStoryClip("Deni/Repair_Contact"));
             if (health.TryRepairFlashlight())
                 _hud.RefreshFlashlight();
-            yield return Line("Всё, держится.", clip: _lightFixedVoice);
+            yield return Line("Всё, держится.", clip: _lightFixedVoice ?? DialogueVoice.GetStoryClip("Deni/Repair_Done"));
         }
 
         IEnumerator Speak()
@@ -265,6 +307,9 @@ namespace CarX.NPC
         {
             _conversation = null;
             _onConversationCompleted = null;
+            if (_repairingPlayer != null)
+                _repairingPlayer.SetMovementLocked(false);
+            _repairingPlayer = null;
             if (_voice != null)
                 _voice.Stop();
             if (_playerVoice != null)

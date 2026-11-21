@@ -131,6 +131,12 @@ namespace CarX.Gameplay
 
         internal void SetChoiceHint(string text) => _choiceHint.text = text;
 
+        internal void SetSuspended(bool suspended)
+        {
+            _root.gameObject.SetActive(!suspended);
+            _gameplayCanvas.enabled = suspended;
+        }
+
         void BuildEncounterChoice()
         {
             _root.gameObject.AddComponent<UnityEngine.UI.GraphicRaycaster>();

@@ -19,7 +19,6 @@ namespace CarX.NPC
         [SerializeField] AudioClip _demandToolsVoice;
         [SerializeField] AudioClip _askAboutFatherVoice;
         [SerializeField] AudioClip _askWhenVoice;
-        [SerializeField] AudioClip _readClueVoice;
         [SerializeField] AudioClip _paidPassageVoice;
         [SerializeField] AudioClip _deniSentYouVoice;
         [SerializeField] AudioClip _threatVoice;
@@ -52,6 +51,7 @@ namespace CarX.NPC
         void Awake()
         {
             _speech = NpcSpeechState.GetOrAdd(this);
+            NpcIdleMotion.Attach(this, _speech);
             _animation = GetComponent<DeniConversationAnimation>();
             _actor = GetComponent<WorkshopActorAnimation>();
             if (_toolbox != null)
@@ -124,7 +124,7 @@ namespace CarX.NPC
 
         void CompleteIntroduction()
         {
-            _actor?.Threaten();
+            _actor?.Threaten(_pistol.ViewCamera != null ? _pistol.ViewCamera.transform : null);
             FinishConversation();
             _stage = Stage.WaitingForThreat;
             _menus.TrackWorkshopObjective(_questGiver);
@@ -193,13 +193,7 @@ namespace CarX.NPC
         {
             if (!CanTakeClue())
                 return;
-            _clueTaken = _inventory.TryCollectClue(_clue, OnClueDismissed);
-        }
-
-        void OnClueDismissed()
-        {
-            if (isActiveAndEnabled)
-                _innerVoice?.ReadClue(_readClueVoice, "Домой… И что бы ты нам сказал?");
+            _clueTaken = _inventory.TryCollectClue(_clue);
         }
 
         internal void SkipConversation()

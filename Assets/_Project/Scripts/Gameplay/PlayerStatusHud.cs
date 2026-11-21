@@ -47,12 +47,14 @@ namespace CarX.Gameplay
         float _damageFlashPeak;
         double _damageBarsVisibleUntil;
         float _subtitleUntil;
+        PlayerMenus _menus;
         bool _aiming;
         bool _inventoryOpen;
         int _displayedLoaded = -1;
         int _displayedReserve = -1;
 
         internal RectTransform HudRect => _hudRect;
+        float SubtitleTime => _menus != null ? _menus.UnpausedTime : Time.unscaledTime;
 
         internal void RegisterHostile(NPC.HostileNpc hostile) => _hostiles.Add(hostile);
 
@@ -61,6 +63,7 @@ namespace CarX.Gameplay
         void Start()
         {
             _health = GetComponent<PlayerHealth>();
+            _menus = GetComponent<PlayerMenus>();
             _statusZones = FindObjectsByType<PlayerStatusZone>();
 
             var hud = new GameObject("Player Status HUD", typeof(RectTransform), typeof(Canvas),
@@ -180,7 +183,7 @@ namespace CarX.Gameplay
             UpdateStatusLayout();
             UpdateBarsVisibility();
             UpdateDamageFlash();
-            if (_subtitleLabel != null && _subtitleLabel.gameObject.activeSelf && Time.unscaledTime >= _subtitleUntil)
+            if (_subtitleLabel != null && _subtitleLabel.gameObject.activeSelf && SubtitleTime >= _subtitleUntil)
             {
                 _subtitleLabel.gameObject.SetActive(false);
                 ClearSubtitleSpeaker();
@@ -308,7 +311,7 @@ namespace CarX.Gameplay
             _subtitleSpeaker = speaker;
             if (_subtitleSpeaker != null)
                 _subtitleSpeaker.SetTalking(true);
-            _subtitleUntil = Time.unscaledTime + duration;
+            _subtitleUntil = SubtitleTime + duration;
             _subtitleLabel.text = text;
             _subtitleLabel.transform.SetAsLastSibling();
             _subtitleLabel.gameObject.SetActive(true);
