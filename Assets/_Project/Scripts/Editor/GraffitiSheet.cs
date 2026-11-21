@@ -71,8 +71,7 @@ namespace CarX.EditorTools
                 int near = 0;
                 foreach (var c in border) if (Dist(c, res.bg) < 0.1f) near++;
                 res.borderSolid = near / (float)border.Count;
-                for (int i = 0; i < src.Length; i++) key[i] = KeyOut(src[i], res.bg);
-                Defringe(key, w, h);
+                KeyFlat(src, key, w, h, res.bg);
             }
 
             // painted pixels on a coarse grid, grown by half the gap: touching cells = one graffiti
@@ -186,46 +185,75 @@ namespace CarX.EditorTools
             return Mathf.Max(Mathf.Abs(a.r - b.r), Mathf.Max(Mathf.Abs(a.g - b.g), Mathf.Abs(a.b - b.b))) / 255f;
         }
 
-        /// <summary>Flat background to transparency (a soft ramp, so edges stay anti-aliased).</summary>
-        static Color32 KeyOut(Color32 p, Color32 bg)
+        /// <summary>Removes a flat background and its colour spill. Graffiti are flat paint, so the true colour of an edge pixel is the
+        /// colour of the nearest solid paint, and its opacity is how far the pixel moved from the background towards that paint
+        /// (the pixel is a mix of the two). Pink halos on black, light halos on dark, and pale edges on bright paint all disappear.</summary>
+        static void KeyFlat(Color32[] src, Color32[] key, int w, int h, Color32 bg)
         {
-            float a = Mathf.Clamp01((Dist(p, bg) - 0.06f) / 0.22f);
-            return new Color32(p.r, p.g, p.b, (byte)(a * p.a));
-        }
-
-        /// <summary>Edge pixels still carry some of the old background colour (a light halo on dark paint):
-        /// they take the colour of the nearest solid paint instead.</summary>
-        static void Defringe(Color32[] key, int w, int h)
-        {
-            var solid = new bool[key.Length];
-            for (int i = 0; i < key.Length; i++) solid[i] = key[i].a >= 250;
-            for (int pass = 0; pass < 4; pass++)
+            int n = src.Length;
+            var d = new float[n];
+            var wide = new bool[n];     // anything that differs from the background at all (includes the halo)
+            var loose = new bool[n];    // clearly paint or paint mixed with a lot of paint
+            for (int i = 0; i < n; i++)
             {
-                var add = new List<int>();
-                var col = new List<Color32>();
-                for (int y = 0; y < h; y++)
-                    for (int x = 0; x < w; x++)
-                    {
-                        int i = y * w + x;
-                        if (solid[i] || key[i].a == 0) continue;
-                        int r = 0, g = 0, b = 0, n = 0;
-                        for (int dy = -1; dy <= 1; dy++)
-                            for (int dx = -1; dx <= 1; dx++)
-                            {
-                                int nx = x + dx, ny = y + dy;
-                                if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-                                int j = ny * w + nx;
-                                if (!solid[j]) continue;
-                                r += key[j].r; g += key[j].g; b += key[j].b; n++;
-                            }
-                        if (n == 0) continue;
-                        add.Add(i);
-                        col.Add(new Color32((byte)(r / n), (byte)(g / n), (byte)(b / n), key[i].a));
-                    }
-                for (int k = 0; k < add.Count; k++) { key[add[k]] = col[k]; solid[add[k]] = true; }
-                if (add.Count == 0) break;
+                d[i] = Dist(src[i], bg);
+                wide[i] = d[i] >= 0.06f;
+                loose[i] = d[i] >= 0.35f;
+            }
+            // core = paint that is at least `r` pixels away from every edge: pure colour, no spill
+            int r = Mathf.Clamp(Mathf.Max(w, h) / 400, 3, 6);
+            var inv = new bool[n];
+            for (int i = 0; i < n; i++) inv[i] = !loose[i];
+            var grown = Dilate(inv, w, h, r);
+            var near = new int[n];      // index of the nearest core pixel, -1 = none
+            var queue = new int[n];
+            var dist = new byte[n];
+            int qh = 0, qt = 0;
+            for (int i = 0; i < n; i++)
+            {
+                near[i] = -1;
+                if (loose[i] && !grown[i]) { near[i] = i; queue[qt++] = i; }
+            }
+            const int reach = 30;       // how far from solid paint an edge pixel may be and still be repainted
+            while (qh < qt)
+            {
+                int c = queue[qh++];
+                if (dist[c] >= reach) continue;
+                int cx = c % w, cy = c / w;
+                for (int k = 0; k < 4; k++)
+                {
+                    int nx = cx + (k == 0 ? 1 : k == 1 ? -1 : 0), ny = cy + (k == 2 ? 1 : k == 3 ? -1 : 0);
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                    int j = ny * w + nx;
+                    if (near[j] >= 0 || !wide[j]) continue;
+                    near[j] = near[c];
+                    dist[j] = (byte)(dist[c] + 1);
+                    queue[qt++] = j;
+                }
+            }
+            for (int i = 0; i < n; i++)
+            {
+                var p = src[i];
+                if (!wide[i]) { key[i] = new Color32(p.r, p.g, p.b, 0); continue; }
+                if (near[i] == i) { key[i] = new Color32(p.r, p.g, p.b, p.a); continue; }
+                if (near[i] < 0)
+                {
+                    // no solid paint nearby (thin line, speck): remove the background by un-mixing
+                    float a0 = Mathf.Clamp01(d[i] / 0.9f);
+                    if (a0 < 0.1f) { key[i] = new Color32(p.r, p.g, p.b, 0); continue; }
+                    key[i] = new Color32(Un(p.r, bg.r, a0), Un(p.g, bg.g, a0), Un(p.b, bg.b, a0), (byte)(Mathf.SmoothStep(0.2f, 0.75f, a0) * 255f));
+                    continue;
+                }
+                var q = src[near[i]];
+                float vr = q.r - bg.r, vg = q.g - bg.g, vb = q.b - bg.b;
+                float len2 = vr * vr + vg * vg + vb * vb;
+                float t = len2 < 1f ? 1f : ((p.r - bg.r) * vr + (p.g - bg.g) * vg + (p.b - bg.b) * vb) / len2;
+                float a = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((t - 0.2f) / 0.55f));
+                key[i] = new Color32(q.r, q.g, q.b, (byte)(a * p.a));
             }
         }
+
+        static byte Un(int p, int bg, float a) { return (byte)Mathf.Clamp(Mathf.RoundToInt(bg + (p - bg) / a), 0, 255); }
 
         static bool[] Dilate(bool[] g, int gw, int gh, int r)
         {

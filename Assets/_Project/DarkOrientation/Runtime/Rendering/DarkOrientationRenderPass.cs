@@ -40,6 +40,8 @@ namespace CarX.DarkOrientation
             };
             public static readonly int DepthNear = Shader.PropertyToID("_DO_DepthNear");
             public static readonly int DepthFar = Shader.PropertyToID("_DO_DepthFar");
+            public static readonly int DepthRange = Shader.PropertyToID("_DO_DepthRange");
+            public static readonly int ZoneMerge = Shader.PropertyToID("_DO_ZoneMerge");
             public static readonly int Look = Shader.PropertyToID("_DO_Look");
             public static readonly int HandFill = Shader.PropertyToID("_DO_HandFill");
             public static readonly int HandOutline = Shader.PropertyToID("_DO_HandOutline");
@@ -240,10 +242,13 @@ namespace CarX.DarkOrientation
                 c.SetVector(Ids.ZoneNormals[i], owner.ZoneNormals[i]);
             float wallEnd = Mathf.Max(s.wallZoneEnd, s.wallZoneCore + 0.01f);
             float objectEnd = Mathf.Max(s.objectZoneEnd, s.objectZoneCore + 0.01f);
-            c.SetVector(Ids.ZoneParams, new Vector4(s.wallZoneCore, wallEnd, s.objectZoneCore, objectEnd));
+            float k = Mathf.Max(0.01f, s.zoneScale);
+            c.SetVector(Ids.ZoneParams, new Vector4(s.wallZoneCore * k, wallEnd * k, s.objectZoneCore * k, objectEnd * k));
             c.SetVector(Ids.RingParams, new Vector4(s.ringSpacing, s.depthRings, Mathf.Cos(s.faceCutoffAngle * Mathf.Deg2Rad), 0f));
             c.SetColor(Ids.DepthNear, s.depthNear);
             c.SetColor(Ids.DepthFar, s.depthFar);
+            c.SetVector(Ids.DepthRange, new Vector4(s.depthNearDistance, Mathf.Max(s.depthNearDistance + 0.05f, s.depthFarDistance), s.depthCurve, s.depthSideShade));
+            c.SetVector(Ids.ZoneMerge, new Vector4(s.zoneMerge, 0f, 0f, 0f));
             c.SetVector(Ids.Look, new Vector4(s.dim, s.desaturate, s.depthEdges, owner.Blend));
             bool solid = s.handStyle == HandStyle.SolidWhite;
             c.SetColor(Ids.HandFill, solid ? s.outlineColor * 0.85f : s.handFill);

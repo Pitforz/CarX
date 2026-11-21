@@ -49,6 +49,12 @@ namespace CarX.Level
         [Tooltip("Снаружи настоящая сцена (например канал CanalEntrance): не рисовать за проёмом светящуюся коробку «неба»")]
         public bool exitOpenAir;
 
+        [Header("Мусор (инструмент «Мусор»; для комнат и камер)")]
+        [Tooltip("Сколько точек с мусором в этой комнате или камере")]
+        [Min(0)] public int trash;
+        [Tooltip("Сид мусора: другой сид - мусор лежит по-другому")]
+        public int trashSeed;
+
         /// <summary>Default plan of a new room: an octagon about 10 m across.</summary>
         public static List<Vector2> DefaultRoom()
         {
@@ -71,6 +77,10 @@ namespace CarX.Level
         public int seed = 1;
         [Tooltip("Подъёмы наверх на этом отрезке. Distance = метры от узла A")]
         public List<ShaftSpec> shafts = new List<ShaftSpec>();
+        [Tooltip("Сколько точек с мусором на этом отрезке (инструмент «Мусор»)")]
+        [Min(0)] public int trash;
+        [Tooltip("Сид мусора: другой сид - мусор лежит по-другому")]
+        public int trashSeed;
     }
 
     public struct GraphIssue
@@ -102,6 +112,8 @@ namespace CarX.Level
         public const float MaxTunnelLength = 3000f;
         /// <summary>Editor hook: scatter puddles on a rebuilt tunnel.</summary>
         public static Action<TunnelPath, int> DressingHook;
+        /// <summary>Editor: runs after every build (the trash tool regenerates what changed).</summary>
+        public static Action<TunnelNetwork> BuiltHook;
         /// <summary>Editor sets this in schematic mode: lay out only, build meshes later.</summary>
         public static bool deferBuild;
 
@@ -293,6 +305,11 @@ namespace CarX.Level
                     e.shafts.RemoveAt(i);
                 }
             }
+            // trash spots are shared by length, each half keeps its own seed
+            int moved = Mathf.RoundToInt(e.trash * (1f - t));
+            e2.trash = moved;
+            e2.trashSeed = e.trashSeed + 1;
+            e.trash -= moved;
             e.b = n.id;
             edges.Add(e2);
             MarkDirty();
@@ -1767,6 +1784,11 @@ namespace CarX.Level
             foreach (var g in dead)
             {
                 if (Application.isPlaying) Destroy(g); else DestroyImmediate(g);
+            }
+            if (BuiltHook != null)
+            {
+                try { BuiltHook(this); }
+                catch (Exception ex) { Debug.LogException(ex, this); }
             }
             if (builtPaths + builtChambers + dead.Count > 0)
                 Debug.Log("CarX graph build: tunnels " + builtPaths + ", chambers " + builtChambers + ", removed " + dead.Count + ", " + watch.ElapsedMilliseconds + " ms");

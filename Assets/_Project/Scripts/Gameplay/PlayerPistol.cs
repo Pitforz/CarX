@@ -107,6 +107,8 @@ namespace CarX.Gameplay
         internal System.Func<bool> HideQuery;
         /// <summary>Set by another system: true means no aiming, firing or reloading.</summary>
         internal System.Func<bool> BlockQuery;
+        /// <summary>Set by another system (dark orientation): degrees added to the field of view.</summary>
+        internal System.Func<float> FovBonusQuery;
         internal bool IsHiddenExternally { get; private set; }
         internal Vector3 GripLightPosition => _beretta != null ? _beretta.GripLightPosition : _view.position;
         internal event System.Action<Vector3> ShotFired;
@@ -241,7 +243,8 @@ namespace CarX.Gameplay
                 _player.IsAiming = _aiming;
             }
             float leanFov = LeanFovBonus * (_player != null ? _player.LeanAmount : 0f);
-            SetFieldOfView(_normalFov * (1f - AimFovReduction * zoom) + leanFov);
+            float extraFov = FovBonusQuery != null ? FovBonusQuery() : 0f;
+            SetFieldOfView(_normalFov * (1f - AimFovReduction * zoom) + leanFov + extraFov);
             UpdatePose(zoom, loweredForFlashlight);
             _hud.ShowPistol(_equipped, _aiming, _loaded, ReserveRounds, _reloadRemaining > 0f);
         }

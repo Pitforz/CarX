@@ -41,12 +41,16 @@ namespace CarX.DarkOrientation.Integration
             // TunnelTouchShell builds its bands and collision shells on scene load; the hands feel the bands instead of the
             // joints of the visible mesh, and ignore the collision shells.
             mode.KindQuery = KindOf;
+            // The hands feel the band instead of the visible wall, so its layer is always in the touch mask.
+            DarkOrientationSettings.Load().extraTouchLayers |= 1 << TunnelTouchShell.Layer;
             // Both hands feel the way: the pistol and its arms are put away while the mode is on.
             mode.HandOccupiedQuery = null;
             if (pistol != null)
             {
                 pistol.HideQuery = () => mode != null && mode.HidesWeapon;
                 pistol.BlockQuery = () => mode != null && mode.BlocksWeapon;
+                // The mode widens the view so the hand on the wall stays in sight when the player looks along it.
+                pistol.FovBonusQuery = () => mode != null ? mode.FovBonus : 0f;
             }
 
             // The pistol view model is built at runtime under the camera; keep it sharp and outlined like the hands.

@@ -1,0 +1,54 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6f0bbf814254fed41812b37ac5cfba2c, type: 3}
+  m_Name: TrashSettings
+  m_EditorClassIdentifier: Assembly-CSharp::CarX.Level.TunnelTrashSettings
+  heaps:
+  - {fileID: 3085240688224948776, guid: c61f45f680603714daa1fd296c4cefa3, type: 3}
+  - {fileID: 1350357917436474487, guid: 54e875ec4eab3eb468fee4d68590267f, type: 3}
+  - {fileID: 5767324359766777731, guid: a5a8048c3779dc640a256746ce776b0d, type: 3}
+  - {fileID: 7542886787728153397, guid: fcc4698059741694b8109a050668ff83, type: 3}
+  - {fileID: 2563763245066944262, guid: 63ee5b243ce2c1a44ad4781bc72e002d, type: 3}
+  - {fileID: 5816923370386436106, guid: acab743723ed9fb499a7d4ec7c4578bd, type: 3}
+  - {fileID: 4017672297414699477, guid: 0933a239c129c384083044112ac31a4e, type: 3}
+  piles:
+  - {fileID: 5398278196126211313, guid: 061212a3f10dff94aa04101489475a9d, type: 3}
+  - {fileID: 372292419298398389, guid: ee3f5e0dc21460742a2bdcb3f48bbee3, type: 3}
+  - {fileID: 3071565827729380618, guid: 57589b00c237bc04281e5cd0bc0bb28c, type: 3}
+  litter:
+  - {fileID: 1963023906503628687, guid: c7f3a70624a8a894191b344c9629f3fc, type: 3}
+  - {fileID: 5852977447195995195, guid: 08dae7210f9216242a0c3ed6284e8612, type: 3}
+  - {fileID: 7262956993760990891, guid: 546453e5a2230d547b7b5d65f27e6331, type: 3}
+  - {fileID: 3564632919824148345, guid: 30858ef0644983d49814b826a7d53d39, type: 3}
+  - {fileID: 295543366600241890, guid: cd8c7024c8812e44ebf0d8443e27721e, type: 3}
+  - {fileID: 7233506418509235627, guid: 5a892c27507b0b74bb708e2cd5e30a95, type: 3}
+  - {fileID: 3866911150615150090, guid: ffc03121a9bfce64d8271a2282d51e93, type: 3}
+  - {fileID: 2844045197979978276, guid: 6556337ea065d154a993212870d16d28, type: 3}
+  - {fileID: 4796403624441789514, guid: bd256781763dbd84e9b4875228eb241e, type: 3}
+  - {fileID: 2356546831128549486, guid: 670ea2d8debb09948a50bddeb9981333, type: 3}
+  - {fileID: 7864100423859595728, guid: 0dc5e8b544f9412479502fa2a64dc858, type: 3}
+  - {fileID: 5655021246613658517, guid: 882a95fcdde60dc428683493f707d8ab, type: 3}
+  - {fileID: 461692670688170993, guid: d3887f0097534cc4baf4263f1b8093ff, type: 3}
+  - {fileID: 22648899321674013, guid: 6b33774543b7deb4988a0676e64e21fb, type: 3}
+  - {fileID: 698171396981000514, guid: b29faf6740cb849438e53d55497b58ee, type: 3}
+  centerChance: 0.25
+  pileChance: 0.35
+  endMargin: 1.5
+  wallGap: 0.02
+  litterAround: {x: 1, y: 3}
+  litterCenter: {x: 2, y: 4}
+  pileSink: {x: 0.35, y: 0.6}
+  heapSink: {x: 0, y: 0.06}
+  scale: {x: 0.9, y: 1.15}
+  yawJitter: 25
+  heapColliders: 1
+  perClick: 1
