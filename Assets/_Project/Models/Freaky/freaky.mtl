@@ -1,0 +1,7 @@
+newmtl Body
+Kd 1 1 1
+map_Kd Textures/freaky_Body_diffuse.png
+
+newmtl Bottom
+Kd 1 1 1
+map_Kd Textures/freaky_Bottom_diffuse.png

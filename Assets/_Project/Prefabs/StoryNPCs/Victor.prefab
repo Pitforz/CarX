@@ -417,6 +417,8 @@ MonoBehaviour:
   _firstAnswerVoices:
   - {fileID: 8300000, guid: 358e00dc890441b8b060e2184ddae795, type: 3}
   - {fileID: 8300000, guid: 363900bbc1524c0cbd8b9ba725d8c088, type: 3}
+  _grantsLowerFloorHint: 1
+  _answerOnlyOnce: 1
   _idleArmClearance: 9.5
 --- !u!114 &202474862988273815
 MonoBehaviour:

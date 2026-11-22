@@ -725,7 +725,6 @@ MonoBehaviour:
   _entry: {fileID: 7119969735566569215}
   _fork: {fileID: 6675682678524320443}
   _leftTunnel: {fileID: 8694360502594478371}
-  _engineer: {fileID: 6754732141228666859}
   _leftShoulder: {fileID: 7936922551053745718}
   _rightShoulder: {fileID: 3861215520548794075}
   _mainMarkClips:
@@ -755,7 +754,7 @@ MonoBehaviour:
   - {fileID: 8300000, guid: 0654751587e74ce4baa7f54d0d99419c, type: 3}
   - {fileID: 8300000, guid: 49595fa7f9f25264c815aa0d4a674a83, type: 3}
   - {fileID: 8300000, guid: ad42c4a9de5397c42b1a62e2ca1fb343, type: 3}
-  - {fileID: 0}
+  - {fileID: 8300000, guid: e9d6a764434446f59ac9201d383a7654, type: 3}
   - {fileID: 8300000, guid: 431730798593972448ca23b1f513e319, type: 3}
   - {fileID: 8300000, guid: b44cef57650fa5243beab25b23ba14b0, type: 3}
   - {fileID: 8300000, guid: f73175b3cf8d4e442af48eb400ad7f7c, type: 3}

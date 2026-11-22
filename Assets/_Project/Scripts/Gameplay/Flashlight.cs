@@ -320,6 +320,32 @@ namespace CarX.Gameplay
 
         public bool IsSwitchedOn => _isOn;
 
+        internal static Flashlight FindForPlayer(Transform player, Camera camera)
+        {
+            var flashlight = player.GetComponentInChildren<Flashlight>(true);
+            if (flashlight != null)
+                return flashlight;
+            return camera != null ? camera.GetComponentInChildren<Flashlight>(true)
+                : player.root.GetComponentInChildren<Flashlight>(true);
+        }
+
+        internal float WorldLightRange => Mathf.Max(_beamRange, _spillRange);
+
+        internal bool IlluminatesPoint(Vector3 point)
+        {
+            if (!isActiveAndEnabled || !_isOn || Charge <= 0f)
+                return false;
+
+            Vector3 offset = point - transform.position;
+            float distance = offset.magnitude;
+            float depth = Vector3.Dot(transform.forward, offset);
+            return IsInSpot(_beam, distance, depth) || IsInSpot(_spill, distance, depth);
+        }
+
+        static bool IsInSpot(Light light, float distance, float depth) => light != null &&
+            light.isActiveAndEnabled && light.intensity > 0f && distance < light.range && depth > 0f &&
+            depth >= distance * Mathf.Cos(light.spotAngle * 0.5f * Mathf.Deg2Rad);
+
         /// <summary>Switches the light off with the usual click (used when the dark-orientation mode is asked for).</summary>
         public void SwitchOff()
         {

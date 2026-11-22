@@ -94,6 +94,8 @@ namespace StarterAssets
 		private Vector2 _lookVelocity;
 		private bool _controlsFrozen;
 		private bool _movementLocked;
+		private bool _superSpeedEnabled;
+		private const float SuperSpeedMultiplier = 4f;
 		private int _controlsResumedFrame = -1;
 		private bool _encounterLookActive;
 		private bool _limitEncounterLook;
@@ -155,6 +157,7 @@ namespace StarterAssets
 		public Quaternion EncounterLookCenterRotation => transform.rotation *
 			Quaternion.Euler(_encounterLookCenterPitch, _encounterLookCenterYaw, 0f);
 		public event System.Action<Vector3, Vector3> AudibleFootstep;
+		public event System.Action<float> GroundedTravel;
 
 		public void SetControlsFrozen(bool frozen)
 		{
@@ -373,11 +376,16 @@ namespace StarterAssets
 			bool leanRight = IsKeyHeld(keyboard, _leanRightKey);
 			bool leanLeft = IsKeyHeld(keyboard, _leanLeftKey);
 			bool jumpPressed = keyboard?.spaceKey.wasPressedThisFrame == true;
+			bool superSpeedPressed = keyboard?.vKey.wasPressedThisFrame == true;
 #else
 			bool leanRight = Input.GetKey(KeyCode.C);
 			bool leanLeft = Input.GetKey(KeyCode.Z);
 			bool jumpPressed = Input.GetKeyDown(KeyCode.Space);
+			bool superSpeedPressed = Input.GetKeyDown(KeyCode.V);
 #endif
+			if (superSpeedPressed && !_movementLocked && !LookInputBlocked)
+				_superSpeedEnabled = !_superSpeedEnabled;
+
 			float desiredLean = _movementLocked ? 0f : (leanRight ? 1f : 0f) - (leanLeft ? 1f : 0f);
 			if (!_movementLocked)
 				UpdateCrouch();
@@ -745,6 +753,8 @@ namespace StarterAssets
 				moveInput = Vector2.zero;
 			if (moveInput.y < 0f)
 				targetSpeed *= _backwardSpeedMultiplier;
+			if (_superSpeedEnabled)
+				targetSpeed *= SuperSpeedMultiplier;
 			Vector2 targetVelocity = moveInput * (targetSpeed * MovementSpeedMultiplier);
 			// Smooth the whole local velocity, including a release to zero and changes of direction.
 			// Collision-reduced controller.velocity must not restart acceleration every frame at a wall.
@@ -767,7 +777,7 @@ namespace StarterAssets
 
 		private void ReportFootstep(Vector3 previousPosition)
 		{
-			if (IsWalkingQuietly || !_controller.isGrounded)
+			if (!_controller.isGrounded)
 			{
 				_audibleStepDistance = 0f;
 				return;
@@ -775,7 +785,16 @@ namespace StarterAssets
 
 			Vector3 movement = transform.position - previousPosition;
 			movement.y = 0f;
-			_audibleStepDistance += movement.magnitude;
+			float distance = movement.magnitude;
+			if (distance > 0f)
+				GroundedTravel?.Invoke(distance);
+			if (IsWalkingQuietly)
+			{
+				_audibleStepDistance = 0f;
+				return;
+			}
+
+			_audibleStepDistance += distance;
 			if (_audibleStepDistance < DistancePerAudibleStep)
 				return;
 

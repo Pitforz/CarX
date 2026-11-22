@@ -464,11 +464,6 @@ namespace CarX.Gameplay
             }
             else if (pickup is ToolboxPickup toolbox)
                 CarryToolbox(toolbox);
-            else if (pickup is DoorKeyPickup key && key.TryCollect(this))
-            {
-                SetFocusedPickup(null);
-                _menus?.RefreshQuestDisplay();
-            }
             else if (pickup is DroppedMagazine magazine && !_spareRounds.HasValue)
             {
                 _spareRounds = magazine.Rounds;
@@ -597,10 +592,6 @@ namespace CarX.Gameplay
 
         static MonoBehaviour FindPickup(Collider collider)
         {
-            var key = collider.GetComponentInParent<DoorKeyPickup>();
-            if (key != null)
-                return key;
-
             var clue = collider.GetComponentInParent<CluePickup>();
             if (clue != null)
                 return clue.Note != null && clue.Note.Paper != null ? clue : null;
@@ -658,15 +649,13 @@ namespace CarX.Gameplay
                     previousMagazine.SetHighlighted(false);
                 else if (_focusedPickup is CluePickup previousClue)
                     previousClue.SetHighlighted(false);
-                else if (_focusedPickup is DoorKeyPickup previousKey)
-                    previousKey.SetHighlighted(false);
             }
             _focusedPickup = pickup;
 
             if (pickup is ToolboxPickup toolbox)
             {
                 toolbox.SetHighlighted(true);
-                _hud.ShowPickupHint("Ящик с инструментами\nE — подобрать");
+                _hud.ShowPickupHint("Ящик с инструментами\nE — подобрать", questItem: true);
             }
             else if (pickup is DroppedMagazine magazine)
             {
@@ -677,12 +666,7 @@ namespace CarX.Gameplay
             else if (pickup is CluePickup clue)
             {
                 clue.SetHighlighted(true);
-                _hud.ShowPickupHint($"{clue.Note.Title}\nE — подобрать");
-            }
-            else if (pickup is DoorKeyPickup key)
-            {
-                key.SetHighlighted(true);
-                _hud.ShowPickupHint($"{LowerFloorKeyName}\nE — забрать");
+                _hud.ShowPickupHint($"{clue.Note.Title}\nE — подобрать", questItem: true);
             }
             else if (_hud != null)
                 _hud.ShowPickupHint(null);

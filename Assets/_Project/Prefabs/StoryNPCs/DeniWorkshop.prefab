@@ -576,6 +576,7 @@ MonoBehaviour:
   _lightFixedVoice: {fileID: 0}
   _toolbox: {fileID: 2538849894165222105}
   _rewardKey: {fileID: 684510000106}
+  _keyThanksVoice: {fileID: 8300000, guid: 00b19468e72f4c02ba0285362a8e1c53, type: 3}
   _returnLines:
   - _alexey: 0
     _text: "Целый? Отлично."
@@ -593,9 +594,6 @@ MonoBehaviour:
   - _alexey: 0
     _text: "Знаешь, я тут недавно ключ нашёл. Может, он от двери на нижний этаж."
     _clip: {fileID: 8300000, guid: 4204df90430c4ec7a1c3e41a4107e9f2, type: 3}
-  - _alexey: 1
-    _text: "Спасибо."
-    _clip: {fileID: 8300000, guid: 00b19468e72f4c02ba0285362a8e1c53, type: 3}
 --- !u!114 &3187330866416045094
 MonoBehaviour:
   m_ObjectHideFlags: 0

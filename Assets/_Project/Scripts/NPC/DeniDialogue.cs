@@ -34,11 +34,16 @@ namespace CarX.NPC
         [SerializeField] DialogueLine[] _openingLines;
         [SerializeField] AudioClip _askForDirectionsVoice;
         [SerializeField] AudioClip _directionsVoice;
+        [SerializeField, TextArea] string _workshopDirections;
+        [SerializeField] Transform _workshopMeetingPoint;
+        [SerializeField] CaretakerTour _caretaker;
+        [SerializeField] bool _requiresLowerFloorHint;
         [SerializeField] AudioClip _askToCheckLightVoice;
         [SerializeField] AudioClip _checkLightVoice;
         [SerializeField] AudioClip _lightFixedVoice;
         [SerializeField] ToolboxPickup _toolbox;
         [SerializeField] DoorKeyPickup _rewardKey;
+        [SerializeField] AudioClip _keyThanksVoice;
         [SerializeField] DialogueLine[] _returnLines =
         {
             new(false, "Целый? Отлично."),
@@ -48,8 +53,7 @@ namespace CarX.NPC
         [SerializeField] DialogueLine[] _keyLines =
         {
             new(true, "Он спустился. Мне нужен ключ."),
-            new(false, "Знаешь, я тут недавно ключ нашёл. Может, он от двери на нижний этаж."),
-            new(true, "Спасибо.")
+            new(false, "Знаешь, я тут недавно ключ нашёл. Может, он от двери на нижний этаж.")
         };
 
         PlayerStatusHud _hud;
@@ -60,6 +64,7 @@ namespace CarX.NPC
         NpcSpeechState _speech;
         DeniConversationAnimation _animation;
         FirstPersonController _repairingPlayer;
+        bool _flashlightChecked;
         int _nextReturnLine;
 
         internal bool HasQuest { get; private set; }
@@ -68,10 +73,26 @@ namespace CarX.NPC
         internal bool KeyReady { get; private set; }
         internal bool HasGreetedForTools => _nextReturnLine > 0;
         internal bool HasReturnDialogueRemaining => _returnLines != null && _nextReturnLine < _returnLines.Length;
-        internal bool CanAskAboutKey => isActiveAndEnabled && ToolsReturned && !HasReturnDialogueRemaining &&
-            !KeyReady && !QuestCompleted && !IsSpeaking && _rewardKey != null;
+        internal bool NeedsLowerFloorHint(bool hasHint) => _requiresLowerFloorHint && !hasHint;
+        internal bool CanAskAboutKey(bool hasHint) => isActiveAndEnabled && ToolsReturned && !HasReturnDialogueRemaining &&
+            !KeyReady && !QuestCompleted && !IsSpeaking && _rewardKey != null && !NeedsLowerFloorHint(hasHint);
+        internal bool CanCheckFlashlight(PlayerHealth health) => isActiveAndEnabled && ToolsReturned &&
+            !HasReturnDialogueRemaining && !IsSpeaking && health != null && !health.IsDead &&
+            (!_flashlightChecked || health.CanRepairFlashlight);
         internal bool IsSpeaking => _conversation != null;
         internal bool HasWorkshopEncounter { get; set; }
+        internal string WorkshopDirections => _workshopDirections;
+        internal bool ReturnsToolsInWorkshop => _workshopMeetingPoint != null;
+        internal bool IsWaitingInWorkshop { get; private set; }
+
+        internal void MoveToWorkshop()
+        {
+            if (!HasQuest || !ReturnsToolsInWorkshop || IsWaitingInWorkshop)
+                return;
+
+            transform.SetPositionAndRotation(_workshopMeetingPoint.position, _workshopMeetingPoint.rotation);
+            IsWaitingInWorkshop = true;
+        }
 
         void Awake()
         {
@@ -96,9 +117,13 @@ namespace CarX.NPC
 
         internal bool CanReturnTools(PlayerInventory inventory) =>
             isActiveAndEnabled && HasQuest && !QuestCompleted && !KeyReady && !IsSpeaking && inventory != null &&
+            (!ReturnsToolsInWorkshop || IsWaitingInWorkshop) &&
             _returnLines != null && _returnLines.Length > 0 &&
             (ToolsReturned ? HasReturnDialogueRemaining :
-                (_toolbox != null ? inventory.IsCarryingToolbox(_toolbox) : inventory.IsCarryingTools));
+                IsCarryingQuestTools(inventory));
+
+        internal bool IsCarryingQuestTools(PlayerInventory inventory) => inventory != null &&
+            (_toolbox != null ? inventory.IsCarryingToolbox(_toolbox) : inventory.IsCarryingTools);
 
         internal void GreetForTools(PlayerStatusHud hud)
         {
@@ -115,10 +140,14 @@ namespace CarX.NPC
         {
             if (!CanReturnTools(inventory) || !HasGreetedForTools)
                 return false;
-            if (!ToolsReturned && !inventory.DeliverTools())
-                return false;
+            if (!ToolsReturned)
+            {
+                if (!inventory.DeliverTools())
+                    return false;
 
-            ToolsReturned = true;
+                ToolsReturned = true;
+                _caretaker?.MoveToAfterToolsPoint();
+            }
             if (HasReturnDialogueRemaining)
                 StartConversation(hud, ReturnTools(), _ =>
                 {
@@ -130,15 +159,14 @@ namespace CarX.NPC
             return true;
         }
 
-        internal bool TryAskAboutKey(PlayerStatusHud hud, System.Action updated)
+        internal bool TryAskAboutKey(PlayerStatusHud hud, bool hasHint, System.Action updated)
         {
-            if (!CanAskAboutKey)
+            if (!CanAskAboutKey(hasHint))
                 return false;
 
             StartConversation(hud, DiscussKey(), _ =>
             {
                 KeyReady = true;
-                _rewardKey.Reveal(this);
                 updated?.Invoke();
             });
             return true;
@@ -150,15 +178,15 @@ namespace CarX.NPC
                 yield return Line(line.Text, line.Alexey, line.Clip);
         }
 
-        internal bool TryTakeKey(DoorKeyPickup key, PlayerInventory inventory)
+        internal bool TryTakeKey(PlayerStatusHud hud, PlayerInventory inventory)
         {
-            if (!isActiveAndEnabled || !KeyReady || IsSpeaking || key != _rewardKey || inventory == null ||
-                !inventory.ReceiveLowerFloorKey(key))
+            if (!isActiveAndEnabled || !KeyReady || IsSpeaking || _rewardKey == null || inventory == null ||
+                !inventory.ReceiveLowerFloorKey(_rewardKey))
                 return false;
 
             KeyReady = false;
             QuestCompleted = true;
-            key.gameObject.SetActive(false);
+            StartConversation(hud, Line("Спасибо.", alexey: true, clip: _keyThanksVoice), null);
             return true;
         }
 
@@ -174,8 +202,7 @@ namespace CarX.NPC
 
         internal bool TryRepairFlashlight(PlayerStatusHud hud, PlayerHealth health)
         {
-            if (!isActiveAndEnabled || !QuestCompleted || IsSpeaking || health == null ||
-                !health.CanRepairFlashlight)
+            if (!CanCheckFlashlight(health))
                 return false;
 
             _repairingPlayer = hud.GetComponent<FirstPersonController>();
@@ -184,6 +211,7 @@ namespace CarX.NPC
             {
                 if (skipped && health.TryRepairFlashlight())
                     hud.RefreshFlashlight();
+                _flashlightChecked = !health.CanRepairFlashlight;
             });
             return true;
         }
@@ -192,6 +220,11 @@ namespace CarX.NPC
         {
             yield return Line("Проверишь свет?", alexey: true,
                 clip: _askToCheckLightVoice ?? DialogueVoice.GetStoryClip("Alexey/Deni_CheckLight"));
+            if (!health.CanRepairFlashlight)
+            {
+                yield return Line("С фонариком всё в порядке.");
+                yield break;
+            }
             yield return Line("Давай. Контакт тут капризный.",
                 clip: _checkLightVoice ?? DialogueVoice.GetStoryClip("Deni/Repair_Contact"));
             if (health.TryRepairFlashlight())
@@ -201,6 +234,12 @@ namespace CarX.NPC
 
         IEnumerator Speak()
         {
+            if (IsWaitingInWorkshop)
+            {
+                yield return Line("Как найдёшь ящик, неси сюда. Я подожду.");
+                yield break;
+            }
+
             if (!HasQuest)
             {
                 if (_openingLines != null && _openingLines.Length > 0)
@@ -223,11 +262,19 @@ namespace CarX.NPC
                 yield return Line("Тебе прямо и сразу направо.", clip: _directionsVoice);
             else
             {
-                string directions = HasWorkshopEncounter
-                    ? "Иди прямо в первый тоннель от жилого зала. Там ищи вымогателя. Ящик красный."
-                    : "Прямо и сразу направо. Потом дверь с белой полосой. Ящик красный.";
+                string directions = _workshopDirections;
+                if (string.IsNullOrWhiteSpace(directions))
+                    directions = HasWorkshopEncounter
+                        ? "Иди прямо в первый тоннель от жилого зала. Там ищи вымогателя. Ящик красный."
+                        : "Прямо и сразу направо. Потом дверь с белой полосой. Ящик красный.";
                 yield return Line(directions);
                 yield return Line("Хотя сейчас весь в грязи. Но ручка красная.");
+            }
+
+            if (ReturnsToolsInWorkshop)
+            {
+                yield return Line("Я буду ждать у себя в мастерской. Принеси ящик туда.");
+                yield return Line("От зала с койками сверни в правый тоннель. Мастерская в боковой комнате.");
             }
         }
 

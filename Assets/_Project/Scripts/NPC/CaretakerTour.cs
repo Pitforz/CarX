@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using CarX.Gameplay;
 using UnityEngine;
 using UnityEngine.AI;
@@ -6,11 +7,13 @@ using UnityEngine.AI;
 namespace CarX.NPC
 {
     [DisallowMultipleComponent]
+    [DefaultExecutionOrder(90)]
     [RequireComponent(typeof(NpcDialogue))]
     public sealed class CaretakerTour : MonoBehaviour
     {
-        const float FollowDistance = 4.5f;
-        const float WalkSpeed = 1.6f;
+        internal const int IntroductionQuestion = -1;
+        const float ResumeDistanceMargin = 0.65f;
+        static readonly int MoveSpeed = Animator.StringToHash("MoveSpeed");
         static readonly Color CaretakerColor = new Color32(255, 209, 139, 255);
 
         [System.Serializable]
@@ -29,18 +32,24 @@ namespace CarX.NPC
 
         [SerializeField, Tooltip("Enable walking and gestures after assigning the route in the scene.")]
         bool _animateTour;
+        [SerializeField] RuntimeAnimatorController _tourLocomotion;
+        [SerializeField, Min(0.1f)] float _walkSpeed = 1.6f;
+        [SerializeField, Min(1f)] float _followDistance = 4.5f;
+        [SerializeField, Min(0f)] float _arrivalAudienceDistance;
         [SerializeField] Transform _entry;
         [SerializeField] Transform _fork;
         [SerializeField] Transform _leftTunnel;
-        [SerializeField] Transform _engineer;
+        [SerializeField] Transform _afterToolsWaitingPoint;
         [SerializeField] Transform _leftShoulder;
         [SerializeField] Transform _rightShoulder;
         [SerializeField] AudioClip[] _mainMarkClips;
         [SerializeField] AudioClip[] _mainAlexeyClips;
         [SerializeField] FollowUp[] _followUps;
 
+        readonly HashSet<int> _askedFollowUps = new();
         NavMeshPath _path;
         NavMeshAgent _agent;
+        Animator _tourAnimator;
         AudioSource _voice;
         AudioSource _playerVoice;
         NpcSpeechState _speech;
@@ -49,19 +58,54 @@ namespace CarX.NPC
         Coroutine _tour;
         Transform _pointAt;
         Transform _pointingShoulder;
+        Transform _gestureTarget;
+        PointingArm _leftArm, _rightArm, _pointingArm;
+        Quaternion _upperArmPose, _forearmPose;
+        bool _armPoseApplied;
         bool _walking;
         bool _waitingForPlayer;
         bool _runningTour;
         bool _hasCompletedIntroduction;
+        bool _movedAfterTools;
         float _walkPhase;
+        float _pointWeight;
 
         internal bool IsRunning => _tour != null;
+        internal bool CanStartIntroduction => !_hasCompletedIntroduction;
         internal int FollowUpCount => _hasCompletedIntroduction ? (_followUps?.Length ?? 0) : 0;
+        internal bool HasAvailableQuestion => CanStartIntroduction || _askedFollowUps.Count < FollowUpCount;
+        internal bool CanAskFollowUp(int index) => index >= 0 && index < FollowUpCount && !_askedFollowUps.Contains(index);
         internal string GetFollowUpQuestion(int index) => _followUps[index].Question;
+
+        internal void MoveToAfterToolsPoint()
+        {
+            if (_afterToolsWaitingPoint == null || _movedAfterTools)
+                return;
+
+            _movedAfterTools = true;
+            StopWalking();
+            if (_agent != null)
+                _agent.enabled = false;
+            transform.SetPositionAndRotation(_afterToolsWaitingPoint.position, _afterToolsWaitingPoint.rotation);
+        }
 
         void Awake()
         {
             _speech = NpcSpeechState.GetOrAdd(this);
+
+            if (_animateTour && _tourLocomotion != null)
+            {
+                var animator = GetComponentInChildren<Animator>();
+                if (animator != null && animator.isHuman)
+                {
+                    _tourAnimator = animator;
+                    animator.runtimeAnimatorController = _tourLocomotion;
+                    animator.applyRootMotion = false;
+                    animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+                    _leftArm = new PointingArm(animator, right: false);
+                    _rightArm = new PointingArm(animator, right: true);
+                }
+            }
 
             if (_mainMarkClips == null || _mainMarkClips.Length == 0)
                 return;
@@ -82,7 +126,7 @@ namespace CarX.NPC
 
         internal bool TryStart(Transform player, PlayerStatusHud hud)
         {
-            if (!isActiveAndEnabled || IsRunning)
+            if (!isActiveAndEnabled || IsRunning || !CanStartIntroduction)
                 return false;
 
             if (_mainAlexeyClips != null && _mainAlexeyClips.Length > 0)
@@ -97,7 +141,7 @@ namespace CarX.NPC
 
         internal bool TryStartFollowUp(int index, Transform player, PlayerStatusHud hud)
         {
-            if (!isActiveAndEnabled || IsRunning || index < 0 || index >= FollowUpCount)
+            if (!isActiveAndEnabled || IsRunning || !CanAskFollowUp(index))
                 return false;
 
             var followUp = _followUps[index];
@@ -108,6 +152,7 @@ namespace CarX.NPC
 
             _player = player;
             _hud = hud;
+            _askedFollowUps.Add(index);
             _tour = StartCoroutine(RunFollowUp(followUp));
             return true;
         }
@@ -130,11 +175,14 @@ namespace CarX.NPC
             yield return SpeakCaretaker(3, "Так всё-таки полицейский?");
             yield return SpeakPlayer(3, "Младший офицер полиции.");
             yield return SpeakCaretaker(4, "Большая честь. Чем обязан, офицеру…");
-            yield return SpeakPlayer(4, "Алексею Александровичу.", "Alexey/Mark_FullName");
+            yield return SpeakPlayer(4, "Алексей… Алексей Александрович.", "Alexey/Mark_FullName");
             yield return SpeakCaretaker(5, "Эмигрант?");
             yield return SpeakPlayer(5, "Подростком переехал.");
             yield return SpeakCaretaker(6, "А я Марк. За порядком присматриваю.");
             yield return SpeakPlayer(6, "Можешь рассказать про это место?");
+            bool walksDuringAnswer = _tourAnimator != null && _entry == null && _fork != null;
+            if (walksDuringAnswer)
+                StartWalk(_fork.position);
             yield return SpeakCaretaker(7, "Конечно, живём на двух этажах.");
             yield return SpeakCaretaker(8, "Наверху люди, внизу — кто как устроился.");
 
@@ -145,15 +193,22 @@ namespace CarX.NPC
                 yield return WaitForArrival();
             }
 
-            if (_fork != null)
+            if (_fork != null && !walksDuringAnswer)
                 StartWalk(_fork.position);
             yield return SpeakCaretaker(9, "Вот это наши катакомбы. Не самое лучшее место на земле.");
             yield return SpeakCaretaker(10, "Сырость, вонь, плесень, крысы. Негусто. Но людей тут всегда достаточно.");
             yield return WaitForArrival();
+            if (_arrivalAudienceDistance > 0f && _fork != null &&
+                (transform.position - _fork.position).sqrMagnitude < 1f)
+            {
+                while (_player != null && PlayerDistanceSquared() > _arrivalAudienceDistance * _arrivalAudienceDistance)
+                    yield return null;
+            }
 
-            PointAt(_leftTunnel, _leftShoulder);
+            if (!_movedAfterTools)
+                PointAt(_leftTunnel, right: _tourAnimator != null);
             yield return SpeakCaretaker(11, "Вон там, видишь? Спят. Ха-ха, не лучший мотель они выбрали.");
-            PointAt(null, null);
+            PointAt(null);
             yield return SpeakCaretaker(12, "А вообще не каждый тут такой, кем кажется.");
             yield return SpeakCaretaker(13, "Некоторые сюда попадают против своей воли.");
             yield return SpeakCaretaker(14, "Несправедливое наказание, проиграл суд, банкрот, потерял семью, сгорел дом.");
@@ -167,10 +222,8 @@ namespace CarX.NPC
             yield return SpeakPlayer(9, "А не знаешь, кто мог видеть?");
             yield return SpeakCaretaker(19, "Тут каждый мог его видеть. Поспрашивай, может, что нового узнаешь.");
 
-            PointAt(_engineer, _rightShoulder);
             yield return SpeakCaretaker(20, "Кстати, в наших тоннелях инженер живёт, Дени зовут. Мастер на все руки.");
             yield return SpeakCaretaker(21, "Ты его сразу узнаешь, он в красной куртке будет. Он точно что-то видел.");
-            PointAt(null, null);
             yield return SpeakCaretaker(22, "А ещё, может, починит тебе что-нибудь. Не за бесплатно, конечно.");
             yield return SpeakPlayer(10, "Ага. Спасибо тебе.");
             _hasCompletedIntroduction = true;
@@ -220,7 +273,7 @@ namespace CarX.NPC
 
         void StartWalk(Vector3 destination)
         {
-            if (!_animateTour)
+            if (!_animateTour || _movedAfterTools)
                 return;
 
             if (_agent == null)
@@ -233,10 +286,12 @@ namespace CarX.NPC
 
                 transform.position = start.position;
                 _agent = gameObject.AddComponent<NavMeshAgent>();
-                _agent.speed = WalkSpeed;
+                _agent.speed = _walkSpeed;
                 _agent.radius = 0.32f;
                 _agent.height = 1.8f;
-                _agent.stoppingDistance = 0.15f;
+                if (_tourAnimator != null)
+                    _agent.acceleration = 4f;
+                _agent.stoppingDistance = 0.2f;
                 _agent.updateRotation = false;
                 _path = new NavMeshPath();
             }
@@ -251,12 +306,13 @@ namespace CarX.NPC
                 return;
             }
 
-            _agent.isStopped = false;
+            _agent.isStopped = _tourAnimator != null;
             _walking = true;
         }
 
         void Update()
         {
+            RestoreArmPose();
             if (!IsRunning || Time.deltaTime <= 0f)
                 return;
 
@@ -288,10 +344,16 @@ namespace CarX.NPC
                 }
                 else
                 {
-                    _waitingForPlayer = towardPlayer.sqrMagnitude > FollowDistance * FollowDistance;
-                    _agent.isStopped = _waitingForPlayer;
+                    float followDistance = _waitingForPlayer ? _followDistance - ResumeDistanceMargin : _followDistance;
+                    _waitingForPlayer = PlayerDistanceSquared() > followDistance * followDistance;
                     if (!_waitingForPlayer)
                         facing = _agent.steeringTarget - transform.position;
+
+                    Vector3 horizontalFacing = Vector3.ProjectOnPlane(facing, Vector3.up);
+                    bool turningTowardsRoute = _tourAnimator != null && _agent.isStopped &&
+                        horizontalFacing.sqrMagnitude > 0.01f &&
+                        Vector3.Dot(transform.forward, horizontalFacing.normalized) < 0.75f;
+                    _agent.isStopped = _waitingForPlayer || turningTowardsRoute;
                 }
             }
 
@@ -299,6 +361,13 @@ namespace CarX.NPC
             if (facing.sqrMagnitude > 0.01f)
                 transform.rotation = Quaternion.RotateTowards(transform.rotation,
                     Quaternion.LookRotation(facing), 175f * Time.deltaTime);
+
+            if (_tourAnimator != null)
+            {
+                float speed = _walking && !_waitingForPlayer ? _agent.velocity.magnitude : 0f;
+                _tourAnimator.SetFloat(MoveSpeed, speed, 0.16f, Time.deltaTime);
+                return;
+            }
 
             float swing = 0f;
             if (_walking && !_waitingForPlayer)
@@ -311,10 +380,59 @@ namespace CarX.NPC
             PoseShoulder(_rightShoulder, -swing);
         }
 
-        void PointAt(Transform target, Transform shoulder)
+        float PlayerDistanceSquared()
+        {
+            Vector3 offset = _player.position - transform.position;
+            offset.y = 0f;
+            return offset.sqrMagnitude;
+        }
+
+        void PointAt(Transform target, bool right = false)
         {
             _pointAt = target;
-            _pointingShoulder = shoulder;
+            _pointingShoulder = right ? _rightShoulder : _leftShoulder;
+            if (_tourAnimator == null || target == null)
+                return;
+
+            RestoreArmPose();
+            _pointingArm = right ? _rightArm : _leftArm;
+            _gestureTarget = target;
+            _pointWeight = 0f;
+        }
+
+        void LateUpdate()
+        {
+            if (_gestureTarget == null || !_pointingArm.IsValid)
+                return;
+
+            bool pointing = _pointAt != null;
+            _pointWeight = Mathf.MoveTowards(_pointWeight, pointing ? 1f : 0f,
+                Time.deltaTime / (pointing ? 0.32f : 0.28f));
+            if (_pointWeight <= 0f)
+                return;
+
+            var arm = _pointingArm;
+            _upperArmPose = arm.Upper.localRotation;
+            _forearmPose = arm.Forearm.localRotation;
+            _armPoseApplied = true;
+
+            Vector3 shoulder = arm.Upper.position;
+            float reach = Vector3.Distance(shoulder, arm.Forearm.position) +
+                Vector3.Distance(arm.Forearm.position, arm.Hand.position);
+            Vector3 direction = (_gestureTarget.position - shoulder).normalized;
+            Vector3 elbowBend = -transform.up + transform.right * (arm.Right ? 0.45f : -0.45f);
+            HumanoidLimbPose.Reach(arm.Upper, arm.Forearm, arm.Hand, shoulder + direction * (reach * 0.94f),
+                elbowBend, Mathf.SmoothStep(0f, 1f, _pointWeight));
+        }
+
+        void RestoreArmPose()
+        {
+            if (!_armPoseApplied)
+                return;
+
+            _pointingArm.Upper.localRotation = _upperArmPose;
+            _pointingArm.Forearm.localRotation = _forearmPose;
+            _armPoseApplied = false;
         }
 
         void PoseShoulder(Transform shoulder, float swing)
@@ -373,7 +491,9 @@ namespace CarX.NPC
             if (_speech != null)
                 _speech.SetTalking(false);
             StopWalking();
-            PointAt(null, null);
+            PointAt(null);
+            if (_tourAnimator != null)
+                _tourAnimator.SetFloat(MoveSpeed, 0f);
             if (_runningTour && _animateTour)
             {
                 if (_leftShoulder != null)
@@ -388,12 +508,33 @@ namespace CarX.NPC
             _player = null;
         }
 
-        void OnDisable() => Cancel();
+        void OnDisable()
+        {
+            Cancel();
+            RestoreArmPose();
+            _gestureTarget = null;
+            _pointWeight = 0f;
+        }
 
         void OnDestroy()
         {
             if (_playerVoice != null)
                 Destroy(_playerVoice.gameObject);
+        }
+
+        readonly struct PointingArm
+        {
+            internal readonly Transform Upper, Forearm, Hand;
+            internal readonly bool Right;
+            internal bool IsValid => Upper != null && Forearm != null && Hand != null;
+
+            internal PointingArm(Animator animator, bool right)
+            {
+                Right = right;
+                Upper = animator.GetBoneTransform(right ? HumanBodyBones.RightUpperArm : HumanBodyBones.LeftUpperArm);
+                Forearm = animator.GetBoneTransform(right ? HumanBodyBones.RightLowerArm : HumanBodyBones.LeftLowerArm);
+                Hand = animator.GetBoneTransform(right ? HumanBodyBones.RightHand : HumanBodyBones.LeftHand);
+            }
         }
     }
 }
