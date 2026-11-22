@@ -10,8 +10,10 @@ namespace CarX.NPC
     {
         enum Stage { WaitingForPlayer, Introduction, WaitingForThreat, Surrender, Finished }
 
-        const float TalkDistance = 4f;
+        const float IntroductionDistance = 6f;
+        const float IntimidationDistance = 4f;
         const float ClueDistance = 2.5f;
+        const float ClueReminderDistance = 7.5f;
         static readonly Color ExtortionistColor = new Color32(226, 174, 131, 255);
 
         [SerializeField] DeniDialogue _questGiver;
@@ -84,12 +86,13 @@ namespace CarX.NPC
             if (_stage == Stage.WaitingForPlayer)
             {
                 if (_questGiver == null || !_questGiver.HasQuest || _questGiver.QuestCompleted ||
-                    !CanSeeNpcWithin(TalkDistance))
+                    !_pistol.IsLookingAt(transform, IntroductionDistance))
                     return;
                 _stage = Stage.Introduction;
+                _questGiver.MoveToWorkshop();
                 _conversation = StartCoroutine(Introduce());
             }
-            else if (_stage == Stage.WaitingForThreat && _pistol.IsAimingAt(transform, TalkDistance))
+            else if (_stage == Stage.WaitingForThreat && _pistol.IsAimingAt(transform, IntimidationDistance))
             {
                 _stage = Stage.Surrender;
                 _actor?.Surrender();
@@ -97,7 +100,7 @@ namespace CarX.NPC
                 _conversation = StartCoroutine(Surrender());
             }
             else if (_stage == Stage.Finished && !_clueTaken && !_clueReminderShown &&
-                (_menus.transform.position - transform.position).sqrMagnitude > TalkDistance * TalkDistance)
+                (_menus.transform.position - transform.position).sqrMagnitude >= ClueReminderDistance * ClueReminderDistance)
             {
                 _conversation = StartCoroutine(RemindAboutClue());
             }
@@ -109,8 +112,6 @@ namespace CarX.NPC
             _clueReminderShown = true;
             FinishConversation();
         }
-
-        bool CanSeeNpcWithin(float range) => _pistol.IsLookingAt(transform, range);
 
         IEnumerator Introduce()
         {

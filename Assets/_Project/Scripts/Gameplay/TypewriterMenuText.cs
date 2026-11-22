@@ -10,6 +10,8 @@ namespace CarX.Gameplay
         readonly Font _regularFont;
         readonly Font _boldFont;
 
+        internal TypewriterMenuText(Font font) => _regularFont = _boldFont = font;
+
         internal TypewriterMenuText()
         {
             if (System.Array.IndexOf(Font.GetOSInstalledFontNames(), "Courier New") >= 0)

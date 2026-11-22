@@ -17,6 +17,10 @@ namespace CarX.Gameplay
         const float DamageBarsDuration = 7f;
         static readonly Vector2 StatusSize = new(200f, 82f);
 
+        [SerializeField] Font _subtitleFont;
+        [SerializeField] Font _questFont;
+
+        Font _defaultFont;
         PlayerHealth _health;
         readonly List<NPC.HostileNpc> _hostiles = new();
         PlayerStatusZone[] _statusZones;
@@ -54,6 +58,7 @@ namespace CarX.Gameplay
         int _displayedReserve = -1;
 
         internal RectTransform HudRect => _hudRect;
+        internal Font QuestFont => _questFont;
         float SubtitleTime => _menus != null ? _menus.UnpausedTime : Time.unscaledTime;
 
         internal void RegisterHostile(NPC.HostileNpc hostile) => _hostiles.Add(hostile);
@@ -104,7 +109,7 @@ namespace CarX.Gameplay
             layout.childForceExpandHeight = false;
             layout.childForceExpandWidth = true;
 
-            var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            var font = _defaultFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             CreateBleedingPanel(panel, font);
             _healthLabel = CreateLabel(bars, "Health Label", font);
             _healthBar = CreateBar(bars, "Health", new Color32(225, 83, 82, 255));
@@ -147,7 +152,8 @@ namespace CarX.Gameplay
             _pickupLabel.rectTransform.sizeDelta = new Vector2(280f, 52f);
             _pickupLabel.gameObject.SetActive(false);
 
-            _subtitleLabel = CreateLabel(_hudRect, "Player Subtitle", font);
+            var subtitleFont = _subtitleFont != null ? _subtitleFont : font;
+            _subtitleLabel = CreateLabel(_hudRect, "Player Subtitle", subtitleFont);
             _subtitleLabel.fontSize = 20;
             _subtitleLabel.alignment = TextAnchor.MiddleCenter;
             var subtitleRect = _subtitleLabel.rectTransform;
@@ -158,7 +164,7 @@ namespace CarX.Gameplay
             subtitleRect.sizeDelta = new Vector2(0f, 52f);
             _subtitleLabel.gameObject.SetActive(false);
 
-            _storySubtitle = CreateLabel(_hudRect, "Story Subtitle", font);
+            _storySubtitle = CreateLabel(_hudRect, "Story Subtitle", subtitleFont);
             _storySubtitle.fontSize = 23;
             _storySubtitle.alignment = TextAnchor.LowerCenter;
             var storyRect = _storySubtitle.rectTransform;
@@ -334,11 +340,12 @@ namespace CarX.Gameplay
             _storySubtitle.gameObject.SetActive(!string.IsNullOrEmpty(text));
         }
 
-        internal void ShowPickupHint(string text)
+        internal void ShowPickupHint(string text, bool questItem = false)
         {
             if (_pickupLabel == null)
                 return;
 
+            _pickupLabel.font = questItem && _questFont != null ? _questFont : _defaultFont;
             _pickupLabel.text = text;
             _pickupLabel.gameObject.SetActive(!string.IsNullOrEmpty(text));
             RefreshAimDot();
@@ -347,7 +354,7 @@ namespace CarX.Gameplay
         void RefreshAimDot()
         {
             if (_aimDot != null)
-                _aimDot.gameObject.SetActive(!_inventoryOpen && (_aiming || _pickupLabel.gameObject.activeSelf));
+                _aimDot.gameObject.SetActive(!_inventoryOpen && !_aiming && _pickupLabel.gameObject.activeSelf);
         }
 
         void Refresh(int health)

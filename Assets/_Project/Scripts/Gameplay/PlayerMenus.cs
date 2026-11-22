@@ -20,18 +20,23 @@ namespace CarX.Gameplay
         const string QuestTitle = "Задание №1";
         const string QuestDescription = "тест";
         const string DeniQuestTitle = "Вернуть Дени инструменты из мастерской";
+        const string FindKeyObjective = "Найти ключ от нижнего этажа";
+        const string FindKeyHint = "Расспроси местных, где можно достать ключ.";
         const string MouseSensitivityPref = "CarX.MouseSensitivityPercent";
         const string MasterVolumePref = "CarX.MasterVolumePercent";
         const int DefaultSensitivity = 100;
         const int MinSensitivity = 25;
         const int MaxSensitivity = 200;
         const int DefaultMasterVolume = 60;
-        const float DialogueOptionSpacing = 59f;
+        const float FullDialogueDistance = 3f;
+        const float DialoguePreviewDistance = 5.5f;
+        const float DeniReturnGreetingDistance = 6f;
+        const float DeniKeyPickupDistance = 1.4f;
         const float SlowTimeScale = 0.02f;
         const float SlowTimePhysicsStepScale = 0.1f;
-        static readonly Vector2 PanelSize = new(400f, 330f);
 
         enum Menu { None, Pause, Settings, Quests, Dying, Death, Dialogue, Clue, SlowTime }
+        enum DeniQuestion { Talk, ContinueReturn, AskAboutKey, CheckFlashlight }
 
         [SerializeField] Material _clueBlur;
 
@@ -59,14 +64,15 @@ namespace CarX.Gameplay
         SettingsMenuView _settingsMenu;
         QuestJournalView _questJournal;
         RectTransform _deathPanel;
-        RectTransform _dialoguePanel;
+        NpcQuestionsView _questionsView;
         UnityEngine.UI.Text _talkHint;
         UnityEngine.UI.Text _skipDialogueHint;
-        UnityEngine.UI.Text _dialogueTitle;
-        readonly List<UnityEngine.UI.Text> _dialogueOptionLabels = new();
-        int _dialogueOptionCount;
+        readonly List<string> _questions = new();
+        readonly List<int> _caretakerQuestionIds = new();
+        readonly List<DeniQuestion> _deniQuestions = new();
         NpcDialogue _nearbyNpc;
         NpcDialogue _dialogueNpc;
+        NpcDialogue _dismissedDialogueNpc;
         NpcDialogue _answeringNpc;
         CaretakerTour _activeTour;
         DeniDialogue _activeDeniDialogue;
@@ -79,6 +85,7 @@ namespace CarX.Gameplay
         UnityEngine.UI.Text _trackedQuest;
         bool _questTracked;
         bool _trackingDeniQuest;
+        bool _hasLowerFloorHint;
         bool _restartingScene;
         Menu _menu;
         float _pauseStartedAt;
@@ -90,6 +97,7 @@ namespace CarX.Gameplay
         bool _previousCursorVisible;
         bool _previousInputCursorLock;
         int _closedFrame = -1;
+        float _nextDialogueScrollAt;
 
         internal bool BlocksGameplayInput => _encounterInputLocked || _openingClue ||
             _menu != Menu.None || _closedFrame == Time.frameCount;
@@ -97,6 +105,8 @@ namespace CarX.Gameplay
         internal bool IsPaused => IsPauseMenu(_menu);
         internal float UnpausedTime => (IsPaused ? _pauseStartedAt : Time.unscaledTime) - _totalPausedTime;
         internal bool HasTalkTarget => _nearbyNpc != null || _clueInView;
+        bool HasTrackedQuest => _questTracked && (!_trackingDeniQuest || (_deniQuest != null && !_deniQuest.QuestCompleted));
+        bool HasKeyObjective => _hasLowerFloorHint && _inventory != null && !_inventory.HasLowerFloorKey;
         internal bool IsNpcSpeaking => (_activeTour != null && _activeTour.IsRunning) ||
             (_activeDeniDialogue != null && _activeDeniDialogue.IsSpeaking) ||
             (_answeringNpc != null && _answeringNpc.IsAnswering) ||
@@ -141,7 +151,7 @@ namespace CarX.Gameplay
 
             _activeTour?.Cancel();
             _activeDeniDialogue?.Cancel();
-            _answeringNpc?.SkipAnswer();
+            _answeringNpc?.CancelAnswer();
             _workshop?.CancelConversation();
 
             if (_deathFall == null || !_deathFall.isActiveAndEnabled)
@@ -245,9 +255,12 @@ namespace CarX.Gameplay
             if (_menu == Menu.Dialogue)
             {
                 if (escape || skipDialogue || _dialogueNpc == null || !_dialogueNpc.CanTalk)
+                {
+                    _dismissedDialogueNpc = _dialogueNpc;
                     SetMenu(Menu.None);
+                }
                 else
-                    UpdateDialogueSelection();
+                    UpdateDialogueSelection(interact);
                 return;
             }
 
@@ -266,7 +279,7 @@ namespace CarX.Gameplay
                 if (skipDialogue && SkipActiveDialogue())
                     return;
 
-                if (!HandleDeniReturn(interact, skipDialogue))
+                if (!HandleDeniQuestInteraction(interact, skipDialogue))
                     UpdateTalkTarget(interact);
             }
         }
@@ -285,10 +298,13 @@ namespace CarX.Gameplay
             return true;
         }
 
-        bool HandleDeniReturn(bool interact, bool skipDialogue)
+        bool HandleDeniQuestInteraction(bool interact, bool skipDialogue)
         {
-            if (!CanStartNpcConversation || _deniQuest == null || !_deniQuest.CanReturnTools(_inventory) ||
-                _pistol == null || _pistol.ViewCamera == null)
+            if (!CanStartNpcConversation || _deniQuest == null || _pistol == null || _pistol.ViewCamera == null)
+                return false;
+
+            bool keyReady = _deniQuest.KeyReady;
+            if (!keyReady && !_deniQuest.CanReturnTools(_inventory))
                 return false;
 
             var npc = _deniQuest.GetComponent<NpcDialogue>();
@@ -297,8 +313,12 @@ namespace CarX.Gameplay
                 npc.gameObject.scene != gameObject.scene)
                 return false;
 
+            bool needsGreeting = !keyReady && !_deniQuest.HasGreetedForTools;
+            float range = keyReady ? DeniKeyPickupDistance : needsGreeting
+                ? Mathf.Max(DeniReturnGreetingDistance, npc.InteractionDistance)
+                : npc.InteractionDistance;
             Vector3 center = transform.position + Vector3.up * 0.9f;
-            if ((collider.ClosestPoint(center) - center).sqrMagnitude > npc.InteractionDistance * npc.InteractionDistance)
+            if ((collider.ClosestPoint(center) - center).sqrMagnitude > range * range)
                 return false;
 
             Vector3 origin = _pistol.ViewCamera.transform.position;
@@ -311,7 +331,26 @@ namespace CarX.Gameplay
                     return false;
             }
 
-            if (!_deniQuest.HasGreetedForTools)
+            if (keyReady)
+            {
+                if (interact && _deniQuest.TryTakeKey(_hud, _inventory))
+                {
+                    _activeDeniDialogue = _deniQuest;
+                    _closedFrame = Time.frameCount;
+                    HideTalkHint();
+                    RefreshQuestDisplay();
+                }
+                else
+                {
+                    _nearbyNpc = npc;
+                    _clueInView = false;
+                    HideDialogueQuestions(immediate: true);
+                    ShowTalkHint("E — забрать ключ");
+                }
+                return true;
+            }
+
+            if (needsGreeting)
             {
                 _activeDeniDialogue = _deniQuest;
                 _deniQuest.GreetForTools(_hud);
@@ -330,6 +369,7 @@ namespace CarX.Gameplay
 
             _nearbyNpc = npc;
             _clueInView = false;
+            HideDialogueQuestions();
             string action = _deniQuest.ToolsReturned ? "E — продолжить разговор" : "E — отдать ящик";
             ShowTalkHint(_deniQuest.HasReturnDialogueRemaining ? action + "\nM — пропустить диалог" : action);
             return true;
@@ -347,35 +387,68 @@ namespace CarX.Gameplay
             return true;
         }
 
+        internal bool TryStartNpcIntroduction(NpcDialogue npc)
+        {
+            Camera camera = _pistol != null ? _pistol.ViewCamera : null;
+            if (!CanStartNpcConversation || camera == null)
+                return false;
+
+            Vector3 origin = camera.transform.position;
+            Vector3 offset = npc.transform.position + Vector3.up * 1.45f - origin;
+            int layers = Physics.DefaultRaycastLayers & ~(1 << gameObject.layer);
+            if (Physics.Raycast(origin, offset.normalized, out var hit, offset.magnitude, layers,
+                QueryTriggerInteraction.Ignore) && !hit.transform.IsChildOf(npc.transform))
+                return false;
+            if (!npc.TryIntroduce(_hud))
+                return false;
+
+            _answeringNpc = npc;
+            HideTalkHint();
+            HideDialogueQuestions(immediate: true);
+            return true;
+        }
+
         void UpdateTalkTarget(bool interact)
         {
             bool canInteract = CanStartNpcConversation;
-            var npc = canInteract ? FindLookedAtNpc() : null;
+            float proximity = 0f;
+            var npc = canInteract ? FindLookedAtNpc(out proximity) : null;
+            if (canInteract && npc != _dismissedDialogueNpc)
+                _dismissedDialogueNpc = null;
+
+            var deni = npc != null ? npc.GetComponent<DeniDialogue>() : null;
+            bool keyReady = deni != null && deni.KeyReady;
+            bool carryingToolsForDeni = deni != null && deni.IsCarryingQuestTools(_inventory);
             _clueInView = canInteract && _workshop != null && _workshop.CanTakeClue();
-            _nearbyNpc = npc;
+            _nearbyNpc = keyReady ? null : npc;
+            ShowTalkHint(_clueInView ? "E — подобрать улику" : null);
 
-            ShowTalkHint(!HasTalkTarget ? null : _clueInView ? "E — подобрать улику" : "E — поговорить");
-
-            if (interact && _clueInView)
+            if (_clueInView || npc == null || keyReady || carryingToolsForDeni)
             {
-                _workshop.TakeClue();
+                HideDialogueQuestions(immediate: !canInteract || _clueInView || keyReady || carryingToolsForDeni);
+                if (interact && _clueInView)
+                    _workshop.TakeClue();
                 return;
             }
 
-            if (!interact || npc == null)
+            if (npc == _dismissedDialogueNpc && !interact)
                 return;
 
+            _dismissedDialogueNpc = null;
+            bool changedTarget = _dialogueNpc != npc;
             _dialogueNpc = npc;
-            SetMenu(Menu.Dialogue);
-            ConfigureDialogue(npc);
-            UpdateLayout();
+            ConfigureDialogue(npc, deni, proximity, changedTarget);
+            if (interact)
+                SetMenu(Menu.Dialogue);
+            else
+                UpdateDialogueSelection(confirm: false);
         }
 
         void ShowTalkHint(string text)
         {
             if (text != null && _talkHint == null)
             {
-                Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                Font font = _hud.QuestFont ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                 _talkHint = MakeText(_hud.HudRect, font, "Talk Hint", "", 18,
                     new Vector2(0f, -56f), new Vector2(280f, 52f));
             }
@@ -388,79 +461,73 @@ namespace CarX.Gameplay
                 _talkHint.gameObject.SetActive(text != null);
         }
 
-        void ConfigureDialogue(NpcDialogue npc)
+        void ConfigureDialogue(NpcDialogue npc, DeniDialogue deni, float proximity, bool changedTarget)
         {
-            _dialogueTitle.text = npc.DisplayName;
-            var tour = npc.GetComponent<CaretakerTour>();
-            var deni = npc.GetComponent<DeniDialogue>();
-            int followUpCount = tour != null ? tour.FollowUpCount : 0;
-            int lastQuestion = 2 + followUpCount;
-            bool offerRepair = deni != null && deni.QuestCompleted && _health.CanRepairFlashlight;
+            _questions.Clear();
+            _caretakerQuestionIds.Clear();
+            _deniQuestions.Clear();
             if (deni != null)
             {
-                bool hasQuestion = !deni.ToolsReturned || deni.HasReturnDialogueRemaining ||
-                    deni.CanAskAboutKey || offerRepair;
-                _dialogueOptionCount = hasQuestion ? 2 : 1;
-            }
-            else if (tour != null)
-                _dialogueOptionCount = lastQuestion;
-            else
-                _dialogueOptionCount = lastQuestion + (string.IsNullOrEmpty(npc.CloseOption) ? 0 : 1);
-            float extraHeight = Mathf.Max(0, _dialogueOptionCount - 3) * DialogueOptionSpacing;
-            float lift = extraHeight * 0.5f;
-            float buttonWidth = followUpCount > 0 ? 390f : 280f;
-            _dialoguePanel.sizeDelta = new Vector2(followUpCount > 0 ? 450f : PanelSize.x, PanelSize.y + extraHeight);
-            _dialogueTitle.rectTransform.anchoredPosition = new Vector2(0f, 117f + lift);
-
-            while (_dialogueOptionLabels.Count < _dialogueOptionCount)
-            {
-                int option = _dialogueOptionLabels.Count + 1;
-                _dialogueOptionLabels.Add(MakeButton(_dialoguePanel, _dialogueTitle.font, $"Option {option}", 0f,
-                    () => SelectDialogueOption(option)));
-            }
-
-            for (int i = 0; i < _dialogueOptionLabels.Count; i++)
-            {
-                var label = _dialogueOptionLabels[i];
-                var button = (RectTransform)label.transform.parent;
-                int option = i + 1;
-                bool visible = option <= _dialogueOptionCount;
-                button.gameObject.SetActive(visible);
-                if (!visible)
-                    continue;
-
-                string text;
-                if (deni != null)
+                if (!deni.ToolsReturned)
                 {
-                    if (option == _dialogueOptionCount)
-                        text = "Уйти";
-                    else if (deni.CanAskAboutKey)
-                        text = "Спросить про ключ";
-                    else if (offerRepair)
-                        text = "Проверишь свет?";
-                    else if (deni.ToolsReturned)
-                        text = "Продолжить разговор";
-                    else if (deni.HasQuest)
-                        text = deni.CanReturnTools(_inventory) ? "Отдать ящик" : "Где мастерская?";
-                    else
-                        text = npc.FirstQuestion;
+                    string question = deni.IsWaitingInWorkshop ? "Я ещё ищу ящик" : "Где мастерская?";
+                    AddDeniQuestion(DeniQuestion.Talk, deni.HasQuest ? question : npc.FirstQuestion);
                 }
-                else if (option == 1)
-                    text = npc.FirstQuestion;
-                else if (tour != null)
-                    text = option < lastQuestion ? tour.GetFollowUpQuestion(option - 2) : "Уйти";
+                else if (deni.HasReturnDialogueRemaining)
+                    AddDeniQuestion(DeniQuestion.ContinueReturn, "Продолжить разговор");
                 else
-                    text = option == lastQuestion ? npc.SecondQuestion : npc.CloseOption;
-
-                button.anchoredPosition = new Vector2(0f, 54f + lift - i * DialogueOptionSpacing);
-                button.sizeDelta = new Vector2(buttonWidth, 46f);
-                label.rectTransform.sizeDelta = new Vector2(buttonWidth - 12f, 46f);
-                label.text = $"{option}. {text}";
+                {
+                    if (deni.CanAskAboutKey(_hasLowerFloorHint))
+                        AddDeniQuestion(DeniQuestion.AskAboutKey, "Спросить про ключ");
+                    if (deni.CanCheckFlashlight(_health))
+                        AddDeniQuestion(DeniQuestion.CheckFlashlight, "Проверишь свет?");
+                }
+                _questions.Add("Уйти");
             }
+            else
+            {
+                var tour = npc.GetComponent<CaretakerTour>();
+                if (tour != null)
+                {
+                    if (tour.CanStartIntroduction)
+                    {
+                        _questions.Add(npc.FirstQuestion);
+                        _caretakerQuestionIds.Add(CaretakerTour.IntroductionQuestion);
+                    }
+                    for (int i = 0; i < tour.FollowUpCount; i++)
+                    {
+                        if (!tour.CanAskFollowUp(i))
+                            continue;
+                        _questions.Add(tour.GetFollowUpQuestion(i));
+                        _caretakerQuestionIds.Add(i);
+                    }
+                    _questions.Add("Уйти");
+                }
+                else
+                {
+                    _questions.Add(npc.FirstQuestion);
+                    if (!npc.HasAutomaticIntroduction)
+                        _questions.Add(npc.SecondQuestion);
+                    if (!string.IsNullOrEmpty(npc.CloseOption))
+                        _questions.Add(npc.CloseOption);
+                }
+            }
+
+            if (_overlay == null)
+                BuildMenus();
+            _questionsView ??= new NpcQuestionsView(_hud.HudRect, SelectDialogueOption, _hud.QuestFont);
+            _questionsView.Show(npc.DisplayName, _questions, proximity, changedTarget);
         }
 
-        NpcDialogue FindLookedAtNpc()
+        void AddDeniQuestion(DeniQuestion question, string text)
         {
+            _deniQuestions.Add(question);
+            _questions.Add(text);
+        }
+
+        NpcDialogue FindLookedAtNpc(out float proximity)
+        {
+            proximity = 0f;
             Camera camera = _pistol != null ? _pistol.ViewCamera : null;
             if (camera == null)
                 return null;
@@ -471,27 +538,41 @@ namespace CarX.Gameplay
                 return null;
 
             var npc = hit.collider.GetComponentInParent<NpcDialogue>();
-            if (npc == null || npc.gameObject.scene != gameObject.scene || !npc.CanTalk)
+            if (npc == null || npc.gameObject.scene != gameObject.scene || !npc.CanTalk || !npc.ShowsQuestions)
+                return null;
+            if (npc.TryGetComponent<CaretakerTour>(out var tour) && !tour.HasAvailableQuestion)
                 return null;
 
-            Vector3 playerCenter = transform.position + Vector3.up * 0.9f;
-            return (hit.point - playerCenter).sqrMagnitude <= npc.InteractionDistance * npc.InteractionDistance
-                ? npc : null;
+            float distance = Vector3.Distance(transform.position, npc.transform.position);
+            float previewDistance = Mathf.Max(DialoguePreviewDistance, npc.InteractionDistance);
+            if (distance > previewDistance)
+                return null;
+
+            proximity = Mathf.InverseLerp(previewDistance, FullDialogueDistance, distance);
+            return npc;
         }
 
-        void UpdateDialogueSelection()
+        void UpdateDialogueSelection(bool confirm)
         {
 #if ENABLE_INPUT_SYSTEM
             var keyboard = Keyboard.current;
-            if (keyboard == null)
-                return;
+            bool up = keyboard?.upArrowKey.wasPressedThisFrame == true;
+            bool down = keyboard?.downArrowKey.wasPressedThisFrame == true;
+            confirm |= keyboard?.enterKey.wasPressedThisFrame == true ||
+                keyboard?.numpadEnterKey.wasPressedThisFrame == true;
+            float wheel = Mouse.current?.scroll.ReadValue().y ?? 0f;
+#else
+            bool up = Input.GetKeyDown(KeyCode.UpArrow);
+            bool down = Input.GetKeyDown(KeyCode.DownArrow);
+            confirm |= Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter);
+            float wheel = Input.mouseScrollDelta.y;
 #endif
-            int shortcutCount = Mathf.Min(_dialogueOptionCount, 9);
+            int shortcutCount = _menu == Menu.Dialogue ? Mathf.Min(_questions.Count, 9) : 0;
             for (int i = 0; i < shortcutCount; i++)
             {
 #if ENABLE_INPUT_SYSTEM
-                bool pressed = keyboard[(Key)((int)Key.Digit1 + i)].wasPressedThisFrame ||
-                    keyboard[(Key)((int)Key.Numpad1 + i)].wasPressedThisFrame;
+                bool pressed = keyboard != null && (keyboard[(Key)((int)Key.Digit1 + i)].wasPressedThisFrame ||
+                    keyboard[(Key)((int)Key.Numpad1 + i)].wasPressedThisFrame);
 #else
                 bool pressed = Input.GetKeyDown((KeyCode)((int)KeyCode.Alpha1 + i)) ||
                     Input.GetKeyDown((KeyCode)((int)KeyCode.Keypad1 + i));
@@ -502,57 +583,96 @@ namespace CarX.Gameplay
                     return;
                 }
             }
+
+            int direction = up ? -1 : down ? 1 : 0;
+            if (direction == 0 && wheel != 0f && Time.unscaledTime >= _nextDialogueScrollAt)
+            {
+                direction = wheel > 0f ? -1 : 1;
+                _nextDialogueScrollAt = Time.unscaledTime + 0.12f;
+            }
+            if (direction != 0)
+                _questionsView.Move(direction);
+
+            if (confirm)
+                SelectDialogueOption(_questionsView.SelectedOption);
         }
 
         void SelectDialogueOption(int option)
         {
-            if (_menu != Menu.Dialogue || _dialogueNpc == null || !_dialogueNpc.CanTalk)
+            bool focused = _menu == Menu.Dialogue;
+            if (_dialogueNpc == null || !_dialogueNpc.CanTalk ||
+                (!focused && (!CanStartNpcConversation || _dialogueNpc != _nearbyNpc)))
                 return;
 
-            if (option < 1 || option > _dialogueOptionCount)
+            if (option < 1 || option > _questions.Count)
                 return;
 
             var npc = _dialogueNpc;
             var tour = npc.GetComponent<CaretakerTour>();
             var deni = npc.GetComponent<DeniDialogue>();
-            SetMenu(Menu.None);
+            bool lastOption = option == _questions.Count;
+            if (focused)
+                SetMenu(Menu.None);
+            else
+            {
+                _closedFrame = Time.frameCount;
+                HideTalkHint();
+            }
+
             if (deni != null)
             {
-                if (option == _dialogueOptionCount)
-                    return;
-                if (deni.CanAskAboutKey)
+                if (lastOption)
                 {
-                    if (deni.TryAskAboutKey(_hud, RefreshQuestDisplay))
-                        _activeDeniDialogue = deni;
-                }
-                else if (deni.QuestCompleted)
-                {
-                    if (deni.TryRepairFlashlight(_hud, _health))
-                        _activeDeniDialogue = deni;
-                }
-                else if (StartDeniReturn(deni))
+                    _dismissedDialogueNpc = npc;
                     return;
-                else if (deni.TryTalk(_hud, () => AcceptDeniQuest(deni)))
-                    _activeDeniDialogue = deni;
+                }
+                switch (_deniQuestions[option - 1])
+                {
+                    case DeniQuestion.AskAboutKey:
+                        if (deni.TryAskAboutKey(_hud, _hasLowerFloorHint, RefreshQuestDisplay))
+                            _activeDeniDialogue = deni;
+                        break;
+                    case DeniQuestion.CheckFlashlight:
+                        if (deni.TryRepairFlashlight(_hud, _health))
+                            _activeDeniDialogue = deni;
+                        break;
+                    case DeniQuestion.ContinueReturn:
+                        if ((npc.transform.position - transform.position).sqrMagnitude <=
+                            npc.InteractionDistance * npc.InteractionDistance)
+                            StartDeniReturn(deni);
+                        break;
+                    case DeniQuestion.Talk:
+                        if (!deni.IsCarryingQuestTools(_inventory) && deni.TryTalk(_hud, () => AcceptDeniQuest(deni)))
+                            _activeDeniDialogue = deni;
+                        break;
+                }
             }
             else if (tour != null)
             {
-                if (option == _dialogueOptionCount)
+                if (lastOption)
+                {
+                    _dismissedDialogueNpc = npc;
                     return;
+                }
 
-                bool started = option == 1
+                int questionId = _caretakerQuestionIds[option - 1];
+                bool started = questionId == CaretakerTour.IntroductionQuestion
                     ? tour.TryStart(transform, _hud)
-                    : tour.TryStartFollowUp(option - 2, transform, _hud);
+                    : tour.TryStartFollowUp(questionId, transform, _hud);
                 if (started)
                     _activeTour = tour;
             }
             else if (npc.HasAnswer)
             {
-                if (option == 1 && npc.TryAnswer(_hud))
+                if (option == 1 && npc.TryAnswer(_hud, npc.GrantsLowerFloorHint ? LearnLowerFloorHint : null))
                     _answeringNpc = npc;
+                else
+                    _dismissedDialogueNpc = npc;
             }
             else if (option <= 2)
                 _hud.ShowSubtitle(option == 1 ? npc.FirstQuestion : npc.SecondQuestion);
+            else
+                _dismissedDialogueNpc = npc;
         }
 
         void LateUpdate()
@@ -566,6 +686,8 @@ namespace CarX.Gameplay
             if (HasTalkTarget && _inventory != null && _inventory.IsOpen)
                 HideTalkHint();
 
+            _questionsView?.UpdateLayout(_hud.HudRect);
+
             if (_skipDialogueHint != null)
                 _skipDialogueHint.gameObject.SetActive(_menu == Menu.None &&
                     (_skipEncounterDialogue != null || IsNpcSpeaking) &&
@@ -575,7 +697,7 @@ namespace CarX.Gameplay
                 return;
 
             _trackedQuest.gameObject.SetActive(_menu != Menu.Dying && _menu != Menu.Death && _menu != Menu.Quests &&
-                _questTracked && (!_trackingDeniQuest || (_deniQuest != null && !_deniQuest.QuestCompleted)) &&
+                (HasTrackedQuest || HasKeyObjective) &&
                 (_inventory == null || !_inventory.IsOpen));
             UpdateLayout();
         }
@@ -744,7 +866,10 @@ namespace CarX.Gameplay
             else if (!willPause && IsPaused)
                 _totalPausedTime += Time.unscaledTime - _pauseStartedAt;
 
-            HideTalkHint();
+            if (menu == Menu.Dialogue)
+                ClearTalkHint();
+            else
+                HideTalkHint();
             bool resumingSlowTime = _slowTimePaused && menu == Menu.SlowTime;
             if (_menu == Menu.SlowTime && menu == Menu.Pause)
             {
@@ -772,9 +897,6 @@ namespace CarX.Gameplay
                 _noteReader?.Close();
                 _onClueDismissed = null;
             }
-            if (menu != Menu.Dialogue)
-                _dialogueNpc = null;
-
             if (_menu == Menu.Settings && _settingsChanged)
             {
                 PlayerPrefs.SetInt(MouseSensitivityPref, _sensitivityPercent);
@@ -811,8 +933,13 @@ namespace CarX.Gameplay
                     MinSensitivity, MaxSensitivity, _sensitivityPercent, _masterVolumePercent,
                     ChangeSensitivity, ChangeMasterVolume, () => SetMenu(Menu.Pause));
             if (menu == Menu.Quests && _questJournal == null)
-                _questJournal = new QuestJournalView(_overlay, _typewriterText ??= new TypewriterMenuText(),
-                    QuestTitle, QuestDescription, TrackQuest, TrackDeniQuest);
+            {
+                var questFont = _hud.QuestFont;
+                var journalText = questFont != null ? new TypewriterMenuText(questFont) :
+                    (_typewriterText ??= new TypewriterMenuText());
+                _questJournal = new QuestJournalView(_overlay, journalText, QuestTitle, QuestDescription,
+                    TrackQuest, TrackDeniQuest);
+            }
             if (menu == Menu.Quests)
                 RefreshQuestDisplay();
 
@@ -862,9 +989,10 @@ namespace CarX.Gameplay
             if (_questJournal != null)
                 _questJournal.Root.gameObject.SetActive(menu == Menu.Quests);
             _deathPanel.gameObject.SetActive(menu == Menu.Death);
-            _dialoguePanel.gameObject.SetActive(menu == Menu.Dialogue);
             _overlay.SetAsLastSibling();
-            _overlay.gameObject.SetActive(menu != Menu.Dying && menu != Menu.SlowTime);
+            _overlay.gameObject.SetActive(menu != Menu.Dying && menu != Menu.SlowTime && menu != Menu.Dialogue);
+            if (menu == Menu.Dialogue)
+                _questionsView.SetFocused(true);
             UpdateLayout();
             if (menu == Menu.Pause)
                 _pauseMenu.FocusContinue();
@@ -890,7 +1018,8 @@ namespace CarX.Gameplay
             }
 
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            _trackedQuest = MakeText(hud, font, "Tracked Quest", $"{QuestTitle}\n{QuestDescription}", 18,
+            var questFont = _hud.QuestFont ?? font;
+            _trackedQuest = MakeText(hud, questFont, "Tracked Quest", $"{QuestTitle}\n{QuestDescription}", 18,
                 Vector2.zero, new Vector2(300f, 84f));
             _trackedQuest.alignment = TextAnchor.UpperRight;
             _trackedQuest.rectTransform.pivot = Vector2.one;
@@ -903,17 +1032,14 @@ namespace CarX.Gameplay
             _overlay.offsetMin = _overlay.offsetMax = Vector2.zero;
 
             _deathPanel = MakePanel(_overlay, "Death Menu", new Color32(30, 33, 35, 255));
-            _deathPanel.sizeDelta = new Vector2(PanelSize.x, 230f);
+            _deathPanel.sizeDelta = new Vector2(400f, 230f);
             var deathTitle = MakeText(_deathPanel, font, "Death Title", "Вы погибли", 32,
                 new Vector2(0f, 70f), new Vector2(320f, 42f));
             deathTitle.color = new Color32(244, 120, 110, 255);
             MakeButton(_deathPanel, font, "Начать заново", 6f, RestartScene);
             MakeButton(_deathPanel, font, "Выйти из игры", -53f, QuitGame);
 
-            _dialoguePanel = MakePanel(_overlay, "NPC Dialogue", new Color32(30, 33, 35, 255));
-            _dialoguePanel.sizeDelta = PanelSize;
-            _dialogueTitle = MakeText(_dialoguePanel, font, "NPC Name", "", 25,
-                new Vector2(0f, 117f), new Vector2(320f, 42f));
+            _overlay.gameObject.SetActive(false);
         }
 
         void EnsureSkipDialogueHint()
@@ -921,7 +1047,7 @@ namespace CarX.Gameplay
             if (_skipDialogueHint != null)
                 return;
 
-            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            Font font = _hud.QuestFont ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             _skipDialogueHint = MakeText(_hud.HudRect, font, "Skip Dialogue Hint", "M — пропустить диалог", 16,
                 new Vector2(0f, 18f), new Vector2(280f, 24f));
             var rect = _skipDialogueHint.rectTransform;
@@ -967,6 +1093,12 @@ namespace CarX.Gameplay
             TrackDeniQuest();
         }
 
+        void LearnLowerFloorHint()
+        {
+            _hasLowerFloorHint = true;
+            RefreshQuestDisplay();
+        }
+
         internal void RegisterWorkshop(WorkshopEncounter workshop) => _workshop = workshop;
 
         internal void TrackWorkshopObjective(DeniDialogue deni)
@@ -991,13 +1123,20 @@ namespace CarX.Gameplay
             bool inWorkshopQuest = _deniQuest != null && _workshop != null && _deniQuest == _workshop.QuestGiver;
             bool returning = _deniQuest != null && _deniQuest.ToolsReturned && !completed;
             bool keyReady = _deniQuest != null && _deniQuest.KeyReady;
+            bool needsHint = _deniQuest != null && _deniQuest.NeedsLowerFloorHint(_hasLowerFloorHint);
+            string keyObjective = needsHint ? "Поговорить с Виктором" : FindKeyObjective;
+            string keyDirections = needsHint ? "Спроси Виктора, как попасть на второй этаж." : FindKeyHint;
+            bool deliverToWorkshop = _deniQuest != null && _deniQuest.ReturnsToolsInWorkshop;
+            string deliveryDirections = deliverToWorkshop
+                ? "Отнеси ящик Дени в мастерскую. От зала с койками сверни в правый тоннель и найди боковую комнату."
+                : "Отнеси ящик Дени.";
             string description = completed ? "Инструменты возвращены Дени. Получен ключ от второго этажа."
-                : keyReady ? "Ключ от второго этажа лежит на полу рядом с Дени. Посмотри на ключ и нажми E."
-                : returning ? "Спроси Дени про ключ от второго этажа."
-                : carrying ? "Отнеси ящик Дени."
+                : keyReady ? "Подойди к Дени и нажми E, чтобы забрать ключ."
+                : returning ? keyDirections
+                : carrying ? deliveryDirections
                 : "Найди красный ящик с инструментами. Ориентир — дверь с белой полосой.";
-            string objective = keyReady ? "Подобрать ключ рядом с Дени" : returning ? "Спросить Дени про ключ" :
-                carrying ? "Вернуть ящик" : "Найти ящик";
+            string objective = keyReady ? "Забрать ключ у Дени" : returning ? keyObjective :
+                carrying ? (deliverToWorkshop ? "Отнести ящик в мастерскую Дени" : "Вернуть ящик") : "Найти ящик";
             if (inWorkshopQuest && !completed && !carrying && !returning)
             {
                 if (_workshop.NeedsIntimidation)
@@ -1012,16 +1151,31 @@ namespace CarX.Gameplay
                 }
                 else
                 {
-                    description = "Найди ящик в первом тоннеле от жилого зала.";
+                    description = string.IsNullOrWhiteSpace(_deniQuest.WorkshopDirections)
+                        ? "Найди ящик в первом тоннеле от жилого зала."
+                        : _deniQuest.WorkshopDirections;
                 }
             }
             _questJournal?.SetQuests(_questTracked && !_trackingDeniQuest, _deniQuest != null,
                 _trackingDeniQuest, completed, DeniQuestTitle, description);
+
+            if (_trackedQuest == null)
+                return;
+
             bool aimingAtExtortionist = inWorkshopQuest && !completed && _workshop.NeedsIntimidation;
-            if (_trackedQuest != null)
-                _trackedQuest.text = _trackingDeniQuest
-                    ? "Инструменты Дени\n" + objective + (aimingAtExtortionist ? "\nУдерживай ПКМ" : "")
-                    : $"{QuestTitle}\n{QuestDescription}";
+            string trackedText = _trackingDeniQuest
+                ? "Инструменты Дени\n" + objective + (aimingAtExtortionist ? "\nУдерживай ПКМ" : "")
+                : $"{QuestTitle}\n{QuestDescription}";
+            if (HasKeyObjective)
+            {
+                string keyText = keyReady ? "Забрать ключ у Дени\nПодойди к нему и нажми E." : $"{FindKeyObjective}\n{FindKeyHint}";
+                bool showOtherObjective = HasTrackedQuest && (!_trackingDeniQuest || !returning);
+                trackedText = showOtherObjective ? $"{keyText}\n\n{trackedText}" : keyText;
+            }
+
+            _trackedQuest.text = trackedText;
+            _trackedQuest.rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical,
+                Mathf.Max(84f, _trackedQuest.preferredHeight));
         }
 
         void UpdateLayout()
@@ -1041,10 +1195,6 @@ namespace CarX.Gameplay
                 _pauseMenu.Fit(min, center, size);
             if (_menu == Menu.Quests)
                 _questJournal.Fit(center, size);
-            _dialoguePanel.anchorMin = _dialoguePanel.anchorMax = center;
-            float dialogueScale = Mathf.Clamp01(Mathf.Min(size.x / (_dialoguePanel.sizeDelta.x + 32f),
-                size.y / (_dialoguePanel.sizeDelta.y + 32f)));
-            _dialoguePanel.localScale = new Vector3(dialogueScale, dialogueScale, 1f);
             _deathPanel.anchorMin = _deathPanel.anchorMax = center;
             float deathScale = Mathf.Clamp01(Mathf.Min(size.x / (_deathPanel.sizeDelta.x + 32f),
                 size.y / (_deathPanel.sizeDelta.y + 32f)));
@@ -1143,7 +1293,7 @@ namespace CarX.Gameplay
                 UnlockEncounterInput();
             _activeTour?.Cancel();
             _activeDeniDialogue?.Cancel();
-            _answeringNpc?.SkipAnswer();
+            _answeringNpc?.CancelAnswer();
             _workshop?.CancelConversation();
             if (_health != null)
                 _health.HealthChanged -= OnHealthChanged;
@@ -1157,6 +1307,7 @@ namespace CarX.Gameplay
 
         void OnDestroy()
         {
+            _questionsView?.Destroy();
             _slowTimeTutorial?.Destroy();
             _typewriterText?.ReleaseFont();
             if (_talkHint != null)
@@ -1170,6 +1321,18 @@ namespace CarX.Gameplay
         }
 
         void HideTalkHint()
+        {
+            ClearTalkHint();
+            HideDialogueQuestions();
+        }
+
+        void HideDialogueQuestions(bool immediate = true)
+        {
+            _dialogueNpc = null;
+            _questionsView?.Hide(immediate);
+        }
+
+        void ClearTalkHint()
         {
             _nearbyNpc = null;
             _clueInView = false;

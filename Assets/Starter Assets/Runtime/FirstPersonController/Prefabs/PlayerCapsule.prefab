@@ -162,6 +162,7 @@ GameObject:
   - component: {fileID: 8616685848737228389}
   - component: {fileID: 8616685848737228390}
   - component: {fileID: 8616685848737228391}
+  - component: {fileID: 8616685848737228392}
   m_Layer: 8
   m_Name: PlayerCapsule
   m_TagString: Player
@@ -197,6 +198,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4603d9d3b0924b5e80d0e73fc1f79066, type: 3}
   m_Name:
   m_EditorClassIdentifier:
+  _subtitleFont: {fileID: 12800000, guid: 0c879047e9eb4d73a95560bef259778c, type: 3}
+  _questFont: {fileID: 12800000, guid: e6647d21cc004530b4d70e7d9e7fa15f, type: 3}
 --- !u!114 &8616685848737228389
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -650,3 +653,25 @@ Light:
   m_LightUnit: 1
   m_LuxAtDistance: 1
   m_EnableSpotReflector: 1
+--- !u!114 &8616685848737228392
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8616685848737228372}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a5bb61d513444300b2f25f56b85dc34c, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::CarX.Gameplay.PlayerFootsteps
+  _clips:
+  - {fileID: 8300000, guid: 0ec12a9dde0c5963b1887e2c1b50243c, type: 3}
+  - {fileID: 8300000, guid: 0d2b3bf524ae5a63920f50453c38a32d, type: 3}
+  - {fileID: 8300000, guid: aade7bf92cd2526096b1bc45c153f8fe, type: 3}
+  - {fileID: 8300000, guid: 30cca2770cbf59b09fa3051841ecf25b, type: 3}
+  - {fileID: 8300000, guid: e2d0f71bb83f5d4d9fca209d7c69ad32, type: 3}
+  - {fileID: 8300000, guid: 6224e41dc6525144ab8429a46d87ae6b, type: 3}
+  - {fileID: 8300000, guid: 22873bdb3aad5585961f9e0dfa4f2bf4, type: 3}
+  - {fileID: 8300000, guid: 91a05a2e526a55e4afb21449c8a58e70, type: 3}
+  _volume: 0.224

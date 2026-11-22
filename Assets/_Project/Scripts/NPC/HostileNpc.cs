@@ -1,4 +1,6 @@
 using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using CarX.Gameplay;
 using StarterAssets;
 using UnityEngine;
@@ -15,6 +17,7 @@ namespace CarX.NPC
         const int KnifeHitDamage = 13;
         const int KnifeBleeding = 2;
         const float UnarmedAttackRange = 1.5f;
+        const float ResidentPunchRange = 1.1f;
         const float KnifeAttackRange = 1.6f;
         const float AttackInterval = 1.2f;
         const float AttackWindup = 0.32f;
@@ -26,6 +29,10 @@ namespace CarX.NPC
         const float SightDistance = 18f;
         const float SightHalfAngle = 55f;
         const float LostSightDelay = 7f;
+        const float TrackInDarknessDuration = 3f;
+        const float AllySupportRadius = 10f;
+        const int AllySupportLimit = 2;
+        const float AllySupportStoppingDistance = 2.6f;
         const float AlertMemoryDuration = 40f;
         const float RepathInterval = 0.18f;
         const float SearchStepLength = 3f;
@@ -42,10 +49,14 @@ namespace CarX.NPC
         [SerializeField] GameObject _combatModel;
         [SerializeField] GameObject _combatPistol;
         [SerializeField] RuntimeAnimatorController _combatLocomotion;
+        [SerializeField] GameObject _residentModel;
+        [SerializeField] GameObject _residentKnifeModel;
+        [SerializeField] bool _provokedByFlashlight;
 
         enum State { Idle, Alerted, Returning, Watching, Dead }
 
         readonly RaycastHit[] _sightHits = new RaycastHit[12];
+        readonly List<HostileNpc> _calledAllies = new(AllySupportLimit);
         NavMeshPath _combatPath;
         State _state;
         BanditPistol _bandit;
@@ -53,6 +64,8 @@ namespace CarX.NPC
         NavMeshAgent _agent;
         PlayerHealth _player;
         PlayerPistol _pistol;
+        Flashlight _playerFlashlight;
+        ResidentModelPose _residentPose;
         PlayerStatusHud _playerHud;
         FirstPersonController _playerMovement;
         CharacterController _playerCollider;
@@ -64,10 +77,14 @@ namespace CarX.NPC
         Vector3 _lastSeenVelocity;
         Vector3 _searchDirection;
         Vector3 _searchProgressPosition;
+        Vector3 _allySupportPoint;
         Quaternion _leftRest;
         Quaternion _rightRest;
         Transform _swingingArm;
         Quaternion _swingRest;
+        bool _provoked;
+        bool _assistingAlly;
+        float _darknessStartedAt = -1f;
         int _health = MaxHealth;
         bool _hasKnife;
         bool _useLeftArm;
@@ -84,7 +101,9 @@ namespace CarX.NPC
         bool _strikeDelivered;
         bool _stagedDamageEnabled;
 
-        float AttackRange => _hasKnife ? KnifeAttackRange : UnarmedAttackRange;
+        float AttackRange => _hasKnife ? KnifeAttackRange : _residentPose != null ? ResidentPunchRange : UnarmedAttackRange;
+        float SwingWindup => _residentPose == null ? AttackWindup : _hasKnife ? 0.43f : 0.39f;
+        float SwingRecovery => _residentPose == null ? AttackRecovery : _hasKnife ? 0.38f : 0.34f;
         internal bool IsEngaged => isActiveAndEnabled && _state != State.Dead &&
             (_bandit != null ? _bandit.IsEngaged : _state == State.Alerted);
         internal bool IsAlive => _state != State.Dead;
@@ -122,6 +141,7 @@ namespace CarX.NPC
                 return;
 
             AttachCombatModel();
+            AttachResidentModel();
             InitializeNavigation();
 
             foreach (var player in FindObjectsByType<PlayerHealth>())
@@ -138,6 +158,8 @@ namespace CarX.NPC
                 if (_playerMovement != null)
                     _playerMovement.AudibleFootstep += HearFootstep;
                 _pistol = player.GetComponent<PlayerPistol>();
+                if (_provokedByFlashlight)
+                    _playerFlashlight = Flashlight.FindForPlayer(player.transform, _pistol?.ViewCamera);
                 if (_pistol != null)
                     _pistol.ShotFired += HearShot;
                 if (_bandit != null)
@@ -208,13 +230,23 @@ namespace CarX.NPC
                 return;
             }
 
+            bool illuminated = _provokedByFlashlight && IsLitByFlashlight();
+            if (_provokedByFlashlight && !TrackFlashlightTarget(illuminated))
+            {
+                if (_assistingAlly)
+                    MoveToAssistAlly();
+                return;
+            }
+
             float distance = Vector3.Distance(transform.position, playerFeet);
             float timeSinceContact = Time.time - _lastContactAt;
             bool remembersPlayer = timeSinceContact < AlertMemoryDuration &&
                 (_state == State.Alerted || _state == State.Returning || _state == State.Watching);
             bool visible = CanSeePlayer(playerCenter, distance);
-            if (visible)
+            bool knowsPlayerPosition = illuminated || visible;
+            if (knowsPlayerPosition)
             {
+                _assistingAlly = false;
                 SetState(State.Alerted);
                 _lastKnownPosition = playerFeet;
                 Vector3 velocity = _playerCollider != null ? _playerCollider.velocity : Vector3.zero;
@@ -222,7 +254,7 @@ namespace CarX.NPC
                 _lastContactAt = Time.time;
                 _hadVisualContact = true;
             }
-            else if (_state == State.Alerted)
+            else if (_state == State.Alerted && !_assistingAlly)
             {
                 if (_hadVisualContact)
                 {
@@ -246,11 +278,15 @@ namespace CarX.NPC
                         if (Time.time >= _nextAttackAt)
                             BeginSwing();
                     }
-                    else if (visible)
+                    else if (knowsPlayerPosition)
                     {
                         MoveTo(_lastKnownPosition, _chaseSpeed, 0.9f);
                         if (!FaceMovement())
                             Face(playerCenter - transform.position);
+                    }
+                    else if (_assistingAlly)
+                    {
+                        MoveToAssistAlly();
                     }
                     else
                     {
@@ -282,6 +318,12 @@ namespace CarX.NPC
 
         void LateUpdate()
         {
+            if (_residentPose != null && _state != State.Dead)
+            {
+                float speed = _agent != null && _agent.isOnNavMesh ? _agent.velocity.magnitude : 0f;
+                _residentPose.PoseMelee(speed, _attacking ? Time.time - _attackStartedAt : -1f,
+                    SwingWindup, SwingRecovery, _useLeftArm, _state == State.Alerted && !_assistingAlly);
+            }
             if (_alertMark == null)
                 return;
 
@@ -326,6 +368,101 @@ namespace CarX.NPC
             return HasClearLine(eye, playerCenter) || HasClearLine(eye, playerCenter + offset) ||
                 HasClearLine(eye, playerCenter - offset);
         }
+
+        bool TrackFlashlightTarget(bool illuminated)
+        {
+            if (!_provoked)
+            {
+                if (!illuminated)
+                    return false;
+                _provoked = true;
+            }
+
+            if (_playerFlashlight != null && _playerFlashlight.isActiveAndEnabled && _playerFlashlight.IsSwitchedOn)
+            {
+                _darknessStartedAt = -1f;
+                return true;
+            }
+
+            if (_darknessStartedAt < 0f)
+                _darknessStartedAt = Time.time;
+            if (Time.time - _darknessStartedAt < TrackInDarknessDuration)
+                return true;
+
+            _provoked = false;
+            _darknessStartedAt = -1f;
+            _hadVisualContact = false;
+            _lastContactAt = float.NegativeInfinity;
+            _lastKnownPosition = Vector3.zero;
+            _lastSeenVelocity = Vector3.zero;
+            _searchDirection = Vector3.zero;
+            _hasSearchStep = false;
+            _searchingBeyondLastKnown = false;
+            EndSwing();
+            SetState(State.Idle);
+            return false;
+        }
+
+        bool IsLitByFlashlight()
+        {
+            if (_playerFlashlight == null || !_playerFlashlight.isActiveAndEnabled || !_playerFlashlight.IsSwitchedOn)
+                return false;
+
+            Transform lightSource = _playerFlashlight.transform;
+            Vector3 origin = lightSource.position;
+            Vector3 forward = lightSource.forward;
+            float range = _playerFlashlight.WorldLightRange;
+            return IsHitboxLit(_bodyHitbox, origin, forward, range) || IsHitboxLit(_headHitbox, origin, forward, range);
+        }
+
+        bool IsHitboxLit(Collider hitbox, Vector3 origin, Vector3 forward, float range)
+        {
+            if (hitbox == null || !hitbox.enabled)
+                return false;
+
+            Bounds bounds = hitbox.bounds;
+            if ((bounds.ClosestPoint(origin) - origin).sqrMagnitude > range * range)
+                return false;
+
+            if (IsLitPoint(origin, bounds.center))
+                return true;
+
+            // Sample the surface nearest the beam axis across the hitbox's depth for glancing hits.
+            Vector3 absoluteForward = new Vector3(Mathf.Abs(forward.x), Mathf.Abs(forward.y), Mathf.Abs(forward.z));
+            float depth = Vector3.Dot(forward, bounds.center - origin);
+            float halfDepth = Vector3.Dot(absoluteForward, bounds.extents);
+            float start = Mathf.Max(0f, depth - halfDepth);
+            float end = Mathf.Min(range, depth + halfDepth);
+            if (end <= start)
+                return false;
+
+            const int depthIntervals = 4;
+            for (int i = 0; i <= depthIntervals; i++)
+            {
+                Vector3 axisPoint = origin + forward * Mathf.Lerp(start, end, i / (float)depthIntervals);
+                if (IsLitPoint(origin, hitbox.ClosestPoint(axisPoint)))
+                    return true;
+            }
+
+            // The nearest surface can be hidden by cover while another side catches the light.
+            if (hitbox is BoxCollider box)
+            {
+                Vector3 halfSize = box.size * 0.5f;
+                for (int corner = 0; corner < 8; corner++)
+                {
+                    var offset = new Vector3((corner & 1) == 0 ? -halfSize.x : halfSize.x,
+                        (corner & 2) == 0 ? -halfSize.y : halfSize.y,
+                        (corner & 4) == 0 ? -halfSize.z : halfSize.z);
+                    if (IsLitPoint(origin, box.transform.TransformPoint(box.center + offset)))
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        bool IsLitPoint(Vector3 origin, Vector3 point) => _playerFlashlight.IlluminatesPoint(point) &&
+            HasClearLine(origin, point);
 
         internal bool CanSeePlayerPoint(Vector3 eye, Vector3 point, float sightDistance) =>
             IsInSightCone(point - eye, sightDistance) && HasClearLine(eye, point);
@@ -604,6 +741,7 @@ namespace CarX.NPC
         void HearNoise(Vector3 position, float range, bool isShot = false, Vector3 footstepVelocity = default)
         {
             if (!isActiveAndEnabled || _state == State.Dead || _player == null || _player.IsDead ||
+                (_provokedByFlashlight && (!_provoked || _assistingAlly)) ||
                 (transform.position - position).sqrMagnitude > range * range)
                 return;
 
@@ -731,7 +869,9 @@ namespace CarX.NPC
                 return false;
 
             float elapsed = Time.time - _attackStartedAt;
-            if (elapsed >= AttackWindup && !_strikeDelivered)
+            float windup = SwingWindup;
+            float recovery = SwingRecovery;
+            if (elapsed >= windup && !_strikeDelivered)
             {
                 _strikeDelivered = true;
                 if (visible && distance <= AttackRange)
@@ -741,12 +881,9 @@ namespace CarX.NPC
                         _player.AddBleeding(KnifeBleeding);
                 }
             }
-            if (elapsed >= AttackWindup + AttackRecovery)
+            if (elapsed >= windup + recovery)
             {
-                _attacking = false;
-                if (_swingingArm != null)
-                    _swingingArm.localRotation = _swingRest;
-                _swingingArm = null;
+                EndSwing();
                 return false;
             }
 
@@ -756,18 +893,29 @@ namespace CarX.NPC
             {
                 float angle = elapsed < 0.17f
                     ? Mathf.SmoothStep(0f, -32f, elapsed / 0.17f)
-                    : elapsed < AttackWindup
-                        ? Mathf.SmoothStep(-32f, 91f, (elapsed - 0.17f) / (AttackWindup - 0.17f))
-                        : Mathf.SmoothStep(91f, 0f, (elapsed - AttackWindup) / AttackRecovery);
+                    : elapsed < windup
+                        ? Mathf.SmoothStep(-32f, 91f, (elapsed - 0.17f) / (windup - 0.17f))
+                        : Mathf.SmoothStep(91f, 0f, (elapsed - windup) / recovery);
                 _swingingArm.localRotation = _swingRest * Quaternion.Euler(-angle, 0f, 0f);
             }
             return true;
+        }
+
+        void EndSwing()
+        {
+            _attacking = false;
+            if (_swingingArm != null)
+                _swingingArm.localRotation = _swingRest;
+            _swingingArm = null;
         }
 
         internal void TakeShot(RaycastHit hit, int bodyDamage, Vector3 shotOrigin)
         {
             if ((!isActiveAndEnabled && !_stagedDamageEnabled) || _state == State.Dead)
                 return;
+
+            if (_provokedByFlashlight && _player != null && !_player.IsDead)
+                CallNearbyAllies(shotOrigin);
 
             bool headshot = _headHitbox != null && hit.collider == _headHitbox;
             _health = headshot ? 0 : Mathf.Max(0, _health - bodyDamage);
@@ -779,6 +927,67 @@ namespace CarX.NPC
             }
 
             TakeFatalShot();
+        }
+
+        void CallNearbyAllies(Vector3 shotOrigin)
+        {
+            Vector3 position = transform.position;
+            int availableSlots = AllySupportLimit - _calledAllies.Count;
+            if (availableSlots > 0)
+            {
+                var nearbyAllies = FindObjectsByType<HostileNpc>()
+                    .Where(ally => ally != this && ally._provokedByFlashlight && ally.isActiveAndEnabled && ally.IsAlive &&
+                        ally.gameObject.scene == gameObject.scene && !_calledAllies.Contains(ally) &&
+                        !ally._assistingAlly && !(ally._provoked && ally._state == State.Alerted && ally._hadVisualContact))
+                    .Select(ally => (ally, distanceSquared: (ally.transform.position - shotOrigin).sqrMagnitude))
+                    .Where(candidate => candidate.distanceSquared <= AllySupportRadius * AllySupportRadius)
+                    .OrderBy(candidate => candidate.distanceSquared)
+                    .Take(availableSlots);
+
+                foreach (var candidate in nearbyAllies)
+                {
+                    candidate.ally.AssistAllyAt(position);
+                    _calledAllies.Add(candidate.ally);
+                }
+            }
+
+            _provoked = true;
+            _assistingAlly = false;
+            _lastContactAt = Time.time;
+            _lastKnownPosition = _player.transform.position;
+            _hadVisualContact = false;
+            SetState(State.Alerted);
+            BeginSearch(_lastKnownPosition - position);
+        }
+
+        void AssistAllyAt(Vector3 position)
+        {
+            _provoked = true;
+            _assistingAlly = true;
+            _allySupportPoint = position;
+            _lastContactAt = Time.time;
+            StopMoving();
+            SetState(State.Alerted);
+        }
+
+        void MoveToAssistAlly()
+        {
+            bool hasAgent = _agent != null && _agent.isOnNavMesh;
+            bool reachedRouteEnd = hasAgent && !_agent.pathPending && _agent.hasPath &&
+                _agent.remainingDistance <= _agent.stoppingDistance + 0.08f;
+            if (!hasAgent || reachedRouteEnd)
+            {
+                _assistingAlly = false;
+                StopMoving();
+                if (reachedRouteEnd)
+                    Face(_allySupportPoint - transform.position);
+                if (_provoked)
+                    SetState(State.Watching);
+                return;
+            }
+
+            MoveTo(_allySupportPoint, _chaseSpeed, AllySupportStoppingDistance);
+            FaceMovement();
         }
 
         internal void TakeFatalShot()
@@ -874,6 +1083,31 @@ namespace CarX.NPC
             _encounterAnimation = animation;
             _bandit.AttachStagedModel(animation);
             animation.SetWeaponVisible(true);
+        }
+
+        void AttachResidentModel()
+        {
+            if (_residentModel == null || _bandit != null)
+                return;
+
+            Transform knife = _hasKnife ? _rightShoulder.Find("RightArm/KnifePlaceholder") : null;
+            var placeholders = GetComponentsInChildren<Renderer>(true);
+            var model = Instantiate(_residentModel, transform, false);
+            _residentPose = model.AddComponent<ResidentModelPose>();
+            foreach (var placeholder in placeholders)
+                if (knife == null || placeholder.transform != knife)
+                    placeholder.enabled = false;
+            _residentPose.EnableMelee(knife, _residentKnifeModel);
+
+            if (_headHitbox == null)
+            {
+                var head = gameObject.AddComponent<SphereCollider>();
+                head.center = Vector3.up * 1.68f;
+                head.radius = 0.14f;
+                _headHitbox = head;
+                _bodyHitbox.center = Vector3.up * 0.77f;
+                _bodyHitbox.size = new Vector3(0.60f, 1.54f, 0.42f);
+            }
         }
 
         internal void SetStagedWeaponVisible(bool visible) => _bandit.SetStagedWeaponVisible(visible);
