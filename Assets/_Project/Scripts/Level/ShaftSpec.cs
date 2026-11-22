@@ -7,7 +7,8 @@ namespace CarX.Level
     {
         [InspectorName("Длинная ливнёвка поперёк хода")] GrateLong,
         [InspectorName("Квадратная решётка")] GrateSquare,
-        [InspectorName("Люк с лестницей")] Manhole
+        [InspectorName("Люк с лестницей")] Manhole,
+        [InspectorName("Вертикальная решётка в трубе")] PipeGrate
     }
 
     /// <summary>A vertical rise to the surface: storm grate or closed manhole with a ladder.</summary>
@@ -39,7 +40,17 @@ namespace CarX.Level
         [Tooltip("Пылинки в луче (только если включены в TunnelTypes → Shaft Dust)")]
         public bool dust = true;
 
-        public static float DefaultBrightness(ShaftType t) { return t == ShaftType.Manhole ? 14f : t == ShaftType.GrateSquare ? 26f : 30f; }
+        public static float DefaultBrightness(ShaftType t)
+        {
+            switch (t)
+            {
+                case ShaftType.Manhole: return 14f;
+                case ShaftType.GrateSquare: return 26f;
+                case ShaftType.PipeGrate: return 0f;
+                default: return 30f;
+            }
+        }
+        public static bool IsCeilingRise(ShaftType t) { return t != ShaftType.PipeGrate; }
         public ShaftSpec Clone() { return (ShaftSpec)MemberwiseClone(); }
 
         public static ShaftSpec Preset(ShaftType t, float distance)
@@ -50,6 +61,7 @@ namespace CarX.Level
                 case ShaftType.GrateLong: s.width = 2.4f; s.length = 0.55f; s.height = 2.2f; break;
                 case ShaftType.GrateSquare: s.width = 1.1f; s.length = 1.1f; s.height = 2.6f; s.brightness = 26f; break;
                 case ShaftType.Manhole: s.lateral = 10f; s.height = 3.2f; s.brightness = 14f; s.beam = 1f; break;
+                case ShaftType.PipeGrate: s.height = 0.3f; s.length = 0.2f; s.brightness = 0f; s.beam = 0f; s.bounce = 0f; s.dust = false; break;
             }
             return s;
         }

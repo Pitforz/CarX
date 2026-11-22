@@ -394,6 +394,31 @@ namespace CarX.TunnelAudio
                 PlaceChunks(floors, acc, width, height, kind, chain);
                 OfferPeople(floors, acc, width * 0.5f);
             }
+            PlaceBridges();
+        }
+
+        /// <summary>Reads TunnelBridge spans that name this graph as network A. Does not write into either graph.</summary>
+        void PlaceBridges()
+        {
+            var found = Object.FindObjectsByType<TunnelBridge>(FindObjectsInactive.Exclude);
+            var floors = new List<Vector3>();
+            int n = 0;
+            for (int i = 0; i < found.Length; i++)
+            {
+                var bridge = found[i];
+                float width, height;
+                if (bridge == null || !bridge.TryAudioSpan(network, floors, out width, out height)) continue;
+                n++;
+                var acc = new float[floors.Count];
+                for (int k = 0; k < floors.Count; k++)
+                {
+                    Enc(floors[k]);
+                    if (k == 0) continue;
+                    acc[k] = acc[k - 1] + Vector3.Distance(floors[k - 1], floors[k]);
+                }
+                PlaceChunks(floors, acc, width, height, TunnelPipeKind.WetNarrow, 1000 + n);
+                OfferPeople(floors, acc, width * 0.5f);
+            }
         }
 
         static TunnelPipeKind KindFor(int chain)

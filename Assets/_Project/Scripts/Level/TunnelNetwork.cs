@@ -1648,6 +1648,9 @@ namespace CarX.Level
                 bool exitE = capE && !holeE && IsExit(c.nodes[c.nodes.Count - 1]);
                 if (exitS) capS = false;
                 if (exitE) capE = false;
+                // A bridge end is an opening for this build only. The node stays a dead end in the graph YAML.
+                if (c.nodes.Count > 0 && !exitS && !holeS && TunnelBridge.Opens(this, c.nodes[0])) capS = false;
+                if (c.nodes.Count > 0 && !exitE && !holeE && TunnelBridge.Opens(this, c.nodes[c.nodes.Count - 1])) capE = false;
                 if (exitS || exitE) BuildExits(root, keep, c, exitS, exitE, libMats);
                 int sig = unchecked(Signature(c, shafts, capS, capE) * 31 + (exitS ? 13 : 0) + (exitE ? 29 : 0));
                 if (path.drivenSignature == sig && path.drivenSamples.Count == c.samples.Count) continue;

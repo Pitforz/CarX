@@ -93,6 +93,7 @@ namespace CarX.EditorTools
             {
                 case ShaftType.GrateLong: return "Ливнёвка";
                 case ShaftType.GrateSquare: return "Решётка";
+                case ShaftType.PipeGrate: return "Решётка трубы";
                 default: return "Люк";
             }
         }

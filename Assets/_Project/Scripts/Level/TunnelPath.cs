@@ -479,24 +479,29 @@ namespace CarX.Level
             for (int i = 0; i < shafts.Count; i++) shaftCentres.Add(new Vector3(float.NaN, 0, 0));
             if (shafts.Count == 0 || slabs.Count == 0) return res;
             float xMin, xMax, yCeil;
-            if (!section.FlatCeiling(out xMin, out xMax, out yCeil) || prof.ceilingEdge < 0)
-            {
-                warning = "У круглой трубы нет плоского потолка: подъёмы наверх не строятся.";
-                return res;
-            }
+            bool hasCeil = section.FlatCeiling(out xMin, out xMax, out yCeil) && prof.ceilingEdge >= 0;
+            bool skippedCeil = false;
             for (int i = 0; i < shafts.Count; i++)
             {
                 var s = shafts[i];
                 if (s == null) continue;
                 int k = SlabAt(s.distance);
                 if (k < 0) continue;
+                var sl = slabs[k];
+                if (!ShaftSpec.IsCeilingRise(s.type))
+                {
+                    float along = Mathf.Clamp(s.distance - sl.startDistance, 0.05f, Mathf.Max(0.05f, sl.length - 0.05f));
+                    shaftCentres[i] = sl.Point(along, 0f, section.Height * 0.5f);
+                    continue;
+                }
+                if (!hasCeil) { skippedCeil = true; continue; }
                 if (res.ContainsKey(k))
                 {
                     int alt = k + 1 < slabs.Count && !res.ContainsKey(k + 1) ? k + 1 : (k > 0 && !res.ContainsKey(k - 1) ? k - 1 : -1);
                     if (alt < 0) { warning = "Подъём №" + (i + 1) + " пропущен: на этой плите уже есть подъём."; continue; }
                     k = alt;
+                    sl = slabs[k];
                 }
-                var sl = slabs[k];
                 float zLo = sl.tStart + edgeBevel + 0.08f, zHi = sl.length - sl.tEnd - edgeBevel - 0.08f;
                 if (zHi - zLo < 0.25f) { warning = "Подъём №" + (i + 1) + " не влезает в плиту: увеличьте длину плиты."; continue; }
                 float cx;
@@ -505,6 +510,8 @@ namespace CarX.Level
                 res[k] = new Hole { spec = i, op = op, cx = cx, cz = cz };
                 shaftCentres[i] = sl.Point(cz, cx, yCeil);
             }
+            if (skippedCeil && string.IsNullOrEmpty(warning))
+                warning = "У круглой трубы нет плоского потолка: подъёмы наверх не строятся.";
             return res;
         }
 
@@ -1149,6 +1156,33 @@ namespace CarX.Level
                     shaftHashes[h.spec] = hash;
                 }
                 go.transform.localPosition = sl.Point(h.cz, h.cx, 0f);
+                go.transform.localRotation = Quaternion.LookRotation(sl.fwd, sl.up);
+            }
+            for (int i = 0; i < count; i++)
+            {
+                if (used[i]) continue;
+                var spec = shafts[i];
+                if (spec == null || ShaftSpec.IsCeilingRise(spec.type)) continue;
+                int k = SlabAt(spec.distance);
+                if (k < 0) continue;
+                var sl = slabs[k];
+                float along = Mathf.Clamp(spec.distance - sl.startDistance, 0.05f, Mathf.Max(0.05f, sl.length - 0.05f));
+                used[i] = true;
+                int hash;
+                unchecked
+                {
+                    hash = spec.Hash() * 31 + section.Hash();
+                    hash = hash * 31 + (mats != null ? mats.GetHashCode() : 0);
+                }
+                var go = shaftObjects[i];
+                if (go == null || force || shaftHashes[i] != hash)
+                {
+                    if (go != null) Kill(go);
+                    go = TunnelShaftBuilder.BuildPipeGrate(transform, "_Shaft_" + i, Vector3.zero, Quaternion.identity, section, mats);
+                    shaftObjects[i] = go;
+                    shaftHashes[i] = hash;
+                }
+                go.transform.localPosition = sl.Point(along, 0f, 0f);
                 go.transform.localRotation = Quaternion.LookRotation(sl.fwd, sl.up);
             }
             for (int i = 0; i < count; i++)

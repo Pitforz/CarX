@@ -72,7 +72,7 @@ namespace CarX.EditorTools
             "Клик по узлу или линии. Узел двигайте стрелками, Delete удаляет выбранное. Esc снимает выделение.",
             "Клик: новый узел и линия от предыдущего. Клик по узлу соединяет с ним, Shift+клик по линии делает врезку в неё. Esc заканчивает линию.",
             "Клик по линии красит её в выбранный тип. С Shift красит весь тоннель от камеры до камеры.",
-            "Клик по линии ставит подъём наверх выбранного вида. Двигать и удалять в инспекторе линии.",
+            "Клик по линии ставит метку выбранного вида. Для трубы выберите «Вертикальная решётка в трубе»: обычный подъём на круглой трубе не ставится. Двигать и удалять в инспекторе линии.",
             "Клик по линии вставляет узел. Клик по узлу убирает его (линии с двух сторон сливаются).",
             "Клик по линии, комнате или камере: больше мусора. Shift+клик: меньше. Ctrl+клик: разложить по-новому (новый сид)."
         };
@@ -351,7 +351,7 @@ namespace CarX.EditorTools
                     if (edge != null)
                     {
                         var t = net.TypeOf(edge);
-                        if (t != null && t.section.profile == TunnelProfile.Round)
+                        if (t != null && t.section.profile == TunnelProfile.Round && ShaftSpec.IsCeilingRise(markerType))
                         {
                             if (SceneView.lastActiveSceneView != null) SceneView.lastActiveSceneView.ShowNotification(new GUIContent("В круглой трубе подъёмов нет"));
                             break;
@@ -748,7 +748,7 @@ namespace CarX.EditorTools
                 {
                     var p = a + dir * s.distance;
                     float hs = HandleUtility.GetHandleSize(p) * 0.08f;
-                    Handles.color = s.type == ShaftType.Manhole ? new Color(1f, 0.3f, 0.3f) : Color.yellow;
+                    Handles.color = s.type == ShaftType.PipeGrate ? new Color(0.4f, 0.75f, 1f) : s.type == ShaftType.Manhole ? new Color(1f, 0.3f, 0.3f) : Color.yellow;
                     Handles.DrawSolidDisc(p, Vector3.up, hs);
                 }
             }
@@ -768,9 +768,16 @@ namespace CarX.EditorTools
             {
                 var p = net.World(n.position);
                 float s = HandleUtility.GetHandleSize(p) * 0.09f;
-                Handles.color = selected && n.id == selNode ? Color.cyan : selected && n.id == hoverNode ? Color.yellow : selected && n.id == penLast ? Color.green : Color.white;
+                bool nodeSel = selected && n.id == selNode;
+                Handles.color = nodeSel ? Color.cyan : selected && n.id == hoverNode ? Color.yellow : selected && n.id == penLast ? Color.green : Color.white;
                 if (selected && n.id == hoverNode) s *= 1.4f;
                 Handles.SphereHandleCap(0, p, Quaternion.identity, s, EventType.Repaint);
+                if (nodeSel)
+                {
+                    var idStyle = new GUIStyle(EditorStyles.boldLabel);
+                    idStyle.normal.textColor = Color.cyan;
+                    Handles.Label(p + Vector3.up * HandleUtility.GetHandleSize(p) * 0.4f, n.id, idStyle);
+                }
             }
             // trash counts while the trash tool is active
             if (selected && tool == Tool.Trash)
@@ -803,7 +810,7 @@ namespace CarX.EditorTools
             GUILayout.BeginVertical(GUILayout.Width(250f));
             int nt = GUILayout.SelectionGrid((int)tool, ToolNames, 3, EditorStyles.miniButton);
             if (nt != (int)tool) { tool = (Tool)nt; penLast = null; SceneView.RepaintAll(); }
-            GUILayout.Label(ToolHints[(int)tool], EditorStyles.wordWrappedMiniLabel, GUILayout.Height(42f));
+            GUILayout.Label(ToolHints[(int)tool], EditorStyles.wordWrappedMiniLabel, GUILayout.Height(tool == Tool.Marker ? 58f : 42f));
 
             if (lib != null)
             {

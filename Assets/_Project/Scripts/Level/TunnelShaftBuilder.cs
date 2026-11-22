@@ -330,6 +330,82 @@ namespace CarX.Level
             return root;
         }
 
+        /// <summary>
+        /// Vertical iron grate across the tunnel section. Same local space as Build:
+        /// origin on the axis at floor level, x across, y up, z along. A solid box blocks the pipe.
+        /// </summary>
+        public static GameObject BuildPipeGrate(Transform parent, string name, Vector3 localPos, Quaternion localRot,
+                                               TunnelSection section, TunnelMaterials mats)
+        {
+            var root = new GameObject(name);
+            root.transform.SetParent(parent, false);
+            root.transform.localPosition = localPos;
+            root.transform.localRotation = localRot;
+
+            var kit = new MeshKit(1);
+            float hz = BarHeight * 0.5f;
+            const float inset = 0.03f;
+            float span = Mathf.Max(0.2f, section.HalfSpan - inset);
+            int count = Mathf.Max(1, Mathf.FloorToInt((span * 2f - 0.05f) / BarPitch) + 1);
+            float origin = -(count - 1) * BarPitch * 0.5f;
+            for (int i = 0; i < count; i++)
+            {
+                float x = origin + i * BarPitch;
+                float y0 = section.FloorHeightAt(x) + inset;
+                float y1 = section.CeilingHeightAt(x) - inset;
+                if (y1 - y0 < 0.04f) continue;
+                float mid = (y0 + y1) * 0.5f;
+                kit.Box(0, new Vector3(x, mid, 0f), new Vector3(BarWidth * 0.5f, 0f, 0f), new Vector3(0f, (y1 - y0) * 0.5f, 0f), new Vector3(0f, 0f, hz), 2f);
+            }
+            float midY = section.Height * 0.5f;
+            float halfW = Mathf.Max(0.05f, section.WallXAt(midY) - inset);
+            kit.Box(0, new Vector3(0f, midY, 0f), new Vector3(halfW, 0f, 0f), new Vector3(0f, BarWidth * 0.5f, 0f), new Vector3(0f, 0f, hz), 2f);
+
+            float fw = 0.035f;
+            if (section.profile == TunnelProfile.Round)
+            {
+                float r = Mathf.Max(0.2f, section.HalfSpan - inset);
+                float cy = section.Height - section.HalfSpan;
+                int sides = Mathf.Max(12, RoundSides);
+                for (int i = 0; i < sides; i++)
+                {
+                    float a0 = i * Mathf.PI * 2f / sides, a1 = (i + 1) * Mathf.PI * 2f / sides;
+                    var p0 = new Vector3(Mathf.Cos(a0) * r, cy + Mathf.Sin(a0) * r, 0f);
+                    var p1 = new Vector3(Mathf.Cos(a1) * r, cy + Mathf.Sin(a1) * r, 0f);
+                    var mid = (p0 + p1) * 0.5f;
+                    if (mid.y < inset) continue;
+                    var alongBar = p1 - p0;
+                    float len = alongBar.magnitude;
+                    if (len < 1e-4f) continue;
+                    alongBar /= len;
+                    var radial = new Vector3(mid.x, mid.y - cy, 0f);
+                    if (radial.sqrMagnitude < 1e-6f) continue;
+                    radial.Normalize();
+                    kit.Box(0, mid, alongBar * (len * 0.5f), radial * fw, Vector3.forward * (hz + 0.01f), 2f);
+                }
+            }
+            else
+            {
+                float y0 = inset, y1 = section.Height - inset;
+                float hy = (y1 - y0) * 0.5f;
+                kit.Box(0, new Vector3(0f, y1, 0f), new Vector3(span + fw, 0f, 0f), new Vector3(0f, fw, 0f), new Vector3(0f, 0f, hz + 0.01f), 2f);
+                kit.Box(0, new Vector3(0f, y0, 0f), new Vector3(span + fw, 0f, 0f), new Vector3(0f, fw, 0f), new Vector3(0f, 0f, hz + 0.01f), 2f);
+                kit.Box(0, new Vector3(span, midY, 0f), new Vector3(fw, 0f, 0f), new Vector3(0f, hy, 0f), new Vector3(0f, 0f, hz + 0.01f), 2f);
+                kit.Box(0, new Vector3(-span, midY, 0f), new Vector3(fw, 0f, 0f), new Vector3(0f, hy, 0f), new Vector3(0f, 0f, hz + 0.01f), 2f);
+            }
+
+            var body = Child(root.transform, "Body");
+            AddMesh(body, kit.ToMesh(name + "_Body"), new[] { mats != null ? mats.iron : null },
+                    ShadowCastingMode.TwoSided, true, true);
+
+            float blockH = Mathf.Max(0.4f, section.Height - 0.04f);
+            var block = Child(root.transform, "Block");
+            var box = block.AddComponent<BoxCollider>();
+            box.center = new Vector3(0f, blockH * 0.5f + 0.02f, 0f);
+            box.size = new Vector3(Mathf.Max(0.4f, section.HalfSpan * 2f - 0.06f), blockH, BarHeight);
+            return root;
+        }
+
         static void SetShaftParams(Material m, Vector3 lightLocal, ShaftOpening op, float ceilY, float grateY, float barOrigin)
         {
             m.SetVector("_ShaftLight", new Vector4(lightLocal.x, lightLocal.y, lightLocal.z, 0));
