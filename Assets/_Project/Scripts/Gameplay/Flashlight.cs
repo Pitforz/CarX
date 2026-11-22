@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.Serialization;
+using CarX.NPC;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -69,6 +70,7 @@ namespace CarX.Gameplay
         float _mountFraction = 1f;
         float _beamPower;
         float _spillPower;
+        readonly RaycastHit[] _surfaceHits = new RaycastHit[16];
 
         float Charge => _health == null ? 1f : _health.IsDead ? 0f : _health.FlashlightCharge;
 
@@ -284,9 +286,7 @@ namespace CarX.Gameplay
             }
 
             // Geometry may adjust brightness, but never switches the light off.
-            float distance = Physics.Raycast(transform.position, transform.forward, out var surface,
-                _beamRange, _obstacleMask, QueryTriggerInteraction.Ignore)
-                ? surface.distance : _beamRange;
+            float distance = GetSurfaceDistance();
             float safePower = _surfaceBrightness * Mathf.Max(0.06f, distance) * Mathf.Max(0.06f, distance);
             float chargeBrightness = Mathf.Lerp(MinChargeBrightness, 1f,
                 Mathf.InverseLerp(DimmedCharge, 1f, charge));
@@ -300,6 +300,36 @@ namespace CarX.Gameplay
             _beam.intensity = _beamPower * fade;
             _spill.intensity = _spillPower * fade;
             UpdateWeaponSpill(chargeBrightness * fade);
+        }
+
+        float GetSurfaceDistance()
+        {
+            var ray = new Ray(transform.position, transform.forward);
+            int count = Physics.RaycastNonAlloc(ray, _surfaceHits, _beamRange, _obstacleMask,
+                QueryTriggerInteraction.Ignore);
+            var hits = _surfaceHits;
+            if (count == hits.Length)
+            {
+                hits = Physics.RaycastAll(ray, _beamRange, _obstacleMask, QueryTriggerInteraction.Ignore);
+                count = hits.Length;
+            }
+
+            float distance = _beamRange;
+            for (int i = 0; i < count; i++)
+            {
+                var hit = hits[i];
+                if (hit.distance >= distance ||
+                    hit.collider.GetComponentInParent<HostileNpc>() != null ||
+                    hit.collider.GetComponentInParent<NpcDialogue>() != null ||
+                    hit.collider.GetComponentInParent<CaretakerTour>() != null ||
+                    hit.collider.GetComponentInParent<ResidentModelPose>() != null ||
+                    hit.collider.GetComponentInParent<NpcIdleMotion>() != null)
+                    continue;
+
+                distance = hit.distance;
+            }
+
+            return distance;
         }
 
         void UpdateWeaponSpill(float power)

@@ -133,7 +133,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CarX.NPC.WorkshopActorAnimation
   _animator: {fileID: 8015951179212587603}
   _crowbar: {fileID: 5117106541319437358}
-  _raiseDuration: 1.05
+  _strikeClip: {fileID: -203655887218126122, guid: 1d02795e43234cb9995cf64a0c5c940e, type: 3}
 --- !u!1 &806615879380355524
 GameObject:
   m_ObjectHideFlags: 0
@@ -458,6 +458,7 @@ GameObject:
   - component: {fileID: 6521033561951244422}
   - component: {fileID: 3187330866416045094}
   - component: {fileID: 3253511273865165598}
+  - component: {fileID: 684510000317}
   m_Layer: 0
   m_Name: "\u0414\u0435\u043D\u0438"
   m_TagString: Untagged
@@ -516,7 +517,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CarX.NPC.NpcDialogue
   _interactionDistance: 2.5
   _displayName: "\u0414\u0435\u043D\u0438"
-  _firstQuestion: "\u041F\u043E\u043C\u043E\u0447\u044C \u0441 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438"
+  _firstQuestion: "Спросить, видел ли он отца"
   _secondQuestion: "\u0423\u0439\u0442\u0438"
   _closeOption: 
 --- !u!114 &6521033561951244422
@@ -926,3 +927,18 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CarX.Gameplay.DoorKeyPickup
   _icon: {fileID: 21300000, guid: b7f436262b494c3f9179edaae570e43a, type: 3}
+--- !u!114 &684510000317
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7708639776785517791}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cb231bf4c9ea44b593a4a4e7a5dfd034, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::CarX.NPC.DeniIdleVariation
+  _animator: {fileID: 4225399586828048965}
+  _controller: {fileID: 0}
+  _warriorClip: {fileID: 0}

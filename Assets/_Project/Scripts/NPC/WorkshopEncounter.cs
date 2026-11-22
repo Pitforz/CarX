@@ -12,6 +12,9 @@ namespace CarX.NPC
 
         const float IntroductionDistance = 6f;
         const float IntimidationDistance = 4f;
+        const float StrikeReach = 1.55f;
+        const float StrikeInterval = 1.25f;
+        const int StrikeDamage = 15;
         const float ClueDistance = 2.5f;
         const float ClueReminderDistance = 7.5f;
         static readonly Color ExtortionistColor = new Color32(226, 174, 131, 255);
@@ -36,6 +39,7 @@ namespace CarX.NPC
         PlayerPistol _pistol;
         PlayerInventory _inventory;
         PlayerStatusHud _hud;
+        PlayerHealth _health;
         PlayerInnerVoice _innerVoice;
         AudioSource _playerVoice, _voice;
         NpcSpeechState _speech;
@@ -44,6 +48,8 @@ namespace CarX.NPC
         Coroutine _conversation;
         Stage _stage;
         bool _clueTaken, _clueReminderShown;
+        float _nextStrikeAt;
+        float _strikeContactAt = float.PositiveInfinity;
 
         internal DeniDialogue QuestGiver => _questGiver;
         internal bool IsSpeaking => _conversation != null;
@@ -72,6 +78,7 @@ namespace CarX.NPC
                 _pistol = menus.GetComponent<PlayerPistol>();
                 _inventory = menus.GetComponent<PlayerInventory>();
                 _hud = menus.GetComponent<PlayerStatusHud>();
+                _health = menus.GetComponent<PlayerHealth>();
                 _innerVoice = menus.GetComponent<PlayerInnerVoice>();
                 _menus.RegisterWorkshop(this);
                 break;
@@ -80,7 +87,25 @@ namespace CarX.NPC
 
         void LateUpdate()
         {
-            if (_menus == null || !_menus.CanStartNpcConversation || _pistol == null)
+            if (_menus == null || _pistol == null)
+                return;
+
+            if (_stage == Stage.WaitingForThreat)
+            {
+                if (_menus.CanStartNpcConversation && _pistol.IsAimingAt(transform, IntimidationDistance))
+                {
+                    _stage = Stage.Surrender;
+                    _strikeContactAt = float.PositiveInfinity;
+                    _actor?.Surrender();
+                    _menus.RefreshQuestDisplay();
+                    _conversation = StartCoroutine(Surrender());
+                }
+                else if (!_menus.BlocksGameplayInput && _health != null && !_health.IsDead)
+                    UpdateStrike();
+                return;
+            }
+
+            if (!_menus.CanStartNpcConversation)
                 return;
 
             if (_stage == Stage.WaitingForPlayer)
@@ -92,18 +117,45 @@ namespace CarX.NPC
                 _questGiver.MoveToWorkshop();
                 _conversation = StartCoroutine(Introduce());
             }
-            else if (_stage == Stage.WaitingForThreat && _pistol.IsAimingAt(transform, IntimidationDistance))
-            {
-                _stage = Stage.Surrender;
-                _actor?.Surrender();
-                _menus.RefreshQuestDisplay();
-                _conversation = StartCoroutine(Surrender());
-            }
             else if (_stage == Stage.Finished && !_clueTaken && !_clueReminderShown &&
                 (_menus.transform.position - transform.position).sqrMagnitude >= ClueReminderDistance * ClueReminderDistance)
             {
                 _conversation = StartCoroutine(RemindAboutClue());
             }
+        }
+
+        void UpdateStrike()
+        {
+            if (_actor == null || _pistol.ViewCamera == null)
+                return;
+
+            float now = Time.time;
+            if (now >= _strikeContactAt)
+            {
+                _strikeContactAt = float.PositiveInfinity;
+                if (PlayerInStrikeReach())
+                    _health.TakeAttackDamage(StrikeDamage);
+                return;
+            }
+
+            if (now < _nextStrikeAt || !PlayerInStrikeReach())
+                return;
+
+            _actor.Strike();
+            _strikeContactAt = now + WorkshopActorAnimation.StrikeContactTime;
+            _nextStrikeAt = now + StrikeInterval;
+        }
+
+        bool PlayerInStrikeReach()
+        {
+            Vector3 chest = transform.position + Vector3.up * 0.38f;
+            Vector3 target = _pistol.ViewCamera.transform.position;
+            if ((target - chest).sqrMagnitude > StrikeReach * StrikeReach)
+                return false;
+
+            int layers = Physics.DefaultRaycastLayers & ~(1 << _health.gameObject.layer);
+            return !Physics.Linecast(chest, target, out var hit, layers, QueryTriggerInteraction.Ignore) ||
+                hit.transform.IsChildOf(transform);
         }
 
         IEnumerator RemindAboutClue()

@@ -90,6 +90,7 @@ namespace CarX.NPC
             if (!HasQuest || !ReturnsToolsInWorkshop || IsWaitingInWorkshop)
                 return;
 
+            GetComponent<DeniIdleVariation>()?.CancelForRelocation();
             transform.SetPositionAndRotation(_workshopMeetingPoint.position, _workshopMeetingPoint.rotation);
             IsWaitingInWorkshop = true;
         }

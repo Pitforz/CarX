@@ -50,7 +50,11 @@ namespace CarX.NPC
         [SerializeField] GameObject _combatPistol;
         [SerializeField] RuntimeAnimatorController _combatLocomotion;
         [SerializeField] GameObject _residentModel;
+        [SerializeField] GameObject _alternateResidentModel;
         [SerializeField] GameObject _residentKnifeModel;
+        [SerializeField] TextAsset _residentWalkAnimation;
+        [SerializeField] TextAsset _residentAttackAnimation;
+        [SerializeField] TextAsset _residentStandingAnimation;
         [SerializeField] bool _provokedByFlashlight;
 
         enum State { Idle, Alerted, Returning, Watching, Dead }
@@ -1092,12 +1096,15 @@ namespace CarX.NPC
 
             Transform knife = _hasKnife ? _rightShoulder.Find("RightArm/KnifePlaceholder") : null;
             var placeholders = GetComponentsInChildren<Renderer>(true);
-            var model = Instantiate(_residentModel, transform, false);
+            var modelPrefab = _alternateResidentModel != null && Random.value < 0.5f
+                ? _alternateResidentModel : _residentModel;
+            var model = Instantiate(modelPrefab, transform, false);
             _residentPose = model.AddComponent<ResidentModelPose>();
             foreach (var placeholder in placeholders)
                 if (knife == null || placeholder.transform != knife)
                     placeholder.enabled = false;
             _residentPose.EnableMelee(knife, _residentKnifeModel);
+            _residentPose.SetMeleeAnimations(_residentWalkAnimation, _residentAttackAnimation, _residentStandingAnimation);
 
             if (_headHitbox == null)
             {

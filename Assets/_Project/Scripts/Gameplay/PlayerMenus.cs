@@ -20,8 +20,10 @@ namespace CarX.Gameplay
         const string QuestTitle = "Задание №1";
         const string QuestDescription = "тест";
         const string DeniQuestTitle = "Вернуть Дени инструменты из мастерской";
-        const string FindKeyObjective = "Найти ключ от нижнего этажа";
+        const string FindKeyObjective = "Найти ключ от второго этажа";
         const string FindKeyHint = "Расспроси местных, где можно достать ключ.";
+        const string InvestigateFatherObjective = "Разузнать, что случилось с отцом";
+        const string InvestigateFatherHint = "Расспроси местных об отце и о том, как спуститься на второй этаж.";
         const string MouseSensitivityPref = "CarX.MouseSensitivityPercent";
         const string MasterVolumePref = "CarX.MasterVolumePercent";
         const int DefaultSensitivity = 100;
@@ -188,6 +190,7 @@ namespace CarX.Gameplay
             var keyboard = Keyboard.current;
             bool escape = keyboard?.escapeKey.wasPressedThisFrame == true;
             bool quests = keyboard?.tKey.wasPressedThisFrame == true;
+            bool inventory = keyboard?.tabKey.wasPressedThisFrame == true;
             bool interact = keyboard?.eKey.wasPressedThisFrame == true;
             bool skipDialogue = keyboard?.mKey.wasPressedThisFrame == true;
             bool slowTime = keyboard?.oKey.wasPressedThisFrame == true;
@@ -195,6 +198,7 @@ namespace CarX.Gameplay
 #else
             bool escape = Input.GetKeyDown(KeyCode.Escape);
             bool quests = Input.GetKeyDown(KeyCode.T);
+            bool inventory = Input.GetKeyDown(KeyCode.Tab);
             bool interact = Input.GetKeyDown(KeyCode.E);
             bool skipDialogue = Input.GetKeyDown(KeyCode.M);
             bool slowTime = Input.GetKeyDown(KeyCode.O);
@@ -235,12 +239,7 @@ namespace CarX.Gameplay
 
             if (_menu == Menu.Clue)
             {
-#if ENABLE_INPUT_SYSTEM
-                bool closeNote = keyboard?.tabKey.wasPressedThisFrame == true;
-#else
-                bool closeNote = Input.GetKeyDown(KeyCode.Tab);
-#endif
-                if (escape || interact || closeNote)
+                if (escape || interact || inventory)
                 {
                     var onDismissed = _onClueDismissed;
                     SetMenu(Menu.None);
@@ -254,10 +253,12 @@ namespace CarX.Gameplay
 
             if (_menu == Menu.Dialogue)
             {
-                if (escape || skipDialogue || _dialogueNpc == null || !_dialogueNpc.CanTalk)
+                if (escape || inventory || skipDialogue || _dialogueNpc == null || !_dialogueNpc.CanTalk)
                 {
                     _dismissedDialogueNpc = _dialogueNpc;
                     SetMenu(Menu.None);
+                    if (inventory)
+                        _inventory?.OpenFromDialogue();
                 }
                 else
                     UpdateDialogueSelection(interact);
@@ -506,7 +507,7 @@ namespace CarX.Gameplay
                 else
                 {
                     _questions.Add(npc.FirstQuestion);
-                    if (!npc.HasAutomaticIntroduction)
+                    if (!npc.HasAutomaticIntroduction && !string.IsNullOrWhiteSpace(npc.SecondQuestion))
                         _questions.Add(npc.SecondQuestion);
                     if (!string.IsNullOrEmpty(npc.CloseOption))
                         _questions.Add(npc.CloseOption);
@@ -538,7 +539,8 @@ namespace CarX.Gameplay
                 return null;
 
             var npc = hit.collider.GetComponentInParent<NpcDialogue>();
-            if (npc == null || npc.gameObject.scene != gameObject.scene || !npc.CanTalk || !npc.ShowsQuestions)
+            if (npc == null || npc.gameObject.scene != gameObject.scene || !npc.CanTalk || !npc.ShowsQuestions ||
+                (npc.RequiresKeyObjective && !HasKeyObjective))
                 return null;
             if (npc.TryGetComponent<CaretakerTour>(out var tour) && !tour.HasAvailableQuestion)
                 return null;
@@ -601,6 +603,7 @@ namespace CarX.Gameplay
         {
             bool focused = _menu == Menu.Dialogue;
             if (_dialogueNpc == null || !_dialogueNpc.CanTalk ||
+                (_dialogueNpc.RequiresKeyObjective && !HasKeyObjective) ||
                 (!focused && (!CanStartNpcConversation || _dialogueNpc != _nearbyNpc)))
                 return;
 
@@ -1124,8 +1127,8 @@ namespace CarX.Gameplay
             bool returning = _deniQuest != null && _deniQuest.ToolsReturned && !completed;
             bool keyReady = _deniQuest != null && _deniQuest.KeyReady;
             bool needsHint = _deniQuest != null && _deniQuest.NeedsLowerFloorHint(_hasLowerFloorHint);
-            string keyObjective = needsHint ? "Поговорить с Виктором" : FindKeyObjective;
-            string keyDirections = needsHint ? "Спроси Виктора, как попасть на второй этаж." : FindKeyHint;
+            string keyObjective = needsHint ? InvestigateFatherObjective : FindKeyObjective;
+            string keyDirections = needsHint ? InvestigateFatherHint : FindKeyHint;
             bool deliverToWorkshop = _deniQuest != null && _deniQuest.ReturnsToolsInWorkshop;
             string deliveryDirections = deliverToWorkshop
                 ? "Отнеси ящик Дени в мастерскую. От зала с койками сверни в правый тоннель и найди боковую комнату."
@@ -1156,16 +1159,19 @@ namespace CarX.Gameplay
                         : _deniQuest.WorkshopDirections;
                 }
             }
+            string journalTitle = returning ? objective : DeniQuestTitle;
             _questJournal?.SetQuests(_questTracked && !_trackingDeniQuest, _deniQuest != null,
-                _trackingDeniQuest, completed, DeniQuestTitle, description);
+                _trackingDeniQuest, completed, journalTitle, description);
 
             if (_trackedQuest == null)
                 return;
 
             bool aimingAtExtortionist = inWorkshopQuest && !completed && _workshop.NeedsIntimidation;
-            string trackedText = _trackingDeniQuest
-                ? "Инструменты Дени\n" + objective + (aimingAtExtortionist ? "\nУдерживай ПКМ" : "")
-                : $"{QuestTitle}\n{QuestDescription}";
+            string trackedText = $"{QuestTitle}\n{QuestDescription}";
+            if (_trackingDeniQuest)
+                trackedText = returning
+                    ? $"{objective}\n{description}"
+                    : "Инструменты Дени\n" + objective + (aimingAtExtortionist ? "\nУдерживай ПКМ" : "");
             if (HasKeyObjective)
             {
                 string keyText = keyReady ? "Забрать ключ у Дени\nПодойди к нему и нажми E." : $"{FindKeyObjective}\n{FindKeyHint}";
