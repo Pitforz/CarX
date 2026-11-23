@@ -13,9 +13,11 @@ namespace CarX.NPC
         sealed class IntroductionLine
         {
             [SerializeField] bool _alexey;
+            [SerializeField] bool _thought;
             [SerializeField, TextArea] string _text;
             [SerializeField] AudioClip _voice;
             internal bool Alexey => _alexey;
+            internal bool Thought => _thought;
             internal string Text => _text;
             internal AudioClip Voice => _voice;
         }
@@ -23,12 +25,15 @@ namespace CarX.NPC
         [SerializeField, Min(0.1f)] float _interactionDistance = 2.5f;
         [SerializeField] string _displayName;
         [SerializeField] string _firstQuestion = "Вопрос один";
+        [SerializeField, TextArea] string _firstQuestionLine;
         [SerializeField] string _secondQuestion = "Вопрос номер два";
         [SerializeField] string _closeOption = "Закрыть";
         [SerializeField, TextArea] string[] _firstAnswer;
         [SerializeField] AudioClip _firstQuestionVoice;
         [SerializeField] AudioClip[] _firstAnswerVoices;
         [SerializeField] bool _grantsLowerFloorHint;
+        [SerializeField] bool _requiresKeyObjective;
+        [SerializeField] bool _startsFatherSearch;
         [SerializeField] bool _answerOnlyOnce;
         [SerializeField, Range(0f, 25f)] float _idleArmClearance;
         [SerializeField, Min(0f)] float _automaticGreetingDistance;
@@ -61,8 +66,10 @@ namespace CarX.NPC
         internal bool HasAnswer => _firstAnswer != null && _firstAnswer.Length > 0;
         internal bool IsAnswering => _answer != null;
         internal bool GrantsLowerFloorHint => _grantsLowerFloorHint;
+        internal bool RequiresKeyObjective => _requiresKeyObjective;
         internal bool HasAutomaticIntroduction => _introduction is { Length: > 0 };
         internal bool ShowsQuestions => !HasAutomaticIntroduction || (_introduced && HasAnswer);
+        internal float IntroductionCompletedAt { get; private set; } = float.PositiveInfinity;
         bool FlashlightOn => _greetingFlashlight != null && _greetingFlashlight.isActiveAndEnabled &&
             _greetingFlashlight.IsSwitchedOn;
         bool CanWarnAboutFlashlight => !_warnedForFlashlight && FlashlightOn;
@@ -125,7 +132,7 @@ namespace CarX.NPC
                     if (i == 0)
                         _introductionPose?.GlanceDown();
                     var line = _introduction[i];
-                    yield return ShowLine(line.Text, line.Voice, line.Alexey);
+                    yield return ShowLine(line.Text, line.Voice, line.Alexey, line.Thought);
                 }
             }
             FinishAnswer(completed: true);
@@ -150,8 +157,10 @@ namespace CarX.NPC
 
         IEnumerator Answer()
         {
-            if (_firstQuestionVoice != null || HasAutomaticIntroduction)
-                yield return ShowLine(FirstQuestion, _firstQuestionVoice, alexey: true);
+            bool hasSpokenQuestion = !string.IsNullOrWhiteSpace(_firstQuestionLine);
+            if (hasSpokenQuestion || _firstQuestionVoice != null || HasAutomaticIntroduction)
+                yield return ShowLine(hasSpokenQuestion ? _firstQuestionLine : FirstQuestion,
+                    _firstQuestionVoice, alexey: true);
 
             for (int i = 0; i < _firstAnswer.Length; i++)
                 yield return ShowLine(_firstAnswer[i], DialogueVoice.GetClip(_firstAnswerVoices, i));
@@ -171,7 +180,13 @@ namespace CarX.NPC
             if (clip != null)
             {
                 if (alexey)
+                {
                     source = _playerVoice = DialogueVoice.GetPlayerSource(_playerVoice, _answerHud.transform);
+                    source.volume = thought ? 0.35f : 1f;
+                    source.spatialBlend = thought ? 0f : 1f;
+                    source.bypassEffects = thought;
+                    source.bypassReverbZones = thought;
+                }
                 else
                     source = _npcVoice ??= DialogueVoice.CreateSource(transform, $"{DisplayName} Voice",
                         minDistance: 3f, maxDistance: 16f);
@@ -215,6 +230,9 @@ namespace CarX.NPC
                 if (completed && !_introduced)
                 {
                     _introduced = true;
+                    IntroductionCompletedAt = Time.time;
+                    if (_startsFatherSearch)
+                        _nearbyPlayer?.StartFatherSearch();
                     if (_activateAfterIntroduction != null)
                         _activateAfterIntroduction.SetActive(true);
                 }

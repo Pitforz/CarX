@@ -50,7 +50,11 @@ namespace CarX.NPC
         [SerializeField] GameObject _combatPistol;
         [SerializeField] RuntimeAnimatorController _combatLocomotion;
         [SerializeField] GameObject _residentModel;
+        [SerializeField] GameObject _alternateResidentModel;
         [SerializeField] GameObject _residentKnifeModel;
+        [SerializeField] TextAsset _residentWalkAnimation;
+        [SerializeField] TextAsset _residentAttackAnimation;
+        [SerializeField] TextAsset _residentStandingAnimation;
         [SerializeField] bool _provokedByFlashlight;
 
         enum State { Idle, Alerted, Returning, Watching, Dead }
@@ -66,6 +70,7 @@ namespace CarX.NPC
         PlayerPistol _pistol;
         Flashlight _playerFlashlight;
         ResidentModelPose _residentPose;
+        ResidentChaseVoice _chaseVoice;
         PlayerStatusHud _playerHud;
         FirstPersonController _playerMovement;
         CharacterController _playerCollider;
@@ -231,6 +236,8 @@ namespace CarX.NPC
             }
 
             bool illuminated = _provokedByFlashlight && IsLitByFlashlight();
+            if (illuminated)
+                _chaseVoice ??= ResidentChaseVoice.ForPlayer(_player);
             if (_provokedByFlashlight && !TrackFlashlightTarget(illuminated))
             {
                 if (_assistingAlly)
@@ -280,6 +287,8 @@ namespace CarX.NPC
                     }
                     else if (knowsPlayerPosition)
                     {
+                        if (distance > AttackRange)
+                            _chaseVoice?.TryShout(transform);
                         MoveTo(_lastKnownPosition, _chaseSpeed, 0.9f);
                         if (!FaceMovement())
                             Face(playerCenter - transform.position);
@@ -390,6 +399,7 @@ namespace CarX.NPC
                 return true;
 
             _provoked = false;
+            _chaseVoice = null;
             _darknessStartedAt = -1f;
             _hadVisualContact = false;
             _lastContactAt = float.NegativeInfinity;
@@ -1092,12 +1102,15 @@ namespace CarX.NPC
 
             Transform knife = _hasKnife ? _rightShoulder.Find("RightArm/KnifePlaceholder") : null;
             var placeholders = GetComponentsInChildren<Renderer>(true);
-            var model = Instantiate(_residentModel, transform, false);
+            var modelPrefab = _alternateResidentModel != null && Random.value < 0.5f
+                ? _alternateResidentModel : _residentModel;
+            var model = Instantiate(modelPrefab, transform, false);
             _residentPose = model.AddComponent<ResidentModelPose>();
             foreach (var placeholder in placeholders)
                 if (knife == null || placeholder.transform != knife)
                     placeholder.enabled = false;
             _residentPose.EnableMelee(knife, _residentKnifeModel);
+            _residentPose.SetMeleeAnimations(_residentWalkAnimation, _residentAttackAnimation, _residentStandingAnimation);
 
             if (_headHitbox == null)
             {

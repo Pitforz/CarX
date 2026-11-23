@@ -1,3 +1,4 @@
+using CarX.NPC;
 using StarterAssets;
 using UnityEngine;
 #if ENABLE_INPUT_SYSTEM
@@ -44,6 +45,7 @@ namespace CarX.Gameplay
         StarterAssetsInputs _inputs;
         PlayerPistol _pistol;
         PlayerStatusHud _hud;
+        PlayerHealth _health;
         PlayerMenus _menus;
         PlayerInnerVoice _innerVoice;
         InventoryWheelView _wheel;
@@ -80,13 +82,14 @@ namespace CarX.Gameplay
             _inputs = GetComponent<StarterAssetsInputs>();
             _pistol = GetComponent<PlayerPistol>();
             _hud = GetComponent<PlayerStatusHud>();
+            _health = GetComponent<PlayerHealth>();
             _menus = GetComponent<PlayerMenus>();
             _innerVoice = GetComponent<PlayerInnerVoice>();
         }
 
         void Update()
         {
-            if (_hud.HudRect == null || _pistol.ViewCamera == null ||
+            if (_hud.HudRect == null || _pistol.ViewCamera == null || (_health != null && _health.IsDead) ||
                 (_menus != null && _menus.BlocksGameplayInput))
                 return;
 
@@ -101,12 +104,18 @@ namespace CarX.Gameplay
             bool drop = keyboard?.qKey.wasPressedThisFrame == true;
             bool pickup = keyboard?.eKey.wasPressedThisFrame == true;
             bool confirm = mouse?.leftButton.wasPressedThisFrame == true;
+            bool grantKey = keyboard != null &&
+                (keyboard.digit9Key.wasPressedThisFrame || keyboard.numpad9Key.wasPressedThisFrame);
 #else
             bool toggle = Input.GetKeyDown(KeyCode.Tab);
             bool drop = Input.GetKeyDown(KeyCode.Q);
             bool pickup = Input.GetKeyDown(KeyCode.E);
             bool confirm = Input.GetMouseButtonDown(0);
+            bool grantKey = Input.GetKeyDown(KeyCode.Alpha9) || Input.GetKeyDown(KeyCode.Keypad9);
 #endif
+            if (grantKey && !HasLowerFloorKey)
+                GrantKeyForTesting();
+
             if (toggle)
             {
                 SetOpen(!_open);
@@ -257,6 +266,8 @@ namespace CarX.Gameplay
                 RefreshWheel();
             }
         }
+
+        internal void OpenFromDialogue() => SetOpen(true);
 
         void SetInventoryCursor(bool open)
         {
@@ -471,6 +482,13 @@ namespace CarX.Gameplay
                 magazine.gameObject.SetActive(false);
                 Destroy(magazine.gameObject);
             }
+            else if (pickup is LowerFloorDoor door)
+            {
+                if (door.TryOpen(this))
+                    SetFocusedPickup(null);
+                else if (!HasLowerFloorKey)
+                    _hud.ShowSubtitle("Заперто. Нужен ключ.");
+            }
         }
 
         void CarryToolbox(ToolboxPickup toolbox)
@@ -522,16 +540,35 @@ namespace CarX.Gameplay
             if (HasLowerFloorKey || IsCarryingTools || (_menus != null && _menus.IsNpcSpeaking))
                 return false;
 
+            GrantLowerFloorKey(key, inspect: true);
+            return true;
+        }
+
+        void GrantKeyForTesting()
+        {
+            foreach (var deni in FindObjectsByType<DeniDialogue>())
+            {
+                if (deni.gameObject.scene != gameObject.scene || deni.RewardKey == null)
+                    continue;
+
+                GrantLowerFloorKey(deni.RewardKey, inspect: false);
+                _menus?.RefreshQuestDisplay();
+                return;
+            }
+        }
+
+        void GrantLowerFloorKey(DoorKeyPickup key, bool inspect)
+        {
             HasLowerFloorKey = true;
             _lowerFloorKeyIcon = key.Icon;
             if (_keyInspectionHand != null && key.Mesh != null && key.Material != null)
             {
                 _keyView = new PlayerKeyView(_keyInspectionHand, _pistol.ViewCamera, transform, key.Mesh, key.Material);
-                ShowLowerFloorKey();
+                if (inspect)
+                    ShowLowerFloorKey();
             }
             RefreshWheel();
             _hud.ShowSubtitle($"Получен предмет: {LowerFloorKeyName}");
-            return true;
         }
 
         bool ShowLowerFloorKey()
@@ -580,7 +617,7 @@ namespace CarX.Gameplay
 
                 var pickup = FindPickup(hit.collider);
                 if (pickup == null || !pickup.isActiveAndEnabled || pickup.gameObject.scene != gameObject.scene ||
-                    (IsCarryingTools && pickup is not CluePickup) ||
+                    (IsCarryingTools && pickup is not (CluePickup or LowerFloorDoor)) ||
                     !HasPickupLineOfSight(ray.origin, hit.point, pickup.transform))
                     continue;
 
@@ -599,6 +636,9 @@ namespace CarX.Gameplay
             var toolbox = collider.GetComponentInParent<ToolboxPickup>();
             if (toolbox != null)
                 return toolbox.PickupAllowed ? toolbox : null;
+            var door = collider.GetComponentInParent<LowerFloorDoor>();
+            if (door != null)
+                return door.CanInteract ? door : null;
             return collider.GetComponentInParent<DroppedMagazine>();
         }
 
@@ -668,6 +708,9 @@ namespace CarX.Gameplay
                 clue.SetHighlighted(true);
                 _hud.ShowPickupHint($"{clue.Note.Title}\nE — подобрать", questItem: true);
             }
+            else if (pickup is LowerFloorDoor)
+                _hud.ShowPickupHint(HasLowerFloorKey ? "E — открыть дверь" : "Дверь заперта\nНужен ключ",
+                    questItem: true);
             else if (_hud != null)
                 _hud.ShowPickupHint(null);
         }
