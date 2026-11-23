@@ -84,3 +84,10 @@ desktop.ini
 # Asset packs shared separately (from carx-scenes-integration)
 /Assets/Abandoned World/
 /Assets/Abandoned World.meta
+
+# Over 25 MB: keep locally (copy from C:\Dev\CarX-pack), do not commit. .meta files stay in git.
+/Assets/_Project/Scenes/MAIN_LEVEL_GRAPHICS_lab.unity
+/Assets/_Project/Scenes/MAIN_LEVEL_GRAPHICS_lab/MAIN_LEVEL_GRAPHICS_lab Baking Set-Default.CellData.bytes
+/Assets/_Project/Scenes/MAIN_LEVEL_GRAPHICS_lab/MAIN_LEVEL_GRAPHICS_lab Baking Set-Default.CellOptionalData.bytes
+/Assets/_Project/Scenes/MAIN_LEVEL_GRAPHICS_lab/MAIN_LEVEL_GRAPHICS_lab Baking Set.CellSupportData.bytes
+/Assets/boxes/Abandoned World/Wood Box Free/Textures/T_Box_wood_4_Normal.png
