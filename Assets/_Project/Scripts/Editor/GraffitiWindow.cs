@@ -339,6 +339,10 @@ namespace CarX.EditorTools
             p.uvScale = new Vector2(flip ? -1f : 1f, 1f);
             p.uvBias = new Vector2(flip ? 1f : 0f, 0f);
             p.fadeFactor = Mathf.Max(0.35f, opacity * 0.8f);
+            p.size = new Vector3(size, h, Mathf.Clamp(size * 0.2f, 0.25f, 0.8f));
+            p.startAngleFade = 40f;
+            p.endAngleFade = 65f;
+            p.renderingLayerMask = uint.MaxValue;
         }
 
         static void KillPreview()
@@ -506,8 +510,10 @@ namespace CarX.EditorTools
             g.opacity = alpha;
             g.wear = GraffitiDecal.WearStep(wearAmount);
             g.flip = flipped;
-            g.depth = Mathf.Clamp(width * 0.25f, 0.3f, 1f);   // wide pieces wrap over curved walls
+            g.depth = Mathf.Clamp(width * 0.2f, 0.25f, 0.8f);
             g.Refresh();
+            float fit;
+            if (FitDepth(g, out fit)) { g.depth = fit; g.Refresh(); }   // as thin as the surface allows: no smear into openings and corners
             if (net != null)
             {
                 var a = go.AddComponent<TunnelAnchor>();
@@ -516,6 +522,65 @@ namespace CarX.EditorTools
                 a.Bind();
             }
             return g;
+        }
+
+        /// <summary>Measures how far the surface under the graffiti departs from the graffiti plane (curved tunnel walls, bumps)
+        /// and returns a paint layer just thick enough to cover it. A flat wall gets a few centimetres, so paint cannot run
+        /// into a tunnel mouth or round a corner. False if the surface could not be measured (no colliders).</summary>
+        public static bool FitDepth(GraffitiDecal g, out float depth)
+        {
+            depth = g.depth;
+            Physics.SyncTransforms();
+            var t = g.transform;
+            Vector3 n = -t.forward, right = t.right, up = t.up;
+            float w = g.size, h = g.Height;
+            const float lift = 0.5f, near = 0.35f;   // surfaces farther than `near` from the graffiti plane are other surfaces (behind an opening, a ledge)
+            float lo = float.MaxValue, hi = float.MinValue;
+            int found = 0, total = 0;
+            for (int iy = 0; iy < 7; iy++)
+                for (int ix = 0; ix < 9; ix++)
+                {
+                    total++;
+                    Vector3 o = t.position + right * w * (ix / 8f - 0.5f) + up * h * (iy / 6f - 0.5f) + n * lift;
+                    float best = float.MaxValue;
+                    foreach (var hit in Physics.RaycastAll(o, -n, lift * 2f, ~(1 << 2), QueryTriggerInteraction.Ignore))
+                    {
+                        if (!hit.collider.gameObject.scene.IsValid() || hit.collider.gameObject.scene != g.gameObject.scene) continue;
+                        if (Vector3.Dot(hit.normal, n) < 0.3f) continue;   // only the painted surface, not walls at an angle to it
+                        if (hit.distance < best) best = hit.distance;
+                    }
+                    if (best == float.MaxValue) continue;
+                    float dev = lift - best;   // + = surface towards the viewer, - = behind the graffiti plane
+                    if (Mathf.Abs(dev) > near) continue;
+                    lo = Mathf.Min(lo, dev);
+                    hi = Mathf.Max(hi, dev);
+                    found++;
+                }
+            if (found < total / 4) return false;
+            depth = Mathf.Clamp(2f * Mathf.Max(Mathf.Abs(lo), Mathf.Abs(hi)) + 0.04f, 0.04f, 1.2f);
+            return true;
+        }
+
+        /// <summary>Re-fits the paint thickness of every graffiti in the open scenes (bridge: call CarX.EditorTools.GraffitiWindow.FitAll).</summary>
+        [MenuItem("CarX/Граффити: подогнать толщину слоя у всех")]
+        public static string FitAll()
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode) { Debug.LogWarning("CarX Graffiti: выйдите из Play, потом подгоняйте толщину."); return "play mode"; }
+            int fitted = 0, skipped = 0;
+            foreach (var g in Object.FindObjectsByType<GraffitiDecal>(FindObjectsInactive.Include))
+            {
+                float d;
+                if (!FitDepth(g, out d)) { skipped++; continue; }
+                Undo.RecordObject(g, "Толщина граффити");
+                g.depth = d;
+                g.Refresh();
+                EditorUtility.SetDirty(g);
+                UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(g.gameObject.scene);
+                fitted++;
+            }
+            string r = "подогнано " + fitted + ", не измерено (нет коллайдеров под граффити) " + skipped;
+            Debug.Log("CarX Graffiti: " + r);
+            return r;
         }
 
         public static Transform ParentFor(GameObject hit, out TunnelNetwork net)

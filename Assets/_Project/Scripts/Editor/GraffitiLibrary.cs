@@ -18,6 +18,31 @@ namespace CarX.EditorTools
         static GraffitiLibrary()
         {
             GraffitiDecal.MaterialFor = MaterialFor;
+            EditorApplication.delayCall += () => { EnsureDecalLayers(); RefreshScenes(); };
+        }
+
+        /// <summary>Angle fade of decals (no paint smeared over walls at 90° to the graffiti) only works with "Decal Layers"
+        /// on the URP Decal renderer feature: turns it on in every renderer of the project, once.</summary>
+        public static void EnsureDecalLayers()
+        {
+            foreach (var guid in AssetDatabase.FindAssets("t:UniversalRendererData"))
+            {
+                var data = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.Universal.UniversalRendererData>(AssetDatabase.GUIDToAssetPath(guid));
+                if (data == null) continue;
+                foreach (var f in data.rendererFeatures)
+                {
+                    if (!(f is UnityEngine.Rendering.Universal.DecalRendererFeature)) continue;
+                    var so = new SerializedObject(f);
+                    var prop = so.FindProperty("m_Settings.decalLayers");
+                    if (prop == null || prop.boolValue) continue;
+                    prop.boolValue = true;
+                    so.ApplyModifiedPropertiesWithoutUndo();
+                    EditorUtility.SetDirty(f);
+                    EditorUtility.SetDirty(data);
+                    AssetDatabase.SaveAssetIfDirty(data);
+                    Debug.Log("CarX Graffiti: включены Decal Layers в " + data.name + " (краска не тянется по перпендикулярным стенам)");
+                }
+            }
         }
 
         public static bool IsSource(string path)

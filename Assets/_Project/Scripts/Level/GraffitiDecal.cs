@@ -20,7 +20,7 @@ namespace CarX.Level
         [Tooltip("Отразить по горизонтали.")]
         public bool flip;
         [Tooltip("Толщина слоя, на который ложится краска, в метрах (вперёд и назад от точки нанесения). Больше = лучше ложится на изогнутые стены, но может задеть соседние поверхности.")]
-        [Min(0.02f)] public float depth = 0.4f;
+        [Min(0.02f)] public float depth = 0.3f;
         [Tooltip("Дальше этого расстояния от камеры граффити не рисуется (экономия).")]
         [Min(1f)] public float drawDistance = 60f;
 
@@ -49,8 +49,11 @@ namespace CarX.Level
             p.fadeFactor = opacity;
             p.drawDistance = drawDistance;
             p.fadeScale = 0.85f;
-            p.startAngleFade = 60f;   // surfaces turned away from the spray (corners, floor under a wall) fade out
-            p.endAngleFade = 85f;
+            // paint only lands on surfaces facing the spray: a wall at 90° (corner, floor under a wall) gets nothing instead of a
+            // long smear. Needs "Decal Layers" on the URP Decal feature (GraffitiLibrary turns it on).
+            p.startAngleFade = 40f;
+            p.endAngleFade = 65f;
+            p.renderingLayerMask = uint.MaxValue;   // decal layers on: still paint every kind of surface
         }
 
 #if UNITY_EDITOR
