@@ -25,6 +25,8 @@ namespace CarX.NPC
         Quaternion[] _animatedPose;
         Vector3 _restPosition, _previousFeet, _pistolReleasePoint, _headOffset;
         Quaternion _pistolReleaseRotation;
+        Quaternion _restRotation;
+        Vector3 _fallAxis;
         Quaternion _headLookFrame;
         Quaternion _weaponAim = Quaternion.identity;
         Vector3? _aimTarget;
@@ -32,7 +34,7 @@ namespace CarX.NPC
         Vector3 _lookTarget;
         Vector3 _stagedGripOffset;
         Vector2 _armedVelocity;
-        float _speed, _aimWeight, _relaxedWeaponWeight, _fallTime, _fallDirection;
+        float _speed, _aimWeight, _relaxedWeaponWeight, _fallTime;
         float _aimRaiseTime = DefaultAimRaiseTime;
         float _gripWeight, _gripClosure, _presentationWeight, _coverLean, _lookWeight;
         float _idlePhase, _idleWeight;
@@ -90,6 +92,7 @@ namespace CarX.NPC
             _headOffset = _head.InverseTransformPoint(_head.position + actor.up * 0.11f + actor.forward * 0.025f);
             _headLookFrame = Quaternion.Inverse(_head.rotation) * actor.rotation;
             _restPosition = transform.localPosition;
+            _restRotation = transform.localRotation;
             _previousFeet = actor.position;
             _idlePhase = (GetEntityId().GetHashCode() & 255) * 0.074f;
             var poseBones = new List<Transform> { _head, _chest, _leftThigh, _leftShin, _rightThigh, _rightShin };
@@ -378,8 +381,11 @@ namespace CarX.NPC
             Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0f, peak, elapsed)) *
             Mathf.SmoothStep(1f, 0f, Mathf.InverseLerp(peak, duration, elapsed));
 
-        internal void Fall(bool immediately)
+        internal void Fall(bool immediately, Vector3? shotOrigin = null)
         {
+            if (_falling || _settled)
+                return;
+
             if (_pistol.gameObject.activeSelf)
             {
                 if (!_poseApplied)
@@ -390,7 +396,15 @@ namespace CarX.NPC
             }
             SavePose();
             _animator.enabled = false;
-            _fallDirection = immediately || Mathf.Abs(_speed) > 2.6f ? 1f : -1f;
+            Vector3 fallDirection = immediately
+                ? Vector3.forward
+                : shotOrigin.HasValue
+                    ? _actor.InverseTransformDirection(_actor.position - shotOrigin.Value)
+                    : Quaternion.Euler(0f, Random.Range(0f, 360f), 0f) * Vector3.back;
+            fallDirection.y = 0f;
+            if (fallDirection.sqrMagnitude < 0.001f)
+                fallDirection = Vector3.back;
+            _fallAxis = Vector3.Cross(Vector3.up, fallDirection.normalized);
             _fallTime = immediately ? FallDuration : 0f;
             _falling = true;
             PoseFall();
@@ -406,7 +420,7 @@ namespace CarX.NPC
             float knees = MotionPulse(t, 0.42f, 0.98f) * 0.72f + roll * 0.28f;
             float shoulderDrop = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.18f, 0.85f, t));
             transform.SetLocalPositionAndRotation(_restPosition - Vector3.up * (0.17f * knees),
-                Quaternion.Euler(_fallDirection * 88f * roll, 6f * roll, -12f * roll));
+                Quaternion.AngleAxis(88f * roll, _fallAxis) * _restRotation);
 
             Rotate(_leftThigh, -26f * knees);
             Rotate(_rightThigh, -42f * knees);

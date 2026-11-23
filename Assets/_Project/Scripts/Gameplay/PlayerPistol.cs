@@ -112,10 +112,10 @@ namespace CarX.Gameplay
         internal bool IsHiddenExternally { get; private set; }
         internal Vector3 GripLightPosition => _beretta != null ? _beretta.GripLightPosition : _view.position;
         internal event System.Action<Vector3> ShotFired;
+        internal event System.Action<Ray, float, NPC.HostileNpc> ShotLineFired;
         int ReserveRounds => _inventory != null ? _inventory.ReserveRounds : _reserve;
         float StressAmount => Mathf.SmoothStep(0f, 1f, _stressBlend);
 
-        // The final encounter can use the same control as the prototype key.
         public void SetCombatStress(bool active) => CombatStressActive = active;
 
         void Start()
@@ -168,24 +168,16 @@ namespace CarX.Gameplay
             bool firePressed = mouse?.leftButton.wasPressedThisFrame == true ||
                 keyboard?.pKey.wasPressedThisFrame == true;
             bool aimHeld = mouse?.rightButton.isPressed == true;
-            bool stressPressed = keyboard?.bKey.wasPressedThisFrame == true;
 #else
             bool equipPressed = Input.GetKeyDown(KeyCode.Alpha1);
             bool reloadPressed = Input.GetKeyDown(KeyCode.R);
             bool firePressed = Input.GetMouseButtonDown(0) || Input.GetKeyDown(KeyCode.P);
             bool aimHeld = Input.GetMouseButton(1);
-            bool stressPressed = Input.GetKeyDown(KeyCode.B);
 #endif
             UpdateReload();
 
             bool gameplayBlocked = _inventory != null ? _inventory.BlocksGameplayInput :
                 _menus != null && _menus.BlocksGameplayInput;
-            if (stressPressed && !gameplayBlocked)
-            {
-                SetCombatStress(!CombatStressActive);
-                _hud.ShowSubtitle(CombatStressActive ? "Мандраж включён" : "Мандраж выключен", duration: 1.5f);
-            }
-
             bool weaponInputBlocked = _inventory?.BlocksWeaponInput ?? gameplayBlocked;
             bool encounterAllowsWeapon = _menus?.AllowsEncounterWeaponInput == true &&
                 _inventory?.IsCarryingTools != true;
@@ -372,6 +364,7 @@ namespace CarX.Gameplay
                 return;
 
             Fire();
+            ShotLineFired?.Invoke(shotRay, hasHit ? hit.distance + 0.6f : float.PositiveInfinity, enemy);
             if (enemy != null)
                 enemy.TakeShot(hit, ShotDamage, shotRay.origin);
             else if (hasHit)

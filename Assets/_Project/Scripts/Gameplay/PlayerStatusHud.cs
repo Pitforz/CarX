@@ -59,6 +59,7 @@ namespace CarX.Gameplay
 
         internal RectTransform HudRect => _hudRect;
         internal Font QuestFont => _questFont;
+        internal Font SubtitleFont => _subtitleLabel != null ? _subtitleLabel.font : _subtitleFont;
         float SubtitleTime => _menus != null ? _menus.UnpausedTime : Time.unscaledTime;
 
         internal void RegisterHostile(NPC.HostileNpc hostile) => _hostiles.Add(hostile);

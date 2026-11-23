@@ -30,8 +30,9 @@ namespace CarX.Gameplay
         internal RectTransform Root { get; }
 
         internal SettingsMenuView(RectTransform parent,
-            int minSensitivity, int maxSensitivity, int sensitivity, int volume,
-            UnityAction<int> changeSensitivity, UnityAction<int> changeVolume, UnityAction back)
+            int minSensitivity, int maxSensitivity, int sensitivity, int volume, PlayerHealth.Difficulty difficulty,
+            UnityAction<int> changeSensitivity, UnityAction<int> changeVolume,
+            UnityAction<PlayerHealth.Difficulty> changeDifficulty, UnityAction back)
         {
             var bundledFont = Resources.Load<Font>("CarX/Fonts/LiberationMono-Bold");
             _font = bundledFont != null ? bundledFont : Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
@@ -63,9 +64,14 @@ namespace CarX.Gameplay
                 0, 100, volume, changeVolume);
 
             var backButton = AddBackButton(back);
+            var difficultyButtons = AddDifficulty(difficulty, changeDifficulty);
+            for (int i = 0; i < difficultyButtons.Length; i++)
+                SetNavigation(difficultyButtons[i], masterVolume, backButton,
+                    i > 0 ? difficultyButtons[i - 1] : null,
+                    i + 1 < difficultyButtons.Length ? difficultyButtons[i + 1] : null);
             SetNavigation(_sensitivity, backButton, masterVolume);
-            SetNavigation(masterVolume, _sensitivity, backButton);
-            SetNavigation(backButton, masterVolume, _sensitivity);
+            SetNavigation(masterVolume, _sensitivity, difficultyButtons[(int)difficulty]);
+            SetNavigation(backButton, difficultyButtons[(int)difficulty], _sensitivity);
         }
 
         internal void FocusFirst() => EventSystem.current?.SetSelectedGameObject(_sensitivity.gameObject);
@@ -148,6 +154,45 @@ namespace CarX.Gameplay
             }
         }
 
+        Button[] AddDifficulty(PlayerHealth.Difficulty difficulty, UnityAction<PlayerHealth.Difficulty> onChange)
+        {
+            var row = Box(Root, "Difficulty", new Rect(53f, 337f, 818f, 49f), Recess).rectTransform;
+            Label(row, "Difficulty Label", "Сложность", new Rect(19f, 0f, 166f, 49f), 19, Ink);
+            string[] labels = { "Лёгкий · 50%", "Средний · 100%", "Тяжёлый · 200%" };
+            var buttons = new Button[labels.Length];
+            var backgrounds = new Image[labels.Length];
+            for (int i = 0; i < labels.Length; i++)
+            {
+                var value = (PlayerHealth.Difficulty)i;
+                var face = Box(row, labels[i], new Rect(191f + 204f * i, 4f, 194f, 41f), Divider);
+                backgrounds[i] = face;
+                var hit = Box(face.rectTransform, "Difficulty Button", new Rect(0f, 0f, 194f, 41f),
+                    Color.clear, hitTarget: true);
+                var button = hit.gameObject.AddComponent<Button>();
+                button.targetGraphic = hit;
+                var colors = FocusColors();
+                colors.highlightedColor = colors.selectedColor = new Color(1f, 1f, 1f, 0.17f);
+                colors.pressedColor = new Color(1f, 1f, 1f, 0.28f);
+                button.colors = colors;
+                Label(face.rectTransform, "Difficulty Option", labels[i], new Rect(0f, 0f, 194f, 41f),
+                    15, Ink, TextAnchor.MiddleCenter);
+                button.onClick.AddListener(() =>
+                {
+                    Refresh(value);
+                    onChange.Invoke(value);
+                });
+                buttons[i] = button;
+            }
+            Refresh(difficulty);
+            return buttons;
+
+            void Refresh(PlayerHealth.Difficulty selected)
+            {
+                for (int i = 0; i < backgrounds.Length; i++)
+                    backgrounds[i].color = i == (int)selected ? new Color32(137, 70, 32, 255) : Divider;
+            }
+        }
+
         Button AddBackButton(UnityAction back)
         {
             var hit = Box(Root, "Back", new Rect(765f, 398f, 106f, 41f), Orange, hitTarget: true);
@@ -180,13 +225,16 @@ namespace CarX.Gameplay
 
         static string FormatPercent(int value) => value + "%";
 
-        static void SetNavigation(Selectable control, Selectable up, Selectable down)
+        static void SetNavigation(Selectable control, Selectable up, Selectable down,
+            Selectable left = null, Selectable right = null)
         {
             control.navigation = new Navigation
             {
                 mode = Navigation.Mode.Explicit,
                 selectOnUp = up,
-                selectOnDown = down
+                selectOnDown = down,
+                selectOnLeft = left,
+                selectOnRight = right
             };
         }
 

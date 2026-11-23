@@ -44,9 +44,9 @@ git clone https://github.com/Pitforz/CarX.git
 4. Если появилось окно **Enter Safe Mode?** — значит, в коде ошибка компиляции. Нажмите **Ignore**, откройте **Window → General → Console** и пришлите красные строки программисту.
 5. Если появилось окно **Administrator Privileges Detected** — нажмите **Restart as Standard User**. Unity не нужно запускать от имени администратора.
 
-## 4. Пакеты и ассеты: ставить ничего не надо
+## 4. Пакеты Unity и общие архивы с ассетами
 
-Всё нужное ставится **само** при первом открытии (список лежит в `Packages/manifest.json`):
+Пакеты из `Packages/manifest.json` ставятся **автоматически** при первом открытии:
 
 - **Universal Render Pipeline (URP)** — графика;
 - **Input System** — управление;
@@ -63,6 +63,8 @@ git clone https://github.com/Pitforz/CarX.git
 - `Assets/_Project` — всё наше: сцены, скрипты, шейдеры, материалы, сгенерированные текстуры.
 
 **Не входит в репозиторий:** персонажи и анимации **Mixamo** (`Assets/ThirdParty/Mixamo`, около 570 МБ). Бесплатный GitHub LFS даёт только 1 ГБ места и 1 ГБ скачиваний в месяц, поэтому эту папку передаём архивом отдельно (спросите у Фёдора). Без неё не работает только сцена `NPC_Demo`: NPC будут без моделей. Архив распакуйте так, чтобы получилось `Assets/ThirdParty/Mixamo/Characters` и `Assets/ThirdParty/Mixamo/Animations`.
+
+**Ошибки `Missing Prefab` для мусора и деревьев.** Возьмите командный архив `CarX_Packs_Trees_Trash.zip` с общего Диска. Закройте Unity и перенесите из архива папки вместе с исходными `.meta` в `Assets/URP_WasteOvergrowth_SA/` и `Assets/TreePackVol.1/`. Рядом с папками положите их одноимённые `.meta`, если они есть в архиве. После импорта Unity восстановит ссылки по исходным GUID. Эти папки перечислены в `.gitignore` и передаются архивом.
 
 ## 5. Окна Unity за минуту
 

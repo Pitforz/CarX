@@ -38,8 +38,6 @@ namespace StarterAssets
 		[Space(10)]
 		[Tooltip("The character uses its own gravity value. The engine default is -9.81f")]
 		public float Gravity = -15.0f;
-		[SerializeField, Min(0f)] private float _jumpHeight = 0.8f;
-		[SerializeField, Min(0f)] private float _crouchJumpHeight = 0.35f;
 
 		[Header("Crouch")]
 		[SerializeField, Min(0f)] private float _crouchHeight = 1.2f;
@@ -179,6 +177,30 @@ namespace StarterAssets
 			_planarVelocity = _planarAcceleration = Vector2.zero;
 			_crouchVelocity = 0f;
 			_audibleStepDistance = 0f;
+		}
+
+		public void TeleportTo(Vector3 position, Quaternion rotation)
+		{
+			if (_controller == null || !_controller.enabled)
+				return;
+
+			Vector3 delta = position - transform.position;
+			_controller.enabled = false;
+			transform.SetPositionAndRotation(position, rotation);
+			_controller.enabled = true;
+			_planarVelocity = _planarAcceleration = Vector2.zero;
+			_pendingLookRotation = _lookVelocity = _remainingLookRecoil = Vector2.zero;
+			_verticalVelocity = _audibleStepDistance = _lookRecoilTimeRemaining = 0f;
+			_cinemachineTargetPitch = Mathf.Clamp(0f, _lookUpLimit, _lookDownLimit);
+			_smoothedCameraFollowY = position.y;
+			_cameraFollowVelocity = 0f;
+			CinemachineCore.OnTargetObjectWarped(transform, delta);
+			if (CinemachineCameraTarget != null)
+			{
+				CinemachineCameraTarget.transform.localRotation = GetViewRotation(LeanRollRotation);
+				CinemachineCore.OnTargetObjectWarped(CinemachineCameraTarget.transform, delta);
+			}
+			Physics.SyncTransforms();
 		}
 
 		public void BeginEncounterLook(Vector3 point)
@@ -375,12 +397,10 @@ namespace StarterAssets
 			var keyboard = Keyboard.current;
 			bool leanRight = IsKeyHeld(keyboard, _leanRightKey);
 			bool leanLeft = IsKeyHeld(keyboard, _leanLeftKey);
-			bool jumpPressed = keyboard?.spaceKey.wasPressedThisFrame == true;
 			bool superSpeedPressed = keyboard?.vKey.wasPressedThisFrame == true;
 #else
 			bool leanRight = Input.GetKey(KeyCode.C);
 			bool leanLeft = Input.GetKey(KeyCode.Z);
-			bool jumpPressed = Input.GetKeyDown(KeyCode.Space);
 			bool superSpeedPressed = Input.GetKeyDown(KeyCode.V);
 #endif
 			if (superSpeedPressed && !_movementLocked && !LookInputBlocked)
@@ -390,7 +410,7 @@ namespace StarterAssets
 			if (!_movementLocked)
 				UpdateCrouch();
 			GroundedCheck();
-			UpdateVerticalVelocity(jumpPressed && !_movementLocked && !LookInputBlocked);
+			UpdateVerticalVelocity();
 			ApplyPendingLookRecoil(Time.deltaTime);
 			CameraRotation();
 			Move(leanRight || leanLeft || Mathf.Abs(_leanProgress) > 0.01f);
@@ -802,12 +822,11 @@ namespace StarterAssets
 			AudibleFootstep?.Invoke(transform.position, movement / Time.deltaTime);
 		}
 
-		private void UpdateVerticalVelocity(bool jumpPressed)
+		private void UpdateVerticalVelocity()
 		{
 			if (_controller.isGrounded && _verticalVelocity <= 0f)
 			{
-				float height = Mathf.Lerp(_jumpHeight, _crouchJumpHeight, _crouchProgress);
-				_verticalVelocity = jumpPressed ? Mathf.Sqrt(2f * Mathf.Max(0f, -Gravity) * height) : -2f;
+				_verticalVelocity = -2f;
 				return;
 			}
 

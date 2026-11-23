@@ -107,6 +107,7 @@ namespace CarX.NPC
         bool _peekHasFired;
         bool _holdCoverInEncounter;
         bool _openingShotPending;
+        float _openingCoverUntil;
         Vector3? _heardPosition;
         Vector3 _lastHeardShotPosition;
         int _rounds = MagazineSize;
@@ -239,7 +240,8 @@ namespace CarX.NPC
                 SetWeaponAngle(angle);
         }
 
-        internal void BeginEncounterCombat(Vector3 target, float? visibleHitChance, bool holdCover)
+        internal void BeginEncounterCombat(Vector3 target, float? visibleHitChance, bool holdCover,
+            float openingCoverSeconds)
         {
             float now = Time.time;
             _visibleHitChance = visibleHitChance ?? VisibleHitChance;
@@ -253,7 +255,53 @@ namespace CarX.NPC
             _nextRoundAt = now;
             _nextCoverTryAt = holdCover ? now : now + 2f;
             SetStagedWeaponVisible(true);
-            AimStagedWeapon(target);
+            _openingCoverUntil = openingCoverSeconds > 0f ? now + openingCoverSeconds : 0f;
+            if (_openingCoverUntil > 0f)
+            {
+                _nextCoverTryAt = now;
+                LowerStagedWeapon();
+            }
+            else
+                AimStagedWeapon(target);
+        }
+
+        internal void EndOpeningCover()
+        {
+            if (_openingCoverUntil <= 0f)
+                return;
+            _openingCoverUntil = 0f;
+            ReleaseCover();
+            StopToWatch();
+            _openingShotPending = true;
+            _fireAt = Time.time;
+        }
+
+        bool WaitInOpeningCover(float now)
+        {
+            if (_openingCoverUntil <= 0f)
+                return false;
+            if (now >= _openingCoverUntil)
+            {
+                EndOpeningCover();
+                return false;
+            }
+
+            if (_cover != null && !_cover.IsReservedBy(this))
+            {
+                ReleaseCover();
+                _npc.StopMoving();
+            }
+            if (_cover == null)
+            {
+                if (now >= _nextCoverTryAt)
+                    TryTakeCover(now, forReload: true);
+            }
+            else if (_state == State.TakingCover && AtPosition(_hidePosition))
+            {
+                _npc.StopMoving();
+                _state = State.InCover;
+            }
+            return true;
         }
 
         internal void Tick(Vector3 playerCenter)
@@ -262,6 +310,9 @@ namespace CarX.NPC
 
             UpdateLean();
             UpdateTargetPoints(playerCenter);
+            if (WaitInOpeningCover(now))
+                return;
+
             bool visible = TryGetVisibleTarget(out Vector3 aimPoint);
             if (visible)
             {
@@ -1509,6 +1560,7 @@ namespace CarX.NPC
             _lastHeardShotAt = float.NegativeInfinity;
             _openingShotPending = false;
             _loudApproachUntil = float.NegativeInfinity;
+            _openingCoverUntil = 0f;
             _squadPeekUntil = float.NegativeInfinity;
             _reloadEndsAt = 0f;
             _leanProgress = 0f;

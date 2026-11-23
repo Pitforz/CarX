@@ -5,6 +5,8 @@ using CarX.Gameplay;
 using StarterAssets;
 using UnityEngine;
 using UnityEngine.AI;
+using UnityEngine.Animations;
+using UnityEngine.Playables;
 
 namespace CarX.NPC
 {
@@ -70,6 +72,9 @@ namespace CarX.NPC
         PlayerPistol _pistol;
         Flashlight _playerFlashlight;
         ResidentModelPose _residentPose;
+        static AnimationClip _humanoidDeathClip;
+        PlayableGraph _deathGraph;
+        bool _scriptedMovement;
         ResidentChaseVoice _chaseVoice;
         PlayerStatusHud _playerHud;
         FirstPersonController _playerMovement;
@@ -190,6 +195,9 @@ namespace CarX.NPC
 
         void InitializeNavigation()
         {
+            if (_scriptedMovement)
+                return;
+
             var filter = new NavMeshQueryFilter { agentTypeID = 0, areaMask = NavMesh.AllAreas };
             if (NavMesh.SamplePosition(_home, out var start, 1.5f, filter))
             {
@@ -936,7 +944,7 @@ namespace CarX.NPC
                 return;
             }
 
-            TakeFatalShot();
+            TakeFatalShot(shotOrigin);
         }
 
         void CallNearbyAllies(Vector3 shotOrigin)
@@ -1000,7 +1008,7 @@ namespace CarX.NPC
             FaceMovement();
         }
 
-        internal void TakeFatalShot()
+        internal void TakeFatalShot(Vector3? shotOrigin = null)
         {
             if (!IsAlive)
                 return;
@@ -1008,9 +1016,51 @@ namespace CarX.NPC
             _health = 0;
             EnterDeadState();
             if (_encounterAnimation != null)
-                _encounterAnimation.Fall(immediately: false);
-            else
+                _encounterAnimation.Fall(immediately: false, shotOrigin: shotOrigin);
+            else if (!TryPlayHumanoidDeath())
                 StartCoroutine(Fall());
+        }
+
+        bool TryPlayHumanoidDeath()
+        {
+            var animator = _residentPose != null ? _residentPose.GetComponentInChildren<Animator>() : null;
+            if (animator == null || !animator.isHuman || animator.avatar == null || !animator.avatar.isValid)
+                return false;
+
+            _humanoidDeathClip ??= Resources.LoadAll<AnimationClip>("CarX/NpcDeathFromRight")
+                .FirstOrDefault(clip => clip.humanMotion && clip.name == "NpcDeathFromRight");
+            if (_humanoidDeathClip == null)
+                return false;
+
+            _residentPose.enabled = false;
+            animator.enabled = true;
+            animator.applyRootMotion = false;
+            animator.fireEvents = false;
+            animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+
+            _deathGraph = PlayableGraph.Create("NPC Death");
+            _deathGraph.SetTimeUpdateMode(DirectorUpdateMode.Manual);
+            var motion = AnimationClipPlayable.Create(_deathGraph, _humanoidDeathClip);
+            motion.SetApplyFootIK(false);
+            var output = AnimationPlayableOutput.Create(_deathGraph, "Death Animation", animator);
+            output.SetSourcePlayable(motion);
+            _deathGraph.Play();
+            StartCoroutine(PlayDeathMotion(motion, _humanoidDeathClip.length));
+            return true;
+        }
+
+        IEnumerator PlayDeathMotion(AnimationClipPlayable motion, float duration)
+        {
+            float elapsed = 0f;
+            while (_deathGraph.IsValid())
+            {
+                motion.SetTime(elapsed);
+                _deathGraph.Evaluate(0f);
+                if (elapsed >= duration)
+                    yield break;
+                yield return null;
+                elapsed = Mathf.Min(duration, elapsed + Time.deltaTime);
+            }
         }
 
         void EnterDeadState()
@@ -1064,6 +1114,13 @@ namespace CarX.NPC
             properties.SetColor("_BaseColor", headColor);
             properties.SetColor("_Color", headColor);
             head.SetPropertyBlock(properties);
+        }
+
+        internal void UseScriptedMovement()
+        {
+            _scriptedMovement = true;
+            if (_agent != null)
+                _agent.enabled = false;
         }
 
         internal void AttachCombatModel(GameObject modelPrefab = null, GameObject pistolPrefab = null,
@@ -1168,14 +1225,17 @@ namespace CarX.NPC
             }
         }
 
-        internal void BeginEncounterCombat(Vector3 target, float? visibleHitChance, bool holdCover)
+        internal void BeginEncounterCombat(Vector3 target, float? visibleHitChance, bool holdCover,
+            float openingCoverSeconds = 0f)
         {
             _stagedDamageEnabled = false;
             _home = transform.position;
             _homeFacing = transform.forward;
-            _bandit.BeginEncounterCombat(target, visibleHitChance, holdCover);
+            _bandit.BeginEncounterCombat(target, visibleHitChance, holdCover, openingCoverSeconds);
             enabled = true;
         }
+
+        internal void EndOpeningCover() => _bandit.EndOpeningCover();
 
         IEnumerator Fall()
         {
@@ -1199,6 +1259,8 @@ namespace CarX.NPC
 
         void OnDestroy()
         {
+            if (_deathGraph.IsValid())
+                _deathGraph.Destroy();
             if (_playerHud != null)
                 _playerHud.UnregisterHostile(this);
             if (_playerMovement != null)
