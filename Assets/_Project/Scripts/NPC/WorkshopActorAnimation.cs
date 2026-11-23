@@ -1,4 +1,6 @@
 using UnityEngine;
+using UnityEngine.Animations;
+using UnityEngine.Playables;
 
 namespace CarX.NPC
 {
@@ -8,7 +10,10 @@ namespace CarX.NPC
     {
         [SerializeField] Animator _animator;
         [SerializeField] Transform _crowbar;
-        [SerializeField, Min(0.1f)] float _raiseDuration = 1.05f;
+        [SerializeField] AnimationClip _strikeClip;
+        internal const float StrikeContactTime = 0.43f;
+        const float StrikeDuration = 0.81f;
+        const float ClipContact = 0.39f;
         Transform _arm, _elbow, _hand;
         Transform _threatTarget;
         Transform _indexBase, _indexMiddle, _indexTip;
@@ -16,7 +21,13 @@ namespace CarX.NPC
         Transform[] _bones;
         Quaternion[] _pose;
         bool _posed, _threatening, _surrendered, _retreatStarted;
-        float _threat, _surrender, _retreatTime;
+        float _surrender, _retreatTime;
+        float _strikeStarted = float.NegativeInfinity;
+        float _strikeWeight;
+        PlayableGraph _strikeGraph;
+        AnimationLayerMixerPlayable _strikeMixer;
+        AnimationClipPlayable _strikeMotion;
+        AvatarMask _strikeMask;
         Vector3 _retreatFrom, _retreatTo;
         Vector3 _leftFootStart, _rightFootStart;
 
@@ -39,6 +50,35 @@ namespace CarX.NPC
             _pose = new Quaternion[_bones.Length];
         }
 
+        void OnEnable()
+        {
+            if (_strikeClip == null || !_strikeClip.humanMotion || _animator == null ||
+                _animator.runtimeAnimatorController == null)
+                return;
+
+            _strikeMask = new AvatarMask();
+            for (int i = 0; i < (int)AvatarMaskBodyPart.LastBodyPart; i++)
+                _strikeMask.SetHumanoidBodyPartActive((AvatarMaskBodyPart)i, false);
+            _strikeMask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightArm, true);
+
+            _strikeGraph = PlayableGraph.Create("Workshop Actor Strike");
+            var idle = AnimatorControllerPlayable.Create(_strikeGraph, _animator.runtimeAnimatorController);
+            _strikeMotion = AnimationClipPlayable.Create(_strikeGraph, _strikeClip);
+            _strikeMotion.SetApplyFootIK(false);
+            _strikeMotion.SetSpeed(0);
+            _strikeMixer = AnimationLayerMixerPlayable.Create(_strikeGraph, 2);
+            _strikeGraph.Connect(idle, 0, _strikeMixer, 0);
+            _strikeGraph.Connect(_strikeMotion, 0, _strikeMixer, 1);
+            _strikeMixer.SetInputWeight(0, 1f);
+            _strikeMixer.SetInputWeight(1, 0f);
+            _strikeMixer.SetLayerMaskFromAvatarMask(1, _strikeMask);
+            var output = AnimationPlayableOutput.Create(_strikeGraph, "Workshop Actor", _animator);
+            output.SetSourcePlayable(_strikeMixer);
+            _strikeGraph.Play();
+        }
+
+        internal void Strike() => _strikeStarted = Time.time;
+
         internal void Threaten(Transform target)
         {
             _threatTarget = target;
@@ -47,7 +87,7 @@ namespace CarX.NPC
 
         internal void Surrender()
         {
-            _threatening = false;
+            CancelThreat();
             _surrendered = true;
             if (_retreatStarted)
                 return;
@@ -76,9 +116,31 @@ namespace CarX.NPC
             _retreatTo = new Vector3(destination.x, floor - bottom, destination.z);
         }
 
-        internal void CancelThreat() => _threatening = false;
+        internal void CancelThreat()
+        {
+            _threatening = false;
+            _strikeStarted = float.NegativeInfinity;
+        }
 
-        void Update() => Restore();
+        void Update()
+        {
+            Restore();
+            float elapsed = Time.time - _strikeStarted;
+            float fade = Mathf.Clamp01(Mathf.Min(elapsed / 0.14f, (StrikeDuration - elapsed) / 0.18f));
+            _strikeWeight = Mathf.SmoothStep(0f, 1f, fade);
+            if (!_strikeGraph.IsValid())
+                return;
+
+            if (_strikeWeight > 0f)
+            {
+                float progress = elapsed <= StrikeContactTime
+                    ? Mathf.Lerp(0f, ClipContact, elapsed / StrikeContactTime)
+                    : Mathf.Lerp(ClipContact, 1f, (elapsed - StrikeContactTime) / (StrikeDuration - StrikeContactTime));
+                _strikeMotion.SetTime(progress * _strikeClip.length);
+            }
+            // The arm blends back to the low, procedural grip in LateUpdate.
+            _strikeMixer.SetInputWeight(1, _strikeWeight > 0f ? 1f : 0f);
+        }
 
         void LateUpdate()
         {
@@ -113,43 +175,29 @@ namespace CarX.NPC
                     transform.rotation = Quaternion.RotateTowards(transform.rotation, Quaternion.LookRotation(facing), 125f * dt);
             }
 
-            // Blend out of the current lift, even when the pistol interrupts it halfway.
-            if (!_surrendered)
-                _threat = Mathf.MoveTowards(_threat, _threatening ? 1f : 0f, dt / Mathf.Max(0.1f, _raiseDuration));
             _surrender = Mathf.MoveTowards(_surrender, _surrendered ? 1f : 0f, dt / 0.85f);
-            float lift = Mathf.SmoothStep(0f, 1f, _threat);
-            float turn = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.09f, 1f, _threat));
             float hide = Mathf.SmoothStep(0f, 1f, _surrender);
-
-            // Keep the upper arm against the torso. Only the forearm comes forward.
-            float upperLength = Vector3.Distance(_arm.position, _elbow.position);
-            float forearmLength = Vector3.Distance(_elbow.position, _hand.position);
-            Vector3 readyWrist = _arm.position - transform.up * (upperLength + 0.38f * forearmLength) +
-                transform.forward * (0.92f * forearmLength) + transform.right * 0.018f;
-            Vector3 towardPlayer = _threatTarget != null
-                ? transform.InverseTransformDirection(_threatTarget.position - transform.up * 0.23f - readyWrist)
-                : Vector3.forward;
-            Vector3 pointed = Vector3.RotateTowards(Vector3.forward, towardPlayer.normalized,
-                30f * Mathf.Deg2Rad, 0f);
-            float presentation = turn * (1f - hide);
-            Vector3 shaft = Vector3.Slerp(new Vector3(0.12f, -0.54f, 0.83f).normalized, pointed, presentation);
-            shaft = Vector3.Slerp(shaft, new Vector3(0.07f, -0.95f, -0.30f).normalized, hide);
-            Vector3 face = Vector3.Slerp(Vector3.left, Vector3.up, presentation);
+            Vector3 shaft = Vector3.Slerp(new Vector3(0.12f, -0.54f, 0.83f).normalized,
+                new Vector3(0.07f, -0.95f, -0.30f).normalized, hide);
             Quaternion barRotation = transform.rotation *
-                Quaternion.LookRotation(Vector3.ProjectOnPlane(face, shaft), shaft);
+                Quaternion.LookRotation(Vector3.ProjectOnPlane(Vector3.left, shaft), shaft);
             Quaternion wristRotation = barRotation * Quaternion.Inverse(_crowbar.localRotation);
             Vector3 palmOffset = Quaternion.Inverse(_hand.rotation) * (_crowbar.position - _hand.position);
 
-            Vector3 lowWrist = transform.TransformPoint(new Vector3(0.30f, -0.17f, 0.09f)) -
-                wristRotation * palmOffset;
-            Vector3 hiddenWrist = transform.TransformPoint(new Vector3(0.18f, -0.07f, -0.26f)) -
-                wristRotation * palmOffset;
-            Vector3 wrist = Vector3.Lerp(Vector3.Lerp(lowWrist, readyWrist, lift), hiddenWrist, hide);
+            Vector3 low = new Vector3(0.30f, -0.17f, 0.09f);
+            Vector3 hidden = new Vector3(0.18f, -0.07f, -0.26f);
+            Vector3 wrist = transform.TransformPoint(Vector3.Lerp(low, hidden, hide)) - wristRotation * palmOffset;
             wrist += transform.right * (0.48f * hide * (1f - hide));
-            Vector3 pole = Vector3.Lerp(transform.right * 0.72f - transform.forward,
-                -transform.up + transform.right * 0.08f, lift * (1f - hide));
-            HumanoidLimbPose.Reach(_arm, _elbow, _hand, wrist, pole);
-            _hand.rotation = wristRotation;
+            float clipWeight = _strikeGraph.IsValid() ? _strikeWeight : 0f;
+            if (clipWeight < 1f)
+            {
+                if (!_strikeGraph.IsValid() && _strikeWeight > 0f)
+                    wrist += (transform.forward * 0.5f + transform.up * 0.25f) * _strikeWeight;
+
+                Vector3 pole = transform.right * 0.72f - transform.forward;
+                HumanoidLimbPose.Reach(_arm, _elbow, _hand, Vector3.Lerp(wrist, _hand.position, clipWeight), pole);
+                _hand.rotation = Quaternion.Slerp(wristRotation, _hand.rotation, clipWeight);
+            }
 
             // Danny's rig has one articulated finger chain for the right-hand grip.
             if (_indexBase != null)
@@ -181,6 +229,13 @@ namespace CarX.NPC
             _posed = false;
         }
 
-        void OnDisable() => Restore();
+        void OnDisable()
+        {
+            Restore();
+            if (_strikeGraph.IsValid())
+                _strikeGraph.Destroy();
+            if (_strikeMask != null)
+                Destroy(_strikeMask);
+        }
     }
 }

@@ -1,4 +1,6 @@
 using UnityEngine;
+using UnityEngine.Animations;
+using UnityEngine.Playables;
 
 namespace CarX.NPC
 {
@@ -10,10 +12,12 @@ namespace CarX.NPC
         [SerializeField, Range(-25f, 25f)] float _headTilt = 12f;
         [SerializeField, Min(1f)] float _breathsPerMinute = 12f;
         [SerializeField, Range(0f, 1f)] float _breathPhase;
+        [SerializeField] AnimationClip _lyingClip;
 
         Transform _chest;
         Quaternion _chestRest;
         Vector3 _breathAxis;
+        PlayableGraph _lyingGraph;
 
         void Awake()
         {
@@ -27,6 +31,13 @@ namespace CarX.NPC
             var rightFoot = animator.GetBoneTransform(HumanBodyBones.RightFoot);
             if (hips == null || head == null || leftFoot == null || rightFoot == null)
                 return;
+
+            if (_lyingClip != null && _lyingClip.humanMotion &&
+                TryPlayLyingClip(animator, hips, head, leftFoot, rightFoot))
+            {
+                CloseEyes();
+                return;
+            }
 
             animator.enabled = false;
             // The scene root is centered on the mattress, with +Z pointing toward the feet.
@@ -57,6 +68,40 @@ namespace CarX.NPC
                 _chestRest = _chest.localRotation;
                 _breathAxis = _chest.parent.InverseTransformDirection(transform.right);
             }
+        }
+
+        bool TryPlayLyingClip(Animator animator, Transform hips, Transform head, Transform leftFoot, Transform rightFoot)
+        {
+            Transform model = animator.transform;
+            model.SetPositionAndRotation(transform.position, transform.rotation);
+            animator.applyRootMotion = false;
+            animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+
+            _lyingGraph = PlayableGraph.Create("Resident Lying Animation");
+            var clip = AnimationClipPlayable.Create(_lyingGraph, _lyingClip);
+            clip.SetApplyFootIK(false);
+            var output = AnimationPlayableOutput.Create(_lyingGraph, "Lying Idle", animator);
+            output.SetSourcePlayable(clip);
+            _lyingGraph.Play();
+            _lyingGraph.Evaluate(0f);
+
+            Vector3 feet = (leftFoot.position + rightFoot.position) * 0.5f;
+            Vector3 lengthwise = Vector3.ProjectOnPlane(feet - head.position, transform.up);
+            if (lengthwise.sqrMagnitude < 0.25f)
+            {
+                _lyingGraph.Destroy();
+                animator.Rebind();
+                return false;
+            }
+            model.rotation = Quaternion.FromToRotation(lengthwise, transform.forward) * model.rotation;
+
+            float headZ = transform.InverseTransformPoint(head.position).z - 0.13f;
+            float feetZ = Mathf.Max(transform.InverseTransformPoint(leftFoot.position).z,
+                transform.InverseTransformPoint(rightFoot.position).z) + 0.12f;
+            Vector3 hipPosition = transform.InverseTransformPoint(hips.position);
+            model.position += transform.TransformVector(new Vector3(-hipPosition.x,
+                _hipHeight - hipPosition.y, -(headZ + feetZ) * 0.5f));
+            return true;
         }
 
         void PoseLeg(Animator animator, HumanBodyBones upperBone, HumanBodyBones lowerBone, Transform foot,
@@ -113,6 +158,12 @@ namespace CarX.NPC
             float phase = (Time.time * _breathsPerMinute / 60f + _breathPhase) * 2f * Mathf.PI;
             float breath = 0.45f * (1f - Mathf.Cos(phase));
             _chest.localRotation = Quaternion.AngleAxis(breath, _breathAxis) * _chestRest;
+        }
+
+        void OnDestroy()
+        {
+            if (_lyingGraph.IsValid())
+                _lyingGraph.Destroy();
         }
     }
 }

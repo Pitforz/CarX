@@ -6,8 +6,12 @@ namespace CarX.NPC
     [DefaultExecutionOrder(80)]
     internal sealed class NpcIdleMotion : MonoBehaviour
     {
-        const float AttentionRange = 4.6f;
-        const float AttentionPoll = 0.19f;
+        const float AttentionRange = 7.5f;
+        internal const float AttentionPoll = 0.19f;
+        static readonly int StandingIdle = Animator.StringToHash("Base Layer.Standing Idle");
+        static readonly int LookAround = Animator.StringToHash("Base Layer.Look Around");
+
+        [SerializeField] RuntimeAnimatorController _idleController;
 
         Animator _animator;
         NpcSpeechState _speech;
@@ -20,7 +24,7 @@ namespace CarX.NPC
         float _armSpread, _phase, _nextGlance, _glanceStarted, _glanceSide;
         float _nextAttentionPoll, _attentionStarted = float.NegativeInfinity;
         float _yaw, _pitch, _idleWeight = 1f, _attentionWeight;
-        bool _tracksHead, _attention, _restorePose;
+        bool _attention, _restorePose;
 
         internal static void Attach(MonoBehaviour owner, NpcSpeechState speech, float armClearance = 0f)
         {
@@ -32,13 +36,26 @@ namespace CarX.NPC
             motion._animator = animator;
             motion._speech = speech;
             motion._armSpread = Mathf.Tan(armClearance * Mathf.Deg2Rad);
-            motion._tracksHead = owner.GetComponent<DeniConversationAnimation>() == null;
         }
 
         void Start()
         {
+            if (_animator == null)
+                _animator = GetComponentInChildren<Animator>();
+            if (_animator == null || !_animator.isHuman)
+            {
+                enabled = false;
+                return;
+            }
+
+            if (_idleController != null)
+            {
+                _animator.runtimeAnimatorController = _idleController;
+                _animator.applyRootMotion = false;
+            }
+
             _spine = _animator.GetBoneTransform(HumanBodyBones.Spine);
-            if (_tracksHead)
+            if (GetComponent<DeniConversationAnimation>() == null)
                 _head = _animator.GetBoneTransform(HumanBodyBones.Head);
             if (_armSpread > 0f)
             {
@@ -52,7 +69,7 @@ namespace CarX.NPC
             int seed = GetEntityId().GetHashCode();
             _phase = (seed & 255) * 0.074f;
             _glanceSide = (seed & 1) == 0 ? -1f : 1f;
-            _nextGlance = Time.time + 3.5f + Mathf.Repeat(_phase, 4f);
+            _nextGlance = Time.time + (_idleController != null ? Random.Range(5f, 9f) : 3.5f + Mathf.Repeat(_phase, 4f));
             _glanceStarted = float.NegativeInfinity;
         }
 
@@ -83,14 +100,20 @@ namespace CarX.NPC
             {
                 if (!_attention && !speaking && _idleWeight > 0.8f)
                 {
-                    _glanceStarted = now;
-                    _glanceSide = -_glanceSide;
+                    if (_idleController != null)
+                        _animator.CrossFadeInFixedTime(LookAround, 0.35f, 0);
+                    else
+                    {
+                        _glanceStarted = now;
+                        _glanceSide = -_glanceSide;
+                    }
                 }
-                _nextGlance = now + 5.8f + Mathf.Repeat(now * 1.37f + _phase, 3.4f);
+                _nextGlance = now + (_idleController != null ? Random.Range(9f, 16f)
+                    : 5.8f + Mathf.Repeat(now * 1.37f + _phase, 3.4f));
             }
 
-            float breath = Mathf.Sin(now * 1.65f + _phase);
-            float sway = Mathf.Sin(now * 0.94f + _phase);
+            float breath = _idleController == null ? Mathf.Sin(now * 1.65f + _phase) : 0f;
+            float sway = _idleController == null ? Mathf.Sin(now * 0.94f + _phase) : 0f;
             float acknowledge = Peak(now - _attentionStarted, 0.68f) * _idleWeight;
             float glance = Peak(now - _glanceStarted, 1.55f) * (1f - _attentionWeight);
             for (int i = 0; i < _bones.Length; i++)
@@ -114,21 +137,33 @@ namespace CarX.NPC
             if (_listener == null || !_listener.isActiveAndEnabled)
                 _listener = Camera.main;
 
-            bool visible = false;
-            if (_listener != null && _listener.gameObject.scene == gameObject.scene)
-            {
-                Vector3 eye = (_head != null ? _head.position : transform.position + Vector3.up * 1.45f);
-                Vector3 target = _listener.transform.position;
-                Vector3 direction = target - eye;
-                if (direction.sqrMagnitude < AttentionRange * AttentionRange &&
-                    Vector3.Dot(transform.forward, direction.normalized) > 0.24f)
-                    visible = !Physics.Linecast(target, eye, out var hit, Physics.DefaultRaycastLayers,
-                        QueryTriggerInteraction.Ignore) || hit.transform.IsChildOf(transform);
-            }
+            Vector3 eye = _head != null ? _head.position : transform.position + Vector3.up * 1.45f;
+            bool visible = CanSeePlayer(transform, _listener, eye);
 
-            if (visible && !_attention && now - _attentionStarted > 2.8f)
-                _attentionStarted = now;
+            if (visible && !_attention)
+            {
+                if (now - _attentionStarted > 2.8f)
+                    _attentionStarted = now;
+                if (_idleController != null && (_animator.GetCurrentAnimatorStateInfo(0).fullPathHash == LookAround ||
+                    (_animator.IsInTransition(0) && _animator.GetNextAnimatorStateInfo(0).fullPathHash == LookAround)))
+                    _animator.CrossFadeInFixedTime(StandingIdle, 0.3f, 0);
+            }
             _attention = visible;
+        }
+
+        internal static bool CanSeePlayer(Transform actor, Camera listener, Vector3 eye)
+        {
+            if (listener == null || listener.gameObject.scene != actor.gameObject.scene)
+                return false;
+
+            Vector3 target = listener.transform.position;
+            Vector3 direction = target - eye;
+            if (direction.sqrMagnitude > AttentionRange * AttentionRange ||
+                Vector3.Dot(actor.forward, direction.normalized) < -0.26f)
+                return false;
+
+            return !Physics.Linecast(target, eye, out var hit, Physics.DefaultRaycastLayers,
+                QueryTriggerInteraction.Ignore) || hit.transform.IsChildOf(actor);
         }
 
         void PoseHead(float dt, float acknowledge, float glance, bool speaking, float now)
@@ -138,10 +173,10 @@ namespace CarX.NPC
                 : Vector3.forward;
             float yaw = Mathf.Atan2(aim.x, aim.z) * Mathf.Rad2Deg;
             float pitch = -Mathf.Atan2(aim.y, new Vector2(aim.x, aim.z).magnitude) * Mathf.Rad2Deg;
-            _yaw = Damp(_yaw, Mathf.Clamp(yaw, -44f, 44f) * _attentionWeight + _glanceSide * 14f * glance, 7f, dt);
+            _yaw = Damp(_yaw, Mathf.Clamp(yaw, -60f, 60f) * _attentionWeight + _glanceSide * 14f * glance, 7f, dt);
             _pitch = Damp(_pitch, Mathf.Clamp(pitch, -15f, 16f) * _attentionWeight, 8f, dt);
             float emphasis = speaking ? Mathf.Sin(now * 4.1f + _phase) * 1.5f : 0f;
-            float weight = Mathf.Lerp(0.3f, 1f, _idleWeight);
+            float weight = Mathf.Lerp(0.55f, 1f, _idleWeight);
             Rotate(_head, transform.up, _yaw * weight);
             Rotate(_head, transform.right, (_pitch + acknowledge * 4.6f + emphasis) * weight);
         }

@@ -1,0 +1,14 @@
+newmtl Body
+Kd 1 1 1
+
+newmtl Eyes
+Kd 1 1 1
+
+newmtl Lashes
+Kd 1 1 1
+
+newmtl Bottom
+Kd 1 1 1
+
+newmtl Shoes
+Kd 1 1 1

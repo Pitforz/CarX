@@ -766,7 +766,6 @@ namespace CarX.Gameplay
             yield return Line("Алексей: А сейчас хочешь заплатить мной.", 2.4f, "Alexey/Final_PayWithMe");
             yield return Line("Босс: Хватит. Он тебе свободу не даст. Я дам.", 2.8f, "Boss/StopListening", _boss);
             yield return Line("Александр: Если я не выстрелю, он нас обоих…", 2.7f, "Alexander/IfIDontShoot", _father);
-            yield return Line("Алексей: Пока ты целишься в меня, ему спокойно. Посмотри на него.", 4.1f);
             yield return Line("Александр: Ты меня выведешь?", 1.8f, "Alexander/WillYouGetMeOut", _father);
             yield return Line("Алексей: Да. За сделанное ответишь. Но здесь не останешься.",
                 3.7f, "Alexey/Final_LeaveTogether");

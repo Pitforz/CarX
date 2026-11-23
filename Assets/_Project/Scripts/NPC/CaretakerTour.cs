@@ -175,14 +175,14 @@ namespace CarX.NPC
             yield return SpeakCaretaker(3, "Так всё-таки полицейский?");
             yield return SpeakPlayer(3, "Младший офицер полиции.");
             yield return SpeakCaretaker(4, "Большая честь. Чем обязан, офицеру…");
-            yield return SpeakPlayer(4, "Алексей… Алексей Александрович.", "Alexey/Mark_FullName");
+            yield return SpeakPlayer(4, "Алексею Александровичу.", "Alexey/Mark_FullName");
             yield return SpeakCaretaker(5, "Эмигрант?");
             yield return SpeakPlayer(5, "Подростком переехал.");
             yield return SpeakCaretaker(6, "А я Марк. За порядком присматриваю.");
-            yield return SpeakPlayer(6, "Можешь рассказать про это место?");
             bool walksDuringAnswer = _tourAnimator != null && _entry == null && _fork != null;
             if (walksDuringAnswer)
                 StartWalk(_fork.position);
+            yield return SpeakPlayer(6, "Можешь рассказать про это место?");
             yield return SpeakCaretaker(7, "Конечно, живём на двух этажах.");
             yield return SpeakCaretaker(8, "Наверху люди, внизу — кто как устроился.");
 
@@ -195,11 +195,18 @@ namespace CarX.NPC
 
             if (_fork != null && !walksDuringAnswer)
                 StartWalk(_fork.position);
-            yield return SpeakCaretaker(9, "Вот это наши катакомбы. Не самое лучшее место на земле.");
+            yield return SpeakCaretaker(9, "Не самое лучшее место на земле.");
             yield return SpeakCaretaker(10, "Сырость, вонь, плесень, крысы. Негусто. Но людей тут всегда достаточно.");
-            yield return WaitForArrival();
+            if (walksDuringAnswer)
+            {
+                while (_walking && (transform.position - _fork.position).sqrMagnitude > 2.4f * 2.4f)
+                    yield return null;
+                StopWalking();
+            }
+            else
+                yield return WaitForArrival();
             if (_arrivalAudienceDistance > 0f && _fork != null &&
-                (transform.position - _fork.position).sqrMagnitude < 1f)
+                (transform.position - _fork.position).sqrMagnitude <= 2.5f * 2.5f)
             {
                 while (_player != null && PlayerDistanceSquared() > _arrivalAudienceDistance * _arrivalAudienceDistance)
                     yield return null;

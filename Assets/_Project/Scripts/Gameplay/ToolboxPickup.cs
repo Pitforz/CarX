@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace CarX.Gameplay
 {
@@ -14,6 +15,8 @@ namespace CarX.Gameplay
         BoxCollider _collider;
         Rigidbody _body;
         MeshRenderer _mesh;
+        Renderer[] _renderers;
+        ShadowCastingMode[] _groundShadowModes;
         MaterialPropertyBlock _properties;
         Transform _carryCamera;
 
@@ -24,6 +27,8 @@ namespace CarX.Gameplay
             _collider = GetComponent<BoxCollider>();
             _body = GetComponent<Rigidbody>();
             _mesh = GetComponent<MeshRenderer>();
+            _renderers = GetComponentsInChildren<Renderer>(true);
+            _groundShadowModes = new ShadowCastingMode[_renderers.Length];
             _properties = new MaterialPropertyBlock();
         }
 
@@ -45,8 +50,13 @@ namespace CarX.Gameplay
             _collider.enabled = false;
             _carryCamera = camera;
             Vector3 scale = transform.lossyScale;
-            foreach (var renderer in GetComponentsInChildren<Renderer>())
+            for (int i = 0; i < _renderers.Length; i++)
+            {
+                var renderer = _renderers[i];
+                _groundShadowModes[i] = renderer.shadowCastingMode;
+                renderer.shadowCastingMode = ShadowCastingMode.Off;
                 renderer.allowOcclusionWhenDynamic = false;
+            }
             transform.SetParent(camera, false);
             Vector3 cameraScale = camera.lossyScale;
             transform.localScale = new Vector3(scale.x / cameraScale.x, scale.y / cameraScale.y, scale.z / cameraScale.z);
@@ -67,6 +77,8 @@ namespace CarX.Gameplay
             _carryCamera = null;
             transform.SetParent(null, true);
             transform.SetPositionAndRotation(position, Quaternion.Euler(0f, yaw, 0f));
+            for (int i = 0; i < _renderers.Length; i++)
+                _renderers[i].shadowCastingMode = _groundShadowModes[i];
             _collider.enabled = true;
             foreach (var playerCollider in playerColliders)
                 if (playerCollider != _collider && playerCollider.enabled && playerCollider.gameObject.activeInHierarchy)
