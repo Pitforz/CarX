@@ -91,3 +91,9 @@ desktop.ini
 /Assets/_Project/Scenes/MAIN_LEVEL_GRAPHICS_lab/MAIN_LEVEL_GRAPHICS_lab Baking Set-Default.CellOptionalData.bytes
 /Assets/_Project/Scenes/MAIN_LEVEL_GRAPHICS_lab/MAIN_LEVEL_GRAPHICS_lab Baking Set.CellSupportData.bytes
 /Assets/boxes/Abandoned World/Wood Box Free/Textures/T_Box_wood_4_Normal.png
+
+# Generator model distributed separately with its Unity metadata.
+/Assets/model/
+/Assets/model.meta
+/Assets/model.zip
+/Assets/model.zip.meta
