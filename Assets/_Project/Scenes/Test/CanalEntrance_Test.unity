@@ -196826,6 +196826,7 @@ MonoBehaviour:
   - {fileID: 8300000, guid: 6348156cd6a440a5a9b3de3f05ef4266, type: 3}
   _answerOnlyOnce: 1
   _automaticGreetingDistance: 7.5
+  _startsFatherSearch: 1
   _afterAnswerThought: "Даже здесь ты решил, что переиграешь их."
   _introductionPose: {fileID: 722200000000000015}
   _activateAfterIntroduction: {fileID: 722200000000000050}
@@ -198167,6 +198168,9 @@ MonoBehaviour:
   _firstQuestionLine: "Слушай, тут пожилой мужчина не проходил? Высокий, с конвертом в руках."
   _secondQuestion: ""
   _closeOption: "Уйти"
+  _firstQuestionVoice: {fileID: 8300000, guid: 22cc16bda0d642ef8e06b1b16710afe9, type: 3}
+  _firstAnswerVoices:
+  - {fileID: 8300000, guid: 9a7828de98234a42bd0c0ef12f83bfa7, type: 3}
   _firstAnswer:
   - "Нет, не видел. Я здесь недавно. Может, он раньше прошёл."
 --- !u!114 &723300000000000021
@@ -198371,6 +198375,9 @@ MonoBehaviour:
   _firstQuestionLine: "Слушай, у тебя есть ключ от двери на второй этаж?"
   _secondQuestion: ""
   _closeOption: "Уйти"
+  _firstQuestionVoice: {fileID: 8300000, guid: b479a0eb52e241dbb4af65bc72b53e10, type: 3}
+  _firstAnswerVoices:
+  - {fileID: 8300000, guid: becb8423cc5f4bd3a20f024ad4afd12d, type: 3}
   _firstAnswer:
   - "Ключ? Есть один. Двести баксов, и он твой."
   _requiresKeyObjective: 1
@@ -198406,6 +198413,9 @@ MonoBehaviour:
   _firstQuestionLine: "Слушай, у тебя есть ключ от двери на второй этаж?"
   _secondQuestion: ""
   _closeOption: "Уйти"
+  _firstQuestionVoice: {fileID: 8300000, guid: b479a0eb52e241dbb4af65bc72b53e10, type: 3}
+  _firstAnswerVoices:
+  - {fileID: 8300000, guid: ea619fad00254651b5dd5e6ae71d81c0, type: 3}
   _firstAnswer:
   - "Нет у меня ключа. Я вниз давно не спускаюсь."
   _requiresKeyObjective: 1

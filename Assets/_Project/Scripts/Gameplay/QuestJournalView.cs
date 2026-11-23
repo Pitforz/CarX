@@ -12,10 +12,11 @@ namespace CarX.Gameplay
         static readonly Color RustInk = new Color32(118, 62, 31, 255);
 
         readonly TypewriterMenuText _text;
-        readonly string _testTitle;
-        readonly string _testDescription;
+        string _testTitle;
+        string _testDescription;
         readonly UnityEngine.UI.Button _questButton;
         readonly UnityEngine.UI.Text _trackingStatus;
+        readonly UnityEngine.UI.Text _questRowTitle;
         readonly UnityEngine.UI.Button _deniQuestButton;
         readonly UnityEngine.UI.Text _deniTrackingStatus;
         readonly UnityEngine.UI.Text _objectiveTitle;
@@ -41,9 +42,9 @@ namespace CarX.Gameplay
             _text.MakeLabel(Root, "Notebook Label", "ПОЛЕВОЙ ДНЕВНИК", new Rect(206, 93, 296, 28), 14, SoftInk, bold: true);
             _text.MakeLabel(Root, "Journal Title", "Задания", new Rect(205, 136, 305, 48), 34, Ink, bold: true);
 
-            _questButton = AddQuestRow(214f, title, trackQuest, out var trackingStatus);
+            _questButton = AddQuestRow(214f, title, trackQuest, out var trackingStatus, out _questRowTitle);
             _trackingStatus = trackingStatus;
-            _deniQuestButton = AddQuestRow(290f, "Инструменты Дени", trackDeniQuest, out var deniTrackingStatus);
+            _deniQuestButton = AddQuestRow(290f, "Инструменты Дени", trackDeniQuest, out var deniTrackingStatus, out _);
             _deniTrackingStatus = deniTrackingStatus;
 
             _text.MakeLabel(Root, "Objective Label", "ТЕКУЩАЯ ЦЕЛЬ", new Rect(546, 138, 526, 28), 14, RustInk, bold: true);
@@ -62,7 +63,8 @@ namespace CarX.Gameplay
             _text.MakeLabel(Root, "Close Journal Hint", "закрыть", new Rect(994, 610, 90, 27), 16, SoftInk);
         }
 
-        UnityEngine.UI.Button AddQuestRow(float top, string title, UnityAction trackQuest, out UnityEngine.UI.Text status)
+        UnityEngine.UI.Button AddQuestRow(float top, string title, UnityAction trackQuest, out UnityEngine.UI.Text status,
+            out UnityEngine.UI.Text titleLabel)
         {
             var row = TypewriterMenuText.Place(Root, title, typeof(UnityEngine.UI.RawImage), new Rect(203, top, 291, 72));
             var mark = row.GetComponent<UnityEngine.UI.RawImage>();
@@ -71,9 +73,16 @@ namespace CarX.Gameplay
             var button = row.gameObject.AddComponent<UnityEngine.UI.Button>();
             button.targetGraphic = mark;
             button.onClick.AddListener(trackQuest);
-            _text.MakeLabel(row, "Quest Title", title, new Rect(19, 7, 254, 35), 22, Ink, bold: true);
+            titleLabel = _text.MakeLabel(row, "Quest Title", title, new Rect(19, 7, 254, 35), 22, Ink, bold: true);
             status = _text.MakeLabel(row, "Tracking Status", "", new Rect(19, 40, 254, 21), 15, RustInk, bold: true);
             return button;
+        }
+
+        internal void SetMainQuest(string title, string description)
+        {
+            _testTitle = title;
+            _testDescription = description;
+            _questRowTitle.text = title;
         }
 
         internal void SetQuests(bool testTracked, bool deniAvailable, bool deniSelected, bool deniCompleted,

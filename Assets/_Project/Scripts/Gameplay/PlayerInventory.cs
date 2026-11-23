@@ -1,3 +1,4 @@
+using CarX.NPC;
 using StarterAssets;
 using UnityEngine;
 #if ENABLE_INPUT_SYSTEM
@@ -103,12 +104,18 @@ namespace CarX.Gameplay
             bool drop = keyboard?.qKey.wasPressedThisFrame == true;
             bool pickup = keyboard?.eKey.wasPressedThisFrame == true;
             bool confirm = mouse?.leftButton.wasPressedThisFrame == true;
+            bool grantKey = keyboard != null &&
+                (keyboard.digit9Key.wasPressedThisFrame || keyboard.numpad9Key.wasPressedThisFrame);
 #else
             bool toggle = Input.GetKeyDown(KeyCode.Tab);
             bool drop = Input.GetKeyDown(KeyCode.Q);
             bool pickup = Input.GetKeyDown(KeyCode.E);
             bool confirm = Input.GetMouseButtonDown(0);
+            bool grantKey = Input.GetKeyDown(KeyCode.Alpha9) || Input.GetKeyDown(KeyCode.Keypad9);
 #endif
+            if (grantKey && !HasLowerFloorKey)
+                GrantKeyForTesting();
+
             if (toggle)
             {
                 SetOpen(!_open);
@@ -533,16 +540,35 @@ namespace CarX.Gameplay
             if (HasLowerFloorKey || IsCarryingTools || (_menus != null && _menus.IsNpcSpeaking))
                 return false;
 
+            GrantLowerFloorKey(key, inspect: true);
+            return true;
+        }
+
+        void GrantKeyForTesting()
+        {
+            foreach (var deni in FindObjectsByType<DeniDialogue>())
+            {
+                if (deni.gameObject.scene != gameObject.scene || deni.RewardKey == null)
+                    continue;
+
+                GrantLowerFloorKey(deni.RewardKey, inspect: false);
+                _menus?.RefreshQuestDisplay();
+                return;
+            }
+        }
+
+        void GrantLowerFloorKey(DoorKeyPickup key, bool inspect)
+        {
             HasLowerFloorKey = true;
             _lowerFloorKeyIcon = key.Icon;
             if (_keyInspectionHand != null && key.Mesh != null && key.Material != null)
             {
                 _keyView = new PlayerKeyView(_keyInspectionHand, _pistol.ViewCamera, transform, key.Mesh, key.Material);
-                ShowLowerFloorKey();
+                if (inspect)
+                    ShowLowerFloorKey();
             }
             RefreshWheel();
             _hud.ShowSubtitle($"Получен предмет: {LowerFloorKeyName}");
-            return true;
         }
 
         bool ShowLowerFloorKey()

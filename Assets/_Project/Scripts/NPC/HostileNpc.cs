@@ -70,6 +70,7 @@ namespace CarX.NPC
         PlayerPistol _pistol;
         Flashlight _playerFlashlight;
         ResidentModelPose _residentPose;
+        ResidentChaseVoice _chaseVoice;
         PlayerStatusHud _playerHud;
         FirstPersonController _playerMovement;
         CharacterController _playerCollider;
@@ -235,6 +236,8 @@ namespace CarX.NPC
             }
 
             bool illuminated = _provokedByFlashlight && IsLitByFlashlight();
+            if (illuminated)
+                _chaseVoice ??= ResidentChaseVoice.ForPlayer(_player);
             if (_provokedByFlashlight && !TrackFlashlightTarget(illuminated))
             {
                 if (_assistingAlly)
@@ -284,6 +287,8 @@ namespace CarX.NPC
                     }
                     else if (knowsPlayerPosition)
                     {
+                        if (distance > AttackRange)
+                            _chaseVoice?.TryShout(transform);
                         MoveTo(_lastKnownPosition, _chaseSpeed, 0.9f);
                         if (!FaceMovement())
                             Face(playerCenter - transform.position);
@@ -394,6 +399,7 @@ namespace CarX.NPC
                 return true;
 
             _provoked = false;
+            _chaseVoice = null;
             _darknessStartedAt = -1f;
             _hadVisualContact = false;
             _lastContactAt = float.NegativeInfinity;

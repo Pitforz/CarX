@@ -71,6 +71,7 @@ namespace CarX.NPC
         internal bool QuestCompleted { get; private set; }
         internal bool ToolsReturned { get; private set; }
         internal bool KeyReady { get; private set; }
+        internal DoorKeyPickup RewardKey => _rewardKey;
         internal bool HasGreetedForTools => _nextReturnLine > 0;
         internal bool HasReturnDialogueRemaining => _returnLines != null && _nextReturnLine < _returnLines.Length;
         internal bool NeedsLowerFloorHint(bool hasHint) => _requiresLowerFloorHint && !hasHint;
@@ -182,7 +183,7 @@ namespace CarX.NPC
         internal bool TryTakeKey(PlayerStatusHud hud, PlayerInventory inventory)
         {
             if (!isActiveAndEnabled || !KeyReady || IsSpeaking || _rewardKey == null || inventory == null ||
-                !inventory.ReceiveLowerFloorKey(_rewardKey))
+                (!inventory.HasLowerFloorKey && !inventory.ReceiveLowerFloorKey(_rewardKey)))
                 return false;
 
             KeyReady = false;
@@ -223,7 +224,7 @@ namespace CarX.NPC
                 clip: _askToCheckLightVoice ?? DialogueVoice.GetStoryClip("Alexey/Deni_CheckLight"));
             if (!health.CanRepairFlashlight)
             {
-                yield return Line("С фонариком всё в порядке.");
+                yield return Line("С фонариком всё в порядке.", clip: DialogueVoice.GetStoryClip("Deni/FlashlightOkay"));
                 yield break;
             }
             yield return Line("Давай. Контакт тут капризный.",
@@ -236,10 +237,7 @@ namespace CarX.NPC
         IEnumerator Speak()
         {
             if (IsWaitingInWorkshop)
-            {
-                yield return Line("Как найдёшь ящик, неси сюда. Я подожду.");
                 yield break;
-            }
 
             if (!HasQuest)
             {
@@ -274,8 +272,10 @@ namespace CarX.NPC
 
             if (ReturnsToolsInWorkshop)
             {
-                yield return Line("Я буду ждать у себя в мастерской. Принеси ящик туда.");
-                yield return Line("От зала с койками сверни в правый тоннель. Мастерская в боковой комнате.");
+                yield return Line("Я буду ждать у себя в мастерской. Принеси ящик туда.",
+                    clip: DialogueVoice.GetStoryClip("Deni/WaitInWorkshop"));
+                yield return Line("От зала с койками сверни в правый тоннель. Мастерская в боковой комнате.",
+                    clip: DialogueVoice.GetStoryClip("Deni/WorkshopRoute"));
             }
         }
 

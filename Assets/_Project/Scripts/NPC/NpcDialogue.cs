@@ -33,6 +33,7 @@ namespace CarX.NPC
         [SerializeField] AudioClip[] _firstAnswerVoices;
         [SerializeField] bool _grantsLowerFloorHint;
         [SerializeField] bool _requiresKeyObjective;
+        [SerializeField] bool _startsFatherSearch;
         [SerializeField] bool _answerOnlyOnce;
         [SerializeField, Range(0f, 25f)] float _idleArmClearance;
         [SerializeField, Min(0f)] float _automaticGreetingDistance;
@@ -230,6 +231,8 @@ namespace CarX.NPC
                 {
                     _introduced = true;
                     IntroductionCompletedAt = Time.time;
+                    if (_startsFatherSearch)
+                        _nearbyPlayer?.StartFatherSearch();
                     if (_activateAfterIntroduction != null)
                         _activateAfterIntroduction.SetActive(true);
                 }

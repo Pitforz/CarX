@@ -24,6 +24,8 @@ namespace CarX.Gameplay
         const string FindKeyHint = "Расспроси местных, где можно достать ключ.";
         const string InvestigateFatherObjective = "Разузнать, что случилось с отцом";
         const string InvestigateFatherHint = "Расспроси местных об отце и о том, как спуститься на второй этаж.";
+        const string FollowFatherTitle = "По следам отца";
+        const string FollowFatherHint = "Пройди дальше по тоннелям и выясни, куда увели отца.";
         const string MouseSensitivityPref = "CarX.MouseSensitivityPercent";
         const string MasterVolumePref = "CarX.MasterVolumePercent";
         const int DefaultSensitivity = 100;
@@ -88,6 +90,7 @@ namespace CarX.Gameplay
         bool _questTracked;
         bool _trackingDeniQuest;
         bool _hasLowerFloorHint;
+        bool _followingFather;
         bool _restartingScene;
         Menu _menu;
         float _pauseStartedAt;
@@ -471,8 +474,8 @@ namespace CarX.Gameplay
             {
                 if (!deni.ToolsReturned)
                 {
-                    string question = deni.IsWaitingInWorkshop ? "Я ещё ищу ящик" : "Где мастерская?";
-                    AddDeniQuestion(DeniQuestion.Talk, deni.HasQuest ? question : npc.FirstQuestion);
+                    if (!deni.IsWaitingInWorkshop)
+                        AddDeniQuestion(DeniQuestion.Talk, deni.HasQuest ? "Где мастерская?" : npc.FirstQuestion);
                 }
                 else if (deni.HasReturnDialogueRemaining)
                     AddDeniQuestion(DeniQuestion.ContinueReturn, "Продолжить разговор");
@@ -700,7 +703,7 @@ namespace CarX.Gameplay
                 return;
 
             _trackedQuest.gameObject.SetActive(_menu != Menu.Dying && _menu != Menu.Death && _menu != Menu.Quests &&
-                (HasTrackedQuest || HasKeyObjective) &&
+                (HasTrackedQuest || HasKeyObjective || _followingFather) &&
                 (_inventory == null || !_inventory.IsOpen));
             UpdateLayout();
         }
@@ -1104,6 +1107,16 @@ namespace CarX.Gameplay
 
         internal void RegisterWorkshop(WorkshopEncounter workshop) => _workshop = workshop;
 
+        internal void StartFatherSearch()
+        {
+            _followingFather = true;
+            _questTracked = true;
+            _trackingDeniQuest = false;
+            if (_overlay == null)
+                BuildMenus();
+            RefreshQuestDisplay();
+        }
+
         internal void TrackWorkshopObjective(DeniDialogue deni)
         {
             if (_deniQuest == deni)
@@ -1160,6 +1173,8 @@ namespace CarX.Gameplay
                 }
             }
             string journalTitle = returning ? objective : DeniQuestTitle;
+            if (_followingFather)
+                _questJournal?.SetMainQuest(FollowFatherTitle, FollowFatherHint);
             _questJournal?.SetQuests(_questTracked && !_trackingDeniQuest, _deniQuest != null,
                 _trackingDeniQuest, completed, journalTitle, description);
 
@@ -1172,7 +1187,9 @@ namespace CarX.Gameplay
                 trackedText = returning
                     ? $"{objective}\n{description}"
                     : "Инструменты Дени\n" + objective + (aimingAtExtortionist ? "\nУдерживай ПКМ" : "");
-            if (HasKeyObjective)
+            if (_followingFather)
+                trackedText = $"{FollowFatherTitle}\n{FollowFatherHint}";
+            else if (HasKeyObjective)
             {
                 string keyText = keyReady ? "Забрать ключ у Дени\nПодойди к нему и нажми E." : $"{FindKeyObjective}\n{FindKeyHint}";
                 bool showOtherObjective = HasTrackedQuest && (!_trackingDeniQuest || !returning);
