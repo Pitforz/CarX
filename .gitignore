@@ -84,3 +84,9 @@ desktop.ini
 # Asset packs shared separately (from carx-scenes-integration)
 /Assets/Abandoned World/
 /Assets/Abandoned World.meta
+
+# Generator model distributed separately with its Unity metadata.
+/Assets/model/
+/Assets/model.meta
+/Assets/model.zip
+/Assets/model.zip.meta
