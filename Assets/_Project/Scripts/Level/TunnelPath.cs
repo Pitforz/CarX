@@ -692,8 +692,10 @@ namespace CarX.Level
             for (int k = 0; k <= last; k++)
             {
                 var sl = slabs[k];
-                float s0 = sl.tStart - (k > 0 ? ext : (deadS ? behind : 0f));
-                float s1 = sl.length - sl.tEnd + (k < last ? ext : (deadE ? behind : 0f));
+                // open ends (another tunnel, a chamber, a T-join) overlap the neighbour too; whatever reaches into its air
+                // is trimmed away by TunnelSkin, so nothing of it shows
+                float s0 = sl.tStart - (k > 0 ? ext : (deadS ? behind : EndOverlap));
+                float s1 = sl.length - sl.tEnd + (k < last ? ext : (deadE ? behind : EndOverlap));
                 if (k == 0 && deadS) Cap(kit, sl, prof, sl.tStart - behind, off * 1.2f, sl.fwd, null);
                 if (k == last && deadE) Cap(kit, sl, prof, sl.length - sl.tEnd + behind, off * 1.2f, -sl.fwd, null);
                 {
@@ -717,10 +719,8 @@ namespace CarX.Level
                     Vector3 C = P(sl, prof, j1, s1, off), D = P(sl, prof, e, s1, off);
                     Vector2 inw = prof.EdgeInward(e);
                     var nrm = sl.Dir(inw);
+                    // side openings (T-joins) are not cut out here: the branch's air trims the skin exactly, with no gap round it
                     List<List<Vector2>> hit = null;
-                    if (sc != null)
-                        foreach (var cut in sc)
-                            if (cut.side * inw.x < -0.05f) (hit ??= new List<List<Vector2>>()).Add(Grow(cut.poly, off * 0.8f));
                     // faces look into the tunnel: the shadow normal bias moves them outwards, away from the walls
                     if (hit != null) QuadCut(kit, 0, sl, A, B, C, D, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, nrm, hit);
                     else kit.Quad(0, A, B, C, D, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, nrm);
@@ -770,6 +770,8 @@ namespace CarX.Level
             }
             TunnelSkin.Submit(skinPart);
         }
+
+        const float EndOverlap = 0.08f;
 
         static float OpenEndReach(List<Vector2> reveal, float off)
         {
