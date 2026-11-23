@@ -41,7 +41,7 @@ namespace CarX.Level
         public static readonly string[] SideNames = { "Север (+Z)", "Восток (+X)", "Юг (-Z)", "Запад (-X)" };
 
         [NonSerialized] bool dirty = true;
-        [NonSerialized] Mesh mesh;
+        [NonSerialized] Mesh mesh, skinMesh;
         [NonSerialized] int signature;
         [NonSerialized] public string warning;
 
@@ -78,7 +78,13 @@ namespace CarX.Level
         void OnDestroy()
         {
             if (mesh != null) DestroyImmediate(mesh);
+            if (skinMesh != null) DestroyImmediate(skinMesh);
+            TunnelSkin.Remove(skinPart);
+            if (skinPart != null && skinPart.mesh != null) DestroyImmediate(skinPart.mesh);
         }
+
+        void OnDisable() { TunnelSkin.Remove(skinPart); }
+        [NonSerialized] TunnelSkin.Part skinPart;
 
         int Signature()
         {
@@ -118,6 +124,8 @@ namespace CarX.Level
             var kit = new MeshKit(5);
             var rnd = new System.Random(seed * 31 + 7);
             float line = dirtLine > 0.01f ? dirtLine : -1f;
+            var skinHoles = new List<Vector2>[4];
+            var skinCentres = new Vector2[4];
 
             for (int side = 0; side < 4; side++)
             {
@@ -129,7 +137,12 @@ namespace CarX.Level
                 Vector2 centre;
                 List<Vector2> tris;
                 var path = GetSide(side);
-                if (path != null && Opening(path, d, r, halfDepth, halfLen, out inner, out centre)) tris = MeshKit.RingFill(centre, inner, outer);
+                if (path != null && Opening(path, d, r, halfDepth, halfLen, out inner, out centre))
+                {
+                    tris = MeshKit.RingFill(centre, inner, outer);
+                    skinHoles[side] = inner;
+                    skinCentres[side] = centre;
+                }
                 else tris = new List<Vector2> { outer[0], outer[1], outer[2], outer[0], outer[2], outer[3] };
                 var below = new List<Vector2>();
                 var above = new List<Vector2>();
@@ -180,10 +193,13 @@ namespace CarX.Level
             mr.receiveShadows = true;
             mr.lightProbeUsage = LightProbeUsage.Off;
             mr.reflectionProbeUsage = ReflectionProbeUsage.Off;
+            TunnelGI.Setup(mr);   // baked bounce light from probe volumes (lighting thread)
             var mc = gen.GetComponent<MeshCollider>();
             if (mc == null) mc = gen.gameObject.AddComponent<MeshCollider>();
             mc.sharedMesh = null;
             mc.sharedMesh = mesh;
+
+            BuildSkin(skinHoles, skinCentres, hasShaft && shaft != null ? op : (ShaftOpening?)null, cx, mats);
 
             // shaft
             if (hasShaft && shaft != null)
@@ -259,6 +275,69 @@ namespace CarX.Level
                         new Vector2(a.x * 0.5f + uOff, a.y * 0.5f + vOff), new Vector2(b.x * 0.5f + uOff, b.y * 0.5f + vOff),
                         new Vector2(c.x * 0.5f + uOff, c.y * 0.5f + vOff), -d);
             }
+        }
+
+        /// <summary>Light-tight black skin round the chamber, a little outside its walls: through a slit at a seam the eye
+        /// meets black, and outside light is shadowed. Open only exactly at the tunnel openings and the shaft.</summary>
+        void BuildSkin(List<Vector2>[] holes, Vector2[] centres, ShaftOpening? op, float cx, TunnelMaterials mats)
+        {
+            const float off = 0.15f;
+            float hx = sizeX * 0.5f + off, hz = sizeZ * 0.5f + off, y0 = -off, y1 = height + off;
+            var kit = new MeshKit(1);
+            for (int side = 0; side < 4; side++)
+            {
+                Vector3 d = SideDirs[side];
+                Vector3 r = Vector3.Cross(Vector3.up, d);
+                float depth = HalfDepth(side) + off, len = HalfLength(side) + off;
+                var outer = new List<Vector2> { new Vector2(-len, y0), new Vector2(len, y0), new Vector2(len, y1), new Vector2(-len, y1) };
+                var tris = holes[side] != null ? MeshKit.RingFill(centres[side], holes[side], outer)
+                                               : new List<Vector2> { outer[0], outer[1], outer[2], outer[0], outer[2], outer[3] };
+                for (int t = 0; t + 2 < tris.Count; t += 3)
+                    kit.Tri(0, W(tris[t], d, r, depth), W(tris[t + 1], d, r, depth), W(tris[t + 2], d, r, depth), Vector2.zero, Vector2.zero, Vector2.zero, -d);
+            }
+            kit.Quad(0, new Vector3(-hx, y0, -hz), new Vector3(hx, y0, -hz), new Vector3(hx, y0, hz), new Vector3(-hx, y0, hz),
+                     Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, Vector3.up);
+            var ceilOuter = new List<Vector2> { new Vector2(-hx, -hz), new Vector2(hx, -hz), new Vector2(hx, hz), new Vector2(-hx, hz) };
+            List<Vector2> ct;
+            if (op.HasValue)
+            {
+                var c = new Vector2(cx, 0f);
+                ct = MeshKit.RingFill(c, op.Value.Polygon(c), ceilOuter);
+            }
+            else ct = new List<Vector2> { ceilOuter[0], ceilOuter[1], ceilOuter[2], ceilOuter[0], ceilOuter[2], ceilOuter[3] };
+            for (int t = 0; t + 2 < ct.Count; t += 3)
+                kit.Tri(0, new Vector3(ct[t].x, y1, ct[t].y), new Vector3(ct[t + 1].x, y1, ct[t + 1].y), new Vector3(ct[t + 2].x, y1, ct[t + 2].y),
+                        Vector2.zero, Vector2.zero, Vector2.zero, Vector3.down);
+
+            var go = transform.Find("_Skin");
+            if (go == null)
+            {
+                go = new GameObject("_Skin").transform;
+                go.SetParent(transform, false);
+            }
+            var mf = go.GetComponent<MeshFilter>();
+            if (mf == null) mf = go.gameObject.AddComponent<MeshFilter>();
+            var mr = go.GetComponent<MeshRenderer>();
+            if (mr == null) mr = go.gameObject.AddComponent<MeshRenderer>();
+            TunnelMaterials.ApplySkin(mr, mats);
+            if (skinPart == null) skinPart = new TunnelSkin.Part();
+            skinPart.owner = transform;
+            skinPart.filter = mf;
+            TunnelSkin.TakeRaw(skinPart, kit);
+            skinPart.volumes.Clear();
+            float ihx = sizeX * 0.5f, ihz = sizeZ * 0.5f;
+            skinPart.volumes.Add(new TunnelSkin.Volume
+            {
+                o = Vector3.zero, u = Vector3.right, v = Vector3.up, w = Vector3.forward,
+                poly = new[] { new Vector2(-ihx, 0f), new Vector2(ihx, 0f), new Vector2(ihx, height), new Vector2(-ihx, height) }, w0 = -ihz, w1 = ihz
+            });
+            if (op.HasValue)
+                skinPart.volumes.Add(new TunnelSkin.Volume
+                {
+                    o = Vector3.zero, u = Vector3.right, v = Vector3.forward, w = Vector3.up,
+                    poly = op.Value.Polygon(new Vector2(cx, 0f)).ToArray(), w0 = height - 0.3f, w1 = height + 8f
+                });
+            TunnelSkin.Submit(skinPart);
         }
 
         static Vector3 W(Vector2 v, Vector3 d, Vector3 r, float halfDepth) { return d * halfDepth + r * v.x + Vector3.up * v.y; }

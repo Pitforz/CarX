@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace CarX.Level
 {
@@ -58,6 +59,35 @@ namespace CarX.Level
             var list = new System.Collections.Generic.List<Material>(TunnelSet());
             if (concreteVariants != null) foreach (var m in concreteVariants) if (m != null) list.Add(m);
             return list.ToArray();
+        }
+
+        static Material skin;
+
+        /// <summary>Matt black, unlit: the light-tight skin behind tunnel walls. No light ever brightens it.</summary>
+        public static Material Skin
+        {
+            get
+            {
+                if (skin != null) return skin;
+                var sh = Shader.Find("Universal Render Pipeline/Unlit");
+                if (sh == null) return null;
+                skin = new Material(sh) { name = "M_TunnelSkin (generated)", hideFlags = HideFlags.DontSave };
+                skin.SetColor("_BaseColor", Color.black);
+                return skin;
+            }
+        }
+
+        /// <summary>Renderer setup of a light-tight skin: drawn black, casts shadows (both sides), receives nothing.</summary>
+        public static void ApplySkin(MeshRenderer mr, TunnelMaterials mats)
+        {
+            var m = Skin;
+            mr.sharedMaterial = m != null ? m : (mats != null ? mats.concrete : null);
+            mr.shadowCastingMode = m != null ? ShadowCastingMode.TwoSided : ShadowCastingMode.ShadowsOnly;
+            mr.receiveShadows = false;
+            mr.lightProbeUsage = LightProbeUsage.Off;
+            mr.reflectionProbeUsage = ReflectionProbeUsage.Off;
+            mr.staticShadowCaster = false;
+            TunnelGI.Setup(mr);   // an occluder for the probe bake (it stays black itself)
         }
     }
 }

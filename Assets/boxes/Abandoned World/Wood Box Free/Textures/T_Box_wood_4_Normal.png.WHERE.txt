@@ -1,0 +1,10 @@
+Файл больше порога 25 МБ, в git его нет.
+
+Было в репозитории: Assets/boxes/Abandoned World/Wood Box Free/Textures/T_Box_wood_4_Normal.png
+Сейчас: C:\Dev\CarX-pack\Assets\boxes\Abandoned World\Wood Box Free\Textures\T_Box_wood_4_Normal.png
+Размер: 25.37 МБ (26602264 байт)
+
+Материал ящиков M_Box_Wood_4 (сцена MAIN_LEVEL_GRAPHICS_lab) ссылается на эту нормаль, guid 8725254b37ebe6c4bb1df61855b401d2. Без файла ящики в лаборатории откроются без карты нормалей.
+
+Перед открытием Unity верните файл на прежнее место:
+Assets/boxes/Abandoned World/Wood Box Free/Textures/T_Box_wood_4_Normal.png

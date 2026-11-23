@@ -1,0 +1,10 @@
+Файл больше порога 25 МБ, в git его нет.
+
+Было в репозитории: Assets/_Project/Scenes/MAIN_LEVEL_GRAPHICS_lab/MAIN_LEVEL_GRAPHICS_lab Baking Set-Default.CellOptionalData.bytes
+Сейчас: C:\Dev\CarX-pack\Assets\_Project\Scenes\MAIN_LEVEL_GRAPHICS_lab\MAIN_LEVEL_GRAPHICS_lab Baking Set-Default.CellOptionalData.bytes
+Размер: 25.50 МБ (26738688 байт)
+
+Это данные запечённого Probe Volume сцены MAIN_LEVEL_GRAPHICS_lab (Baking Set, guid сцены 703a649045858bb45bebce0d112d6237). Без файла запечённый свет лаборатории не откроется.
+
+Перед открытием Unity верните файл на прежнее место:
+Assets/_Project/Scenes/MAIN_LEVEL_GRAPHICS_lab/MAIN_LEVEL_GRAPHICS_lab Baking Set-Default.CellOptionalData.bytes

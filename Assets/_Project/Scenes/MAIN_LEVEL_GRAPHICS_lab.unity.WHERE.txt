@@ -1,0 +1,10 @@
+Файл больше порога 25 МБ, в git его нет.
+
+Было в репозитории: Assets/_Project/Scenes/MAIN_LEVEL_GRAPHICS_lab.unity
+Сейчас: C:\Dev\CarX-pack\Assets\_Project\Scenes\MAIN_LEVEL_GRAPHICS_lab.unity
+Размер: 33.18 МБ (34790559 байт)
+
+Катсцена Cutscene_NewGame (targetScene MAIN_LEVEL_GRAPHICS_lab) и EditorBuildSettings ссылаются на эту сцену по имени и guid 703a649045858bb45bebce0d112d6237. После переноса ссылка ломается: файла на прежнем месте нет.
+
+Перед открытием Unity верните файл на прежнее место:
+Assets/_Project/Scenes/MAIN_LEVEL_GRAPHICS_lab.unity

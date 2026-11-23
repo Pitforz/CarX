@@ -7,6 +7,15 @@
 //   float4 _ShaftOpening;  // rect opening: xMin, zMin, xMax, zMax (shaft space)
 //   float4 _ShaftParams;   // x: opening plane y, y: grate plane y, z: round radius (0 = rect), w: edge softness
 //   float4 _ShaftBars;     // x: bar pitch along x, y: bar width, z: pitch along z, w: bar origin x
+// Optional (define CARX_SHAFT_SHARP before the include and declare it):
+//   float4 _ShaftSharp;    // x: bar shadow blur at the grate (m), y: its growth per metre below the grate,
+//                          // z: opening edge blur (m), w: its growth per metre below the opening
+
+#ifdef CARX_SHAFT_SHARP
+    #define CARX_SHARP _ShaftSharp
+#else
+    #define CARX_SHARP float4(0.002, 0.004, _ShaftParams.w, 0.012)
+#endif
 
 float CarX_FogVisibility(float eyeDepth)
 {
@@ -39,30 +48,35 @@ float CarX_Bars(float2 g, float pen)
     return m;
 }
 
-// How much direct daylight reaches point p (shaft space). Includes the opening mask, bar shadows and spreading.
+// Inside the opening outline at plane point g (rect or round), blurred by soft (m).
+float CarX_Aperture(float2 g, float soft)
+{
+    soft = max(soft, 1e-4);
+    if (_ShaftParams.z > 0.0)
+        return saturate((_ShaftParams.z - length(g)) / (2.5 * soft) + 0.5);
+    float dx = min(g.x - _ShaftOpening.x, _ShaftOpening.z - g.x);
+    float dz = min(g.y - _ShaftOpening.y, _ShaftOpening.w - g.y);
+    return saturate(dx / (2.5 * soft) + 0.5) * saturate(dz / (2.5 * soft) + 0.5);
+}
+
+// How much direct daylight reaches point p (shaft space): through the top of the shaft (grate bars) and through the
+// opening in the tunnel ceiling, seen from the light point; includes spreading.
 float CarX_ShaftLight(float3 p)
 {
     float drop = _ShaftLight.y - p.y;
     if (drop <= 0.01) return 0.0;
+    float4 sharp = CARX_SHARP;
+    // the opening in the ceiling
     float kh = (_ShaftLight.y - _ShaftParams.x) / drop;
     float2 g = _ShaftLight.xz + (p.xz - _ShaftLight.xz) * kh;
-    float soft = _ShaftParams.w + max(0.0, _ShaftParams.x - p.y) * 0.012;
-    float m;
-    if (_ShaftParams.z > 0.0)
-    {
-        m = saturate((_ShaftParams.z - length(g)) / soft);
-    }
-    else
-    {
-        float dx = min(g.x - _ShaftOpening.x, _ShaftOpening.z - g.x);
-        float dz = min(g.y - _ShaftOpening.y, _ShaftOpening.w - g.y);
-        m = saturate(min(dx, dz) / soft);
-    }
+    float m = CarX_Aperture(g, sharp.z + max(0.0, _ShaftParams.x - p.y) * sharp.w);
     if (m <= 0.0) return 0.0;
+    // the top of the shaft with the bars (same outline)
     float kg = (_ShaftLight.y - _ShaftParams.y) / drop;
     float2 b = _ShaftLight.xz + (p.xz - _ShaftLight.xz) * kg;
-    float pen = 0.003 + max(0.0, _ShaftParams.y - p.y) * 0.006;
-    m *= CarX_Bars(b, pen);
+    float below = max(0.0, _ShaftParams.y - p.y);
+    m *= CarX_Aperture(b, sharp.z + below * sharp.w);
+    m *= CarX_Bars(b, 1.5 * (sharp.x + below * sharp.y));
     float k = min(kh, 1.4);
     return m * k * k;
 }

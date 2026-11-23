@@ -132,6 +132,7 @@ namespace CarX.Level
         [NonSerialized] public string warning;
         [NonSerialized] bool dirty = true;
         [NonSerialized] Mesh mesh, waterMesh, shellMesh;
+        [NonSerialized] TunnelSkin.Part skinPart;
         [NonSerialized] int variants;
 
         // ------------------------------------------------------------------ lifecycle
@@ -164,7 +165,11 @@ namespace CarX.Level
             if (mesh != null) DestroyImmediate(mesh);
             if (waterMesh != null) DestroyImmediate(waterMesh);
             if (shellMesh != null) DestroyImmediate(shellMesh);
+            TunnelSkin.Remove(skinPart);
+            if (skinPart != null && skinPart.mesh != null) DestroyImmediate(skinPart.mesh);
         }
+
+        void OnDisable() { TunnelSkin.Remove(skinPart); }
 
         public void MarkDirty() { dirty = true; }
 
@@ -233,6 +238,7 @@ namespace CarX.Level
             mr.receiveShadows = true;
             mr.lightProbeUsage = LightProbeUsage.Off;
             mr.reflectionProbeUsage = ReflectionProbeUsage.Off;
+            TunnelGI.Setup(mr);   // baked bounce light from probe volumes (lighting thread)
             var mc = gen.GetComponent<MeshCollider>();
             if (mc == null) mc = gen.AddComponent<MeshCollider>();
             mc.sharedMesh = null;
@@ -525,10 +531,14 @@ namespace CarX.Level
 
         /// <summary>Sloping faces next to the floor (the lower bevels of an octagon): their joints are made like the floor's,
         /// flat and filled, so they read as a faint line, not a shadowed groove.</summary>
+        const bool flatLowerBevels = false;
+
         static bool[] LowEdges(Profile prof)
         {
             int n = prof.Count;
             var low = new bool[n];
+            // 2026-11-22: the lower bevels get the same joint as the upper ones again (user's call), so none is «low» now
+            if (!flatLowerBevels) return low;
             for (int e = 0; e < n; e++)
             {
                 if (prof.edgeSub[e] == 1) continue;
@@ -657,53 +667,145 @@ namespace CarX.Level
                 if (slabs[k].mStart == Vector3.zero || slabs[k].gapStart) JointFill(kit, prof, slabs[k - 1], slabs[k], thick);
         }
 
-        /// <summary>Invisible closed sleeve around the tunnel (inside the concrete) that only casts shadows:
-        /// no light gets in through the slab joints from a tunnel round the corner.
-        /// Left open where light has to come in: shaft holes and openings into other tunnels.</summary>
+        /// <summary>Light-tight skin behind the walls (inside the concrete, half a slab out): a closed, matt black sleeve.
+        /// Through any slit between faces (slab joints, seams with other pieces) the eye meets black, never the lit world
+        /// outside, and it casts shadows, so light from outside the tunnel cannot get in either.
+        /// It overlaps across the slab joints; it is open only exactly at the shaft holes and at openings into other tunnels.</summary>
         void BuildShadowShell(Profile prof, Dictionary<int, Hole> holes, TunnelMaterials mats)
         {
             var kit = new MeshKit(1);
             int n = prof.Count;
             float off = Mathf.Max(0.05f, slabThickness) * 0.5f;
+            const float ext = 0.04f;   // overlap across a joint: the skins of two slabs never leave a slit between them
             var cuts = PlanCuts();
-            for (int k = 0; k < slabs.Count; k++)
+            int last = slabs.Count - 1;
+            // dead ends: the skin runs on past the end wall and is closed behind it
+            bool deadS = capStart && !startAtWall && !(capHoleStart != null && capHoleStart.Count >= 3);
+            bool deadE = capEnd && !endAtWall && !(capHoleEnd != null && capHoleEnd.Count >= 3);
+            float behind = 0.01f + off;
+            // the floor plate: a wide flat sheet under the floor skin, carried on past both ends of every slab, so nothing
+            // under the tunnel (seams at the floor, the lower corners, joins with other pieces) ever shows the world below
+            float pxMin = float.MaxValue, pxMax = float.MinValue, pyMin = float.MaxValue;
+            for (int j = 0; j < n; j++) { var v = prof.points[j]; pxMin = Mathf.Min(pxMin, v.x); pxMax = Mathf.Max(pxMax, v.x); pyMin = Mathf.Min(pyMin, v.y); }
+            float plateY = pyMin - off - 0.01f;
+            pxMin -= off * 2f; pxMax += off * 2f;
+            for (int k = 0; k <= last; k++)
             {
                 var sl = slabs[k];
+                float s0 = sl.tStart - (k > 0 ? ext : (deadS ? behind : 0f));
+                float s1 = sl.length - sl.tEnd + (k < last ? ext : (deadE ? behind : 0f));
+                if (k == 0 && deadS) Cap(kit, sl, prof, sl.tStart - behind, off * 1.2f, sl.fwd, null);
+                if (k == last && deadE) Cap(kit, sl, prof, sl.length - sl.tEnd + behind, off * 1.2f, -sl.fwd, null);
+                {
+                    float pa = sl.tStart - off, pb = sl.length - sl.tEnd + off;
+                    kit.Quad(0, sl.MPoint(pa, pxMin, plateY), sl.MPoint(pa, pxMax, plateY), sl.MPoint(pb, pxMax, plateY), sl.MPoint(pb, pxMin, plateY),
+                             Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, sl.up);
+                }
                 List<Cut> sc;
                 cuts.TryGetValue(k, out sc);
-                bool hasHole = holes.ContainsKey(k) && prof.ceilingEdge >= 0;
+                Hole hole;
+                bool hasHole = holes.TryGetValue(k, out hole) && prof.ceilingEdge >= 0;
                 for (int e = 0; e < n; e++)
                 {
-                    if (hasHole && e == prof.ceilingEdge) continue;
-                    if (sc != null)
-                    {
-                        Vector2 inw = prof.EdgeInward(e);
-                        bool open = false;
-                        foreach (var cut in sc) if (cut.side * inw.x < -0.05f) open = true;
-                        if (open) continue;
-                    }
                     int j1 = (e + 1) % n;
-                    Vector3 A = P(sl, prof, e, 0f, off), B = P(sl, prof, j1, 0f, off);
-                    Vector3 C = P(sl, prof, j1, sl.length, off), D = P(sl, prof, e, sl.length, off);
-                    var nrm = sl.Dir(prof.EdgeInward(e));
-                    // faces look into the tunnel: they stop light coming from inside it (its exit, its shafts) and the
-                    // shadow normal bias moves them outwards, away from the walls (never into the tunnel)
-                    kit.Quad(0, A, B, C, D, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, nrm);
+                    if (hasHole && e == prof.ceilingEdge)
+                    {
+                        SkinCeilingWithHole(kit, sl, prof, hole, s0, s1, off);
+                        continue;
+                    }
+                    Vector3 A = P(sl, prof, e, s0, off), B = P(sl, prof, j1, s0, off);
+                    Vector3 C = P(sl, prof, j1, s1, off), D = P(sl, prof, e, s1, off);
+                    Vector2 inw = prof.EdgeInward(e);
+                    var nrm = sl.Dir(inw);
+                    List<List<Vector2>> hit = null;
+                    if (sc != null)
+                        foreach (var cut in sc)
+                            if (cut.side * inw.x < -0.05f) (hit ??= new List<List<Vector2>>()).Add(Grow(cut.poly, off * 0.8f));
+                    // faces look into the tunnel: the shadow normal bias moves them outwards, away from the walls
+                    if (hit != null) QuadCut(kit, 0, sl, A, B, C, D, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, nrm, hit);
+                    else kit.Quad(0, A, B, C, D, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, nrm);
                 }
             }
             var go = GetChild("_ShadowShell", true).gameObject;
-            if (shellMesh == null) shellMesh = new Mesh { name = name + "_Shell", hideFlags = HideFlags.DontSave };
-            kit.Fill(shellMesh);
             var mf = go.GetComponent<MeshFilter>();
             if (mf == null) mf = go.AddComponent<MeshFilter>();
-            mf.sharedMesh = shellMesh;
             var mr = go.GetComponent<MeshRenderer>();
             if (mr == null) mr = go.AddComponent<MeshRenderer>();
-            if (mats != null && mats.concrete != null) mr.sharedMaterial = mats.concrete;
-            mr.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
-            mr.receiveShadows = false;
-            mr.lightProbeUsage = LightProbeUsage.Off;
-            mr.reflectionProbeUsage = ReflectionProbeUsage.Off;
+            TunnelMaterials.ApplySkin(mr, mats);
+
+            // the skin is trimmed against the air of every piece (this tunnel, its shafts, its neighbours): never seen from inside
+            if (skinPart == null) skinPart = new TunnelSkin.Part();
+            skinPart.owner = transform;
+            skinPart.filter = mf;
+            TunnelSkin.TakeRaw(skinPart, kit);
+            skinPart.volumes.Clear();
+            var poly = new Vector2[n];
+            for (int j = 0; j < n; j++) poly[j] = prof.points[j];
+            float ceilY = prof.ceilingEdge >= 0 ? prof.points[prof.ceilingEdge].y : 0f;
+            for (int k = 0; k <= last; k++)
+            {
+                var sl = slabs[k];
+                // the air of the slab: its profile swept along it, reaching past a mitred end as far as the mitre does,
+                // and past an open end of the tunnel (into a reveal, a doorway, a chamber) by a little more than the skin's offset
+                float w0 = sl.tStart, w1 = sl.length - sl.tEnd;
+                float shS = 0f, shE = 0f;
+                for (int j = 0; j < n; j++)
+                {
+                    var o = sl.right * poly[j].x + sl.up * poly[j].y;
+                    if (sl.mStart != Vector3.zero) { float d = Vector3.Dot(sl.fwd, sl.mStart); if (Mathf.Abs(d) > 0.2f) shS = Mathf.Max(shS, Vector3.Dot(o, sl.mStart) / d); }
+                    if (sl.mEnd != Vector3.zero) { float d = Vector3.Dot(sl.fwd, sl.mEnd); if (Mathf.Abs(d) > 0.2f) shE = Mathf.Max(shE, -Vector3.Dot(o, sl.mEnd) / d); }
+                }
+                w0 -= shS + 0.01f;
+                w1 += shE + 0.01f;
+                if (k == 0 && !deadS) w0 -= OpenEndReach(startReveal, off);
+                if (k == last && !deadE) w1 += OpenEndReach(endReveal, off);
+                skinPart.volumes.Add(new TunnelSkin.Volume { o = sl.a, u = sl.right, v = sl.up, w = sl.fwd, poly = poly, w0 = w0, w1 = w1 });
+                Hole hole;
+                if (holes.TryGetValue(k, out hole) && prof.ceilingEdge >= 0)
+                    skinPart.volumes.Add(new TunnelSkin.Volume
+                    {
+                        o = sl.a, u = sl.right, v = sl.fwd, w = sl.up,
+                        poly = hole.op.Polygon(new Vector2(hole.cx, hole.cz)).ToArray(), w0 = ceilY - 0.3f, w1 = ceilY + 8f
+                    });
+            }
+            TunnelSkin.Submit(skinPart);
+        }
+
+        static float OpenEndReach(List<Vector2> reveal, float off)
+        {
+            float r = off + 0.12f;
+            if (reveal != null) foreach (var v in reveal) r = Mathf.Max(r, v.y + 0.05f);
+            return r;
+        }
+
+        /// <summary>The skin's ceiling over a slab with a shaft: a ring round the opening (the shaft walls pass through it).</summary>
+        static void SkinCeilingWithHole(MeshKit kit, Slab sl, Profile prof, Hole hole, float sa, float sb, float off)
+        {
+            int e = prof.ceilingEdge;
+            Vector2 pa = prof.Offset(e, off), pb = prof.Offset((e + 1) % prof.Count, off);
+            float xMin = Mathf.Min(pa.x, pb.x), xMax = Mathf.Max(pa.x, pb.x), y = pa.y;
+            var outer = new List<Vector2> { new Vector2(xMin, sa), new Vector2(xMax, sa), new Vector2(xMax, sb), new Vector2(xMin, sb) };
+            var c = new Vector2(hole.cx, hole.cz);
+            var tris = MeshKit.RingFill(c, hole.op.Polygon(c), outer);
+            for (int t = 0; t + 2 < tris.Count; t += 3)
+                kit.Tri(0, CeilPoint(sl, tris[t], y, sa, sb), CeilPoint(sl, tris[t + 1], y, sa, sb), CeilPoint(sl, tris[t + 2], y, sa, sb),
+                        Vector2.zero, Vector2.zero, Vector2.zero, -sl.up);
+        }
+
+        /// <summary>A convex polygon pushed outwards from its centre by d.</summary>
+        static List<Vector2> Grow(List<Vector2> poly, float d)
+        {
+            var c = Vector2.zero;
+            foreach (var v in poly) c += v;
+            c /= Mathf.Max(1, poly.Count);
+            var res = new List<Vector2>(poly.Count);
+            foreach (var v in poly)
+            {
+                var dir = v - c;
+                float len = dir.magnitude;
+                res.Add(len > 1e-5f ? v + dir / len * d : v);
+            }
+            return res;
         }
 
         Vector2 FloorUV(Vector3 local)
@@ -896,7 +998,8 @@ namespace CarX.Level
                 kit.Quad(2, a0, a1, b1, b0, new Vector2(p0, va), new Vector2(p1, va), new Vector2(p1, vb), new Vector2(p0, vb), A.Dir(prof.EdgeInward(e)));
             }
             // floor: the seam is filled with the same floor surface, at most a few mm lower, so the floor stays one plane
-            float sink = Mathf.Clamp(jointSink, 0f, 0.005f);
+            // flush: a sunk strip showed as a thin dark line at grazing angles (the eye slipped under the next slab's edge)
+            const float sink = 0f;
             for (int e = 0; e < n; e++)
             {
                 if (prof.edgeSub[e] != 1) continue;

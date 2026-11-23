@@ -15,6 +15,7 @@ Material:
   m_InvalidKeywords:
   - _ALPHACLIP_ON
   - _ALPHATEST_ON
+  - _TREECREATORDATA_ON
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 1
@@ -33,6 +34,10 @@ Material:
         m_Offset: {x: 0, y: 0}
     - _BumpMap:
         m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _BumpSpecMap:
+        m_Texture: {fileID: 2800000, guid: ef8ca01e06431e54cbc1fc5489ce3a86, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _DetailAlbedoMap:
@@ -69,6 +74,10 @@ Material:
         m_Offset: {x: 0, y: 0}
     - _SpecGlossMap:
         m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _TranslucencyMap:
+        m_Texture: {fileID: 2800000, guid: d5405bf25f62a8341bd1d5baa22b60da, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - unity_Lightmaps:
@@ -108,20 +117,25 @@ Material:
     - _GlossyReflections: 0
     - _GustSpeed: 9
     - _Metallic: 0
+    - _NormalStrength: 1
+    - _Occlusion: 0.5
     - _OcclusionStrength: 1
     - _Parallax: 0.005
     - _QueueOffset: 0
     - _ReceiveShadows: 1
     - _ScreenSpaceReflections: 1
     - _ScreenSpaceReflectionsContributeTransparent: 1
-    - _Smoothness: 0.25
+    - _Smoothness: 0.45
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
     - _Strength: 0.6115476
     - _Surface: 0
+    - _Translucency: 1.2
+    - _TreeCreatorData: 1
     - _TreeHeight: 20.38492
+    - _UsePackMaps: 1
     - _WindMode: 0
     - _WorkflowMode: 1
     - _XRMotionVectorsPass: 1

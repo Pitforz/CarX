@@ -691,6 +691,9 @@ namespace CarX.Level
             if (old != null) DestroyImmediate(old.gameObject);
             var grassRoot = Group(root, "Трава");
             if (grassTuft == null || tuftDensity <= 0f) return;
+            // a texture 4 times as wide as high holds 4 kinds of dry grass side by side (CanalTextures.GrassAtlas)
+            var tuftTex = grassTuft.HasProperty("_BaseMap") ? grassTuft.GetTexture("_BaseMap") : null;
+            int cells = tuftTex != null && tuftTex.height > 0 ? Mathf.Clamp(Mathf.RoundToInt((float)tuftTex.width / tuftTex.height), 1, 8) : 1;
             var rnd = new System.Random(seed * 31 + 5);
             int k = 0;
             foreach (var mf in root.GetComponentsInChildren<MeshFilter>())
@@ -717,7 +720,7 @@ namespace CarX.Level
                     {
                         float r1 = R(rnd), r2 = R(rnd);
                         if (r1 + r2 > 1f) { r1 = 1f - r1; r2 = 1f - r2; }
-                        Tuft(g, a + (b - a) * r1 + (c - a) * r2, (0.2f + 0.4f * R(rnd)) * (0.6f + 0.6f * bl), rnd);
+                        Tuft(g, a + (b - a) * r1 + (c - a) * r2, (0.2f + 0.4f * R(rnd)) * (0.6f + 0.6f * bl), rnd, cells);
                     }
                 }
                 if (g.v.Count == 0) continue;
@@ -725,19 +728,51 @@ namespace CarX.Level
             }
         }
 
-        static void Tuft(Geo g, Vector3 p, float h, System.Random rnd)
+        // shades of dry grass, one per tuft (multiplied with the texture in the CarX/WindFoliage shader)
+        static readonly Color[] TuftTints =
         {
-            float w = h * 1.2f, yaw = R(rnd) * Mathf.PI;
-            var lean = new Vector3(R(rnd) - 0.5f, 0f, R(rnd) - 0.5f) * (0.3f * h);
-            for (int q = 0; q < 2; q++)
+            new Color(1.00f, 0.97f, 0.92f), new Color(1.00f, 0.92f, 0.74f), new Color(1.00f, 0.99f, 0.95f),
+            new Color(0.88f, 0.88f, 0.84f), new Color(0.90f, 0.94f, 0.78f), new Color(0.98f, 0.86f, 0.80f),
+        };
+
+        /// <summary>
+        /// One tuft of crossed cards. With a 4-cell atlas each tuft is one kind: straw clump, foxtail (taller, narrower),
+        /// arching brome (lower, wider) or a dry weed, with its own size and shade; with a plain texture the old two-card tuft.
+        /// </summary>
+        static void Tuft(Geo g, Vector3 p, float h, System.Random rnd, int cells)
+        {
+            int kind = 0;
+            float tall = 1f, wide = 1.2f;
+            if (cells >= 4)
             {
-                float ang = yaw + q * Mathf.PI * 0.5f;
+                float k = R(rnd);
+                if (k < 0.40f) { kind = 0; tall = 1f; wide = 1.2f; }
+                else if (k < 0.62f) { kind = 1; tall = 1.35f; wide = 0.9f; }
+                else if (k < 0.88f) { kind = 2; tall = 0.85f; wide = 1.35f; }
+                else { kind = 3; tall = 1.15f; wide = 1.0f; }
+                h *= tall * (0.85f + 0.3f * R(rnd));
+            }
+            float w = h * wide, yaw = R(rnd) * Mathf.PI;
+            var lean = new Vector3(R(rnd) - 0.5f, 0f, R(rnd) - 0.5f) * (0.3f * h);
+            Color tint = Color.white;
+            if (cells >= 4)
+            {
+                tint = TuftTints[rnd.Next(TuftTints.Length)] * (0.86f + 0.14f * R(rnd));
+                tint.a = 1f;
+            }
+            float u0 = cells > 1 ? (float)kind / cells : 0f, u1 = cells > 1 ? (kind + 1f) / cells : 1f;
+            int cards = cells >= 4 ? 3 : 2;
+            for (int q = 0; q < cards; q++)
+            {
+                float ang = yaw + q * Mathf.PI / cards;
                 var d = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang)) * (w * 0.5f);
                 var down = Vector3.up * 0.03f;
-                int i = g.Add(p - d - down, Vector3.up, new Vector2(0f, 0f), Color.white);
-                g.Add(p + d - down, Vector3.up, new Vector2(1f, 0f), Color.white);
-                g.Add(p + d + Vector3.up * h + lean, Vector3.up, new Vector2(1f, 1f), Color.white);
-                g.Add(p - d + Vector3.up * h + lean, Vector3.up, new Vector2(0f, 1f), Color.white);
+                bool flip = cells >= 4 && R(rnd) < 0.5f;   // mirrored cards: the same picture does not repeat in one tuft
+                float ua = flip ? u1 : u0, ub = flip ? u0 : u1;
+                int i = g.Add(p - d - down, Vector3.up, new Vector2(ua, 0f), tint);
+                g.Add(p + d - down, Vector3.up, new Vector2(ub, 0f), tint);
+                g.Add(p + d + Vector3.up * h + lean, Vector3.up, new Vector2(ub, 1f), tint);
+                g.Add(p - d + Vector3.up * h + lean, Vector3.up, new Vector2(ua, 1f), tint);
                 g.Quad(0, i, i + 1, i + 2, i + 3, new Vector3(-d.z, 0f, d.x));
             }
         }

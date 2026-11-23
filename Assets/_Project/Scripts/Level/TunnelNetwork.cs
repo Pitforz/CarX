@@ -55,6 +55,12 @@ namespace CarX.Level
         [Tooltip("Сид мусора: другой сид - мусор лежит по-другому")]
         public int trashSeed;
 
+        [Header("Граффити (инструмент «Граффити»; для комнат и камер)")]
+        [Tooltip("Сколько граффити на стенах этой комнаты или камеры")]
+        [Min(0)] public int graffiti;
+        [Tooltip("Сид граффити: другой сид - другие места, размеры и рисунки")]
+        public int graffitiSeed;
+
         /// <summary>Default plan of a new room: an octagon about 10 m across.</summary>
         public static List<Vector2> DefaultRoom()
         {
@@ -81,6 +87,10 @@ namespace CarX.Level
         [Min(0)] public int trash;
         [Tooltip("Сид мусора: другой сид - мусор лежит по-другому")]
         public int trashSeed;
+        [Tooltip("Сколько граффити на стенах этого отрезка (инструмент «Граффити»)")]
+        [Min(0)] public int graffiti;
+        [Tooltip("Сид граффити: другой сид - другие места, размеры и рисунки")]
+        public int graffitiSeed;
     }
 
     public struct GraphIssue
@@ -305,11 +315,15 @@ namespace CarX.Level
                     e.shafts.RemoveAt(i);
                 }
             }
-            // trash spots are shared by length, each half keeps its own seed
+            // trash and graffiti spots are shared by length, each half keeps its own seed
             int moved = Mathf.RoundToInt(e.trash * (1f - t));
             e2.trash = moved;
             e2.trashSeed = e.trashSeed + 1;
             e.trash -= moved;
+            int gMoved = Mathf.RoundToInt(e.graffiti * (1f - t));
+            e2.graffiti = gMoved;
+            e2.graffitiSeed = e.graffitiSeed + 1;
+            e.graffiti -= gMoved;
             e.b = n.id;
             edges.Add(e2);
             MarkDirty();

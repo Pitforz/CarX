@@ -611,9 +611,10 @@ namespace CarX.Level
                         Vector3 dir = t.TransformDirection(s.right * side).normalized;
                         // straight collision walls: the main wall plane is about half the width away; a ray that finds
                         // nothing there looks through a side opening (or hits its jamb) and leaves the opening free
-                        float half = path.section.Width * 0.5f;
+                        // a round pipe is widest at mid height (HalfSpan), wider than its silt floor (Width): the ray must reach that far
+                        float half = path.section.Width * 0.5f, span = Mathf.Max(half, path.section.HalfSpan);
                         bool straight = s_Collision && StraightWalls;
-                        line.Add(new Probe { floor = floor, dir = dir, start = 0f, maxDistance = straight ? half + 0.35f : 4f, minDistance = straight ? half * 0.8f : 0f });
+                        line.Add(new Probe { floor = floor, dir = dir, start = 0f, maxDistance = straight ? span + 0.35f : 4f, minDistance = straight ? half * 0.8f : 0f });
                     }
                 }
                 Strip(wall, line, false);

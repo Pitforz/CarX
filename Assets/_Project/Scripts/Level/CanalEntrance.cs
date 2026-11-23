@@ -194,9 +194,10 @@ namespace CarX.Level
         [Range(0f, 1f)] public float outsideVignette = 0f;
         [Tooltip("Свечение ярких мест снаружи (Bloom), 0 = нет. Порог подстраивается под экспозицию, иначе всё снаружи светится молочной дымкой")]
         [Range(0f, 1f)] public float outsideBloom = 0.15f;
-        [Tooltip("Дымка снаружи (0 = нет)")]
-        [Range(0f, 0.05f)] public float outsideFogDensity = 0f;
-        [ColorUsage(false, true)] public Color outsideFogColor = new Color(12f, 12.5f, 13f);
+        [Tooltip("Дымка вдали: небоскрёбы и дальние деревья бледнеют и голубеют, вблизи почти ничего не меняется. 0 = нет, 0.001 = как в жизни, 0.002 = жаркое марево")]
+        [Range(0f, 0.004f)] public float outsideFogDensity = 0.001f;
+        [Tooltip("Цвет дымки: как небо у горизонта")]
+        [ColorUsage(false, true)] public Color outsideFogColor = new Color(15f, 16.5f, 19f);
         [Min(0.2f)] public float blendInside = 1.5f;
         [Min(0.2f)] public float blendOutside = 4f;
 
@@ -223,15 +224,17 @@ namespace CarX.Level
         void OnDisable()
         {
             all.Remove(this);
+            DisableSkyReflection();
             if (all.Count == 0) ResetAtmosphere();
         }
 
-        void OnDestroy() { FreeMeshes(); }
+        void OnDestroy() { FreeMeshes(); DestroySkyReflection(); }
 
         void OnValidate() { builtSignature = 0; pathDirty = true; }
 
         void Update()
         {
+            OutdoorTick();
             if (Application.isPlaying) return;
             double now = Time.realtimeSinceStartupAsDouble;
             if (builtSignature != 0 && now < nextCheck) return;
@@ -246,6 +249,7 @@ namespace CarX.Level
                 int h = JsonUtility.ToJson(this).GetHashCode();
                 foreach (var m in Mouths()) h = h * 31 + Mathf.RoundToInt(m.x * 100f) * 7 + Mathf.RoundToInt(m.halfW * 100f) * 13 + Mathf.RoundToInt(m.height * 100f);
                 h = h * 31 + transform.localToWorldMatrix.GetHashCode();
+                h = h * 31 + SunSignature();
                 if (network != null && network.library != null && network.library.materials != null && network.library.materials.concrete != null)
                     h = h * 31 + network.library.materials.concrete.GetHashCode();
                 return h == 0 ? 1 : h;
@@ -306,7 +310,7 @@ namespace CarX.Level
             mr.renderingLayerMask = OutsideMask;
             mr.shadowCastingMode = ShadowCastingMode.On;
             mr.receiveShadows = true;
-            mr.lightProbeUsage = LightProbeUsage.Off;
+            mr.lightProbeUsage = realSkyLight ? LightProbeUsage.CustomProvided : LightProbeUsage.Off;   // sky light: CanalEntrance.Outdoor
             mr.reflectionProbeUsage = ReflectionProbeUsage.Off;
             var mc = t.GetComponent<MeshCollider>();
             if (collider)
@@ -698,7 +702,15 @@ namespace CarX.Level
 
         // ------------------------------------------------------------------ sky and lights
 
-        Vector3 SunForward { get { return transform.rotation * (Quaternion.Euler(sunPitch, sunYaw + 180f, 0f) * Vector3.forward); } }
+        Vector3 SunForward
+        {
+            get
+            {
+                var lib = SunLibrary;
+                if (lib != null) return -lib.SunDirection;
+                return transform.rotation * (Quaternion.Euler(sunPitch, sunYaw + 180f, 0f) * Vector3.forward);
+            }
+        }
 
         void BuildSky(Transform root)
         {
@@ -738,6 +750,8 @@ namespace CarX.Level
             mpb.SetVector("_Ground", (Vector4)skyBelow);
             mpb.SetVector("_SunColor", (Vector4)sunDiscColor);
             mpb.SetVector("_SunDir", -SunForward);
+            mpb.SetFloat("_SunDiscBoost", sunDiscBrightness);
+            mpb.SetFloat("_SunHalo", sunHalo);
             mpb.SetVector("_CloudLit", (Vector4)cloudLit);
             mpb.SetVector("_CloudShade", (Vector4)cloudShade);
             mpb.SetVector("_Clouds", new Vector4(cloudCover, 1f / Mathf.Max(0.05f, cloudSize), cloudSpeed, seed * 7.31f));
@@ -746,11 +760,16 @@ namespace CarX.Level
 
         void BuildLights(Transform root)
         {
-            Dir(root, "Sun", Quaternion.LookRotation(SunForward), sunColor, sunIntensity, true);
-            Dir(root, "SkyFill", transform.rotation * Quaternion.Euler(skyFillPitch, sunYaw + 200f, 0f), skyFillColor, skyFill, false);
-            Dir(root, "SkyFill 2", transform.rotation * Quaternion.Euler(skyFillPitch, sunYaw + 20f, 0f), skyFillColor, skyFill * skyFillBalance, false);
-            Dir(root, "Bounce", transform.rotation * Quaternion.Euler(-bouncePitch, sunYaw + 180f, 0f), bounceColor, bounce * 0.6f, false);
-            Dir(root, "Bounce 2", transform.rotation * Quaternion.Euler(-bouncePitch, sunYaw, 0f), bounceColor, bounce * 0.4f, false);
+            var sf = SunForward;
+            // straight down: LookRotation needs an "up" that is not parallel to the view
+            var sunRot = Quaternion.LookRotation(sf, Mathf.Abs(sf.y) > 0.999f ? transform.forward : Vector3.up);
+            Dir(root, "Sun", sunRot, SunColorNow, sunIntensity, true);
+            // the old flat fills; with the real sky light (CanalEntrance.Outdoor) they are off
+            float fills = realSkyLight ? 0f : 1f;
+            Dir(root, "SkyFill", transform.rotation * Quaternion.Euler(skyFillPitch, sunYaw + 200f, 0f), skyFillColor, skyFill * fills, false);
+            Dir(root, "SkyFill 2", transform.rotation * Quaternion.Euler(skyFillPitch, sunYaw + 20f, 0f), skyFillColor, skyFill * skyFillBalance * fills, false);
+            Dir(root, "Bounce", transform.rotation * Quaternion.Euler(-bouncePitch, sunYaw + 180f, 0f), bounceColor, bounce * 0.6f * fills, false);
+            Dir(root, "Bounce 2", transform.rotation * Quaternion.Euler(-bouncePitch, sunYaw, 0f), bounceColor, bounce * 0.4f * fills, false);
         }
 
         void Dir(Transform root, string name, Quaternion rot, Color color, float intensity, bool shadows)
@@ -797,6 +816,8 @@ namespace CarX.Level
         static ColorAdjustments adjust;
         static Vignette vignette;
         static Bloom bloom;
+        static WhiteBalance whiteBalance;
+        static ScreenSpaceLensFlare lensFlare;
 
         /// <summary>1 = the camera is outside (in the canal or above ground), 0 = in the tunnels.</summary>
         public float Outside(Vector3 worldPos)
@@ -853,7 +874,9 @@ namespace CarX.Level
                         adjust.postExposure.Override(0f);
                         vignette.intensity.Override(0f);
                         bloom.intensity.Override(0f);
+                        lensFlare.intensity.Override(0f);
                         fv.weight = 1f;
+                        ScaleMouthLights(0f, 1f);
                         return;
                     }
 #endif
@@ -861,15 +884,33 @@ namespace CarX.Level
             InsideFog(out d, out c);
             RenderSettings.fog = true;
             RenderSettings.fogDensity = Mathf.Lerp(d, best.outsideFogDensity, t);
-            RenderSettings.fogColor = Color.Lerp(c, best.outsideFogColor, t);
+            // the fog colour of the engine is gamma-encoded and turned linear for the shaders; ours is a linear HDR sky colour
+            RenderSettings.fogColor = Color.Lerp(c, best.outsideFogColor.gamma, t);
             SetFogGlobals();
             var v = GetVolume();
-            adjust.postExposure.Override(best.outsideExposure);
+            // looking into the sun: the picture darkens a little, the sun glows wider and the lens flares
+            float dazzle = best.Dazzle(cam, t);
+            float exposure = best.outsideExposure - dazzle * 1.5f * best.sunGlare;
+            adjust.postExposure.Override(exposure);
             vignette.intensity.Override(best.outsideVignette);
-            // the tunnel profile blooms everything above 1; outside the scene is ~20x brighter before exposure
-            bloom.threshold.Override(Mathf.Pow(2f, -best.outsideExposure) * 1.2f);
-            bloom.intensity.Override(best.outsideBloom);
+            // the tunnel profile blooms everything above 1; outside the scene is ~20x brighter before exposure.
+            // URP reads the threshold as a gamma-space value and turns it linear itself (24 meant ~1100 and nothing bloomed)
+            bloom.threshold.Override(Mathf.LinearToGammaSpace(Mathf.Pow(2f, -exposure) * 1.2f));
+            // the tunnel profile also clamps the picture at 16 before blooming (no sparkles from tiny highlights inside);
+            // outside that cut the sun (thousands) down below the threshold and nothing glowed
+            bloom.clamp.Override(Mathf.Pow(2f, -exposure) * 160f);
+            bloom.intensity.Override(best.outsideBloom + dazzle * 1.5f * best.sunGlare);
+            // the glow around the sun is as warm as the sunlight in the grates
+            bloom.tint.Override(Color.Lerp(Color.white, new Color(1f, 0.85f, 0.65f), dazzle));
+            lensFlare.intensity.Override(dazzle * best.sunFlare);
+            // outside: warm and colourful (the tunnel profile is cool and washed out)
+            adjust.saturation.Override(best.outsideSaturation);
+            adjust.contrast.Override(best.outsideContrast);
+            whiteBalance.temperature.Override(best.outsideWarmth);
+            whiteBalance.tint.Override(0f);
             v.weight = t;
+            // daylight in the tunnel mouths: as bright as before from inside, dim (as in life) from outside
+            ScaleMouthLights(t, best.mouthLightOutside);
         }
 
         /// <summary>The engine may read RenderSettings fog once per frame: set the shader values for this camera directly.</summary>
@@ -887,6 +928,7 @@ namespace CarX.Level
             RenderSettings.fogDensity = d;
             RenderSettings.fogColor = c;
             if (volume != null) volume.weight = 0f;
+            ScaleMouthLights(0f, 1f);
         }
 
         static Volume GetVolume()
@@ -900,13 +942,24 @@ namespace CarX.Level
                 volume.isGlobal = true;
                 volume.priority = 25f;
             }
-            if (profile == null || adjust == null || vignette == null || bloom == null)
+            if (profile == null || adjust == null || vignette == null || bloom == null || whiteBalance == null || lensFlare == null)
             {
                 profile = ScriptableObject.CreateInstance<VolumeProfile>();
                 profile.hideFlags = HideFlags.HideAndDontSave;
                 adjust = profile.Add<ColorAdjustments>(false);
                 vignette = profile.Add<Vignette>(false);
                 bloom = profile.Add<Bloom>(false);
+                whiteBalance = profile.Add<WhiteBalance>(false);
+                lensFlare = profile.Add<ScreenSpaceLensFlare>(false);
+                lensFlare.tintColor.Override(new Color(1f, 0.85f, 0.65f));
+                lensFlare.streaksIntensity.Override(0.35f);
+                lensFlare.streaksLength.Override(0.35f);
+                lensFlare.streaksThreshold.Override(0.4f);
+                lensFlare.secondaryFlareIntensity.Override(0.6f);
+                lensFlare.warpedFlareIntensity.Override(0.4f);
+                // several ghost circles on the line from the sun through the middle of the picture, each dimmer
+                lensFlare.samples.Override(3);
+                lensFlare.sampleDimmer.Override(0.6f);
             }
             if (volume.sharedProfile != profile) volume.sharedProfile = profile;
             return volume;

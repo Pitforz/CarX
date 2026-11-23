@@ -32,14 +32,26 @@ namespace CarX.Level
         public TunnelMaterials materials;
         [HideInInspector] public int drivenSignature;
 
-        [NonSerialized] Mesh mesh;
+        [NonSerialized] Mesh mesh, skinMesh;
+        const float SkinOffset = 0.15f;
 
         void OnEnable() { Rebuild(); }
+
+        void OnDestroy()
+        {
+            if (skinMesh != null) DestroyImmediate(skinMesh);
+            TunnelSkin.Remove(skinPart);
+            if (skinPart != null && skinPart.mesh != null) DestroyImmediate(skinPart.mesh);
+        }
+
+        void OnDisable() { TunnelSkin.Remove(skinPart); }
+        [NonSerialized] TunnelSkin.Part skinPart;
 
         public void Rebuild()
         {
             var kit = new MeshKit(5);
-            if (corners.Count >= 3) Emit(kit);
+            var skin = new MeshKit(1);
+            if (corners.Count >= 3) Emit(kit, skin);
             var gen = transform.Find("_Generated");
             if (gen == null)
             {
@@ -58,10 +70,35 @@ namespace CarX.Level
             mr.shadowCastingMode = ShadowCastingMode.TwoSided;
             mr.lightProbeUsage = LightProbeUsage.Off;
             mr.reflectionProbeUsage = ReflectionProbeUsage.Off;
+            TunnelGI.Setup(mr);   // baked bounce light from probe volumes (lighting thread)
             var mc = gen.GetComponent<MeshCollider>();
             if (mc == null) mc = gen.gameObject.AddComponent<MeshCollider>();
             mc.sharedMesh = null;
             if (kit.VertexCount > 0) mc.sharedMesh = mesh;
+
+            // light-tight black skin a little outside the walls, floor and ceiling (see TunnelPath.BuildShadowShell)
+            var sk = transform.Find("_Skin");
+            if (sk == null)
+            {
+                sk = new GameObject("_Skin").transform;
+                sk.SetParent(transform, false);
+            }
+            var smf = sk.GetComponent<MeshFilter>();
+            if (smf == null) smf = sk.gameObject.AddComponent<MeshFilter>();
+            var smr = sk.GetComponent<MeshRenderer>();
+            if (smr == null) smr = sk.gameObject.AddComponent<MeshRenderer>();
+            TunnelMaterials.ApplySkin(smr, mats);
+            if (skinPart == null) skinPart = new TunnelSkin.Part();
+            skinPart.owner = transform;
+            skinPart.filter = smf;
+            TunnelSkin.TakeRaw(skinPart, skin);
+            skinPart.volumes.Clear();
+            if (corners.Count >= 3)
+                skinPart.volumes.Add(new TunnelSkin.Volume
+                {
+                    o = Vector3.zero, u = Vector3.right, v = Vector3.forward, w = Vector3.up, poly = corners.ToArray(), w0 = 0f, w1 = height
+                });
+            TunnelSkin.Submit(skinPart);
         }
 
         /// <summary>World-planar floor UV, the same as tunnels use, so the floor texture runs on through doorways.</summary>
@@ -71,11 +108,23 @@ namespace CarX.Level
             return new Vector2(w.x * 0.5f, w.z * 0.5f);
         }
 
-        void Emit(MeshKit kit)
+        void Emit(MeshKit kit, MeshKit skin)
         {
             var poly = new List<Vector2>(corners);
             if (Area(poly) < 0f) poly.Reverse();
             float H = height;
+            const float off = SkinOffset;
+            float sy0 = -off, sy1 = H + off;
+            var outerPoly = OffsetPoly(poly, off);
+            {
+                var st = EarClip(outerPoly);
+                for (int t = 0; t + 2 < st.Count; t += 3)
+                {
+                    Vector2 a = st[t], b = st[t + 1], c = st[t + 2];
+                    skin.Tri(0, new Vector3(a.x, sy0, a.y), new Vector3(b.x, sy0, b.y), new Vector3(c.x, sy0, c.y), Vector2.zero, Vector2.zero, Vector2.zero, Vector3.up);
+                    skin.Tri(0, new Vector3(a.x, sy1, a.y), new Vector3(b.x, sy1, b.y), new Vector3(c.x, sy1, c.y), Vector2.zero, Vector2.zero, Vector2.zero, Vector3.down);
+                }
+            }
             var rnd = new System.Random(seed * 17 + 3);
             float line = dirtLine > 0.01f ? dirtLine : -1f;
 
@@ -104,6 +153,11 @@ namespace CarX.Level
                 var here = new List<RoomDoor>();
                 foreach (var d in doors) if (d.wall == srcWall && d.outline.Count >= 3) here.Add(d);
                 var pieces = new List<Vector2>();
+                var skinPieces = new List<Vector2>();
+                Vector2 sa = outerPoly[w], sb = outerPoly[(w + 1) % n];
+                float shift = Vector2.Dot(a - sa, u2);          // along the skin wall = along the wall + shift
+                float sLen = Vector2.Dot(sb - sa, u2);
+                float sCur = 0f;
                 float cur = 0f;
                 here.Sort((x, y) => x.along.CompareTo(y.along));
                 foreach (var d in here)
@@ -130,8 +184,21 @@ namespace CarX.Level
                     var rect = new List<Vector2> { new Vector2(lo, 0f), new Vector2(hi, 0f), new Vector2(hi, H), new Vector2(lo, H) };
                     pieces.AddRange(MeshKit.RingFill(new Vector2(cx, top * 0.5f), hole, rect));
                     cur = hi;
+                    // the skin: the same opening exactly (the tunnel behind the door runs on through it)
+                    float slo = Mathf.Max(sCur, lo + shift), shi = Mathf.Min(sLen, hi + shift);
+                    if (shi - slo > 0.05f)
+                    {
+                        SkinRect(skinPieces, sCur, slo, sy0, sy1);
+                        var sh = new List<Vector2>(hole.Count);
+                        foreach (var v in hole) sh.Add(new Vector2(v.x + shift, v.y));
+                        var srect = new List<Vector2> { new Vector2(slo, sy0), new Vector2(shi, sy0), new Vector2(shi, sy1), new Vector2(slo, sy1) };
+                        skinPieces.AddRange(MeshKit.RingFill(new Vector2(cx + shift, top * 0.5f), sh, srect));
+                        sCur = shi;
+                    }
                 }
                 AddRect(pieces, cur, len, H);
+                SkinRect(skinPieces, sCur, sLen, sy0, sy1);
+                EmitWall(skin, 0, skinPieces, new Vector3(sa.x, 0f, sa.y), U, inward, 0f, 0f);
                 var below = new List<Vector2>();
                 var above = new List<Vector2>();
                 for (int t = 0; t + 2 < pieces.Count; t += 3) MeshKit.SplitTri(pieces[t], pieces[t + 1], pieces[t + 2], line, below, above);
@@ -141,6 +208,30 @@ namespace CarX.Level
             }
 
             foreach (var col in columns) col.Emit(kit, 0, 0f, H);
+        }
+
+        static void SkinRect(List<Vector2> l, float x0, float x1, float y0, float y1)
+        {
+            if (x1 - x0 < 1e-4f) return;
+            l.Add(new Vector2(x0, y0)); l.Add(new Vector2(x1, y0)); l.Add(new Vector2(x1, y1));
+            l.Add(new Vector2(x0, y0)); l.Add(new Vector2(x1, y1)); l.Add(new Vector2(x0, y1));
+        }
+
+        /// <summary>Counter-clockwise polygon pushed outwards by d (mitred corners, convex and reflex alike).</summary>
+        static List<Vector2> OffsetPoly(List<Vector2> poly, float d)
+        {
+            int n = poly.Count;
+            var res = new List<Vector2>(n);
+            for (int i = 0; i < n; i++)
+            {
+                Vector2 p = poly[(i + n - 1) % n], c = poly[i], q = poly[(i + 1) % n];
+                Vector2 e0 = (c - p).normalized, e1 = (q - c).normalized;
+                Vector2 n0 = new Vector2(e0.y, -e0.x), n1 = new Vector2(e1.y, -e1.x);   // outward normals
+                Vector2 m = n0 + n1;
+                float k = 1f + Vector2.Dot(n0, n1);
+                res.Add(k > 0.1f ? c + m * (d / k) : c + n0 * d);
+            }
+            return res;
         }
 
         static void AddRect(List<Vector2> l, float x0, float x1, float H)

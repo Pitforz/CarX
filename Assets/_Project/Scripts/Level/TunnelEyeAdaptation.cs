@@ -87,7 +87,7 @@ namespace CarX.Level
                 float near = 1f - Smooth(0.6f, reach * 0.7f, r);
                 float look = Smooth(0.2f, 0.9f, Vector3.Dot(fwd, to.normalized));
                 float g = near * Mathf.Lerp(0.3f, 1f, look);
-                keep *= 1f - Mathf.Clamp01(g * s.glare);
+                keep *= 1f - Mathf.Clamp01(g * s.glare * lib.grateEyeAdapt);   // a grate is a small light: the eye darkens far less than at an exit
             }
             return 1f - keep;
         }

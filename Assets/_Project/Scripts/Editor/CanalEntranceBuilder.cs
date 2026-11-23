@@ -197,17 +197,24 @@ namespace CarX.EditorTools
             return "zenith light set";
         }
 
-        /// <summary>Bridge: set a float/bool field on the canal and rebuild, e.g. "SetField skyFill 20".</summary>
+        /// <summary>Bridge: set a float/bool/colour field on the canal and rebuild, e.g. "SetField skyFill 20" or "SetField skyLightSide 5.5,5.2,4.8".</summary>
         public static string SetField(string name, string value)
         {
             var c = Object.FindAnyObjectByType<CanalEntrance>();
             if (c == null) return "no canal";
             var f = typeof(CanalEntrance).GetField(name);
             if (f == null) return "no field " + name;
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
             Undo.RecordObject(c, "Set " + name);
             if (f.FieldType == typeof(bool)) f.SetValue(c, value == "1" || value == "true");
             else if (f.FieldType == typeof(int)) f.SetValue(c, int.Parse(value));
-            else f.SetValue(c, float.Parse(value, System.Globalization.CultureInfo.InvariantCulture));
+            else if (f.FieldType == typeof(Color))
+            {
+                var p = value.Split(',');
+                if (p.Length < 3) return "colour needs r,g,b";
+                f.SetValue(c, new Color(float.Parse(p[0], inv), float.Parse(p[1], inv), float.Parse(p[2], inv), p.Length > 3 ? float.Parse(p[3], inv) : 1f));
+            }
+            else f.SetValue(c, float.Parse(value, inv));
             EditorUtility.SetDirty(c);
             c.ForceRebuild();
             return name + " = " + f.GetValue(c);
@@ -409,7 +416,7 @@ namespace CarX.EditorTools
             };
             c.sealant = Lit("Canal_Sealant", new Color(0.12f, 0.12f, 0.12f), 0.2f, null, 1f);
             c.chainLink = Cutout("Canal_ChainLink", CanalTextures.ChainLink(false), new Color(0.9f, 0.9f, 0.9f), 0.35f);
-            c.grassTuft = Cutout("Canal_GrassTuft", CanalTextures.GrassTuft(false), Color.white, 0.05f);
+            c.grassTuft = Cutout("Canal_GrassTuft", CanalTextures.GrassAtlas(false), Color.white, 0.05f);
             c.fenceSteel = Steel();
             c.dark = Lit("Canal_CulvertDark", new Color(0.035f, 0.035f, 0.035f), 0.1f, null, 1f);
             c.palmPrefab = PalmPrefab();

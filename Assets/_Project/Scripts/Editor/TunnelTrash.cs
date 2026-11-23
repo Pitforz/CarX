@@ -21,7 +21,8 @@ namespace CarX.EditorTools
 
         static TunnelTrash()
         {
-            TunnelNetwork.BuiltHook = net => Sync(net);
+            var prev = TunnelNetwork.BuiltHook;
+            TunnelNetwork.BuiltHook = net => { if (prev != null) prev(net); Sync(net); };
         }
 
         // ------------------------------------------------------------------ settings

@@ -12,6 +12,7 @@ Shader "CarX/LightShaft"
         _ShaftOpening ("Opening xMin zMin xMax zMax", Vector) = (-1, -0.3, 1, 0.3)
         _ShaftParams ("Opening Y, Grate Y, Radius, Softness", Vector) = (2.4, 4.6, 0, 0.03)
         _ShaftBars ("Bars pitchX, width, pitchZ, originX", Vector) = (0.1, 0.028, 0, 0)
+        _ShaftSharp ("Blur: bars, bars/m, edge, edge/m", Vector) = (0.004, 0.006, 0.02, 0.01)
         _NoiseScale ("Dust Noise Scale", Float) = 2.3
         _NoiseSpeed ("Dust Noise Speed", Float) = 0.12
         _NoiseStrength ("Dust Noise Strength", Range(0, 1)) = 0.6
@@ -46,11 +47,13 @@ Shader "CarX/LightShaft"
                 float4 _ShaftOpening;
                 float4 _ShaftParams;
                 float4 _ShaftBars;
+                float4 _ShaftSharp;
                 float _NoiseScale;
                 float _NoiseSpeed;
                 float _NoiseStrength;
             CBUFFER_END
 
+            #define CARX_SHAFT_SHARP
             #include "Assets/_Project/Shaders/CarXShaft.hlsl"
 
             struct Attributes

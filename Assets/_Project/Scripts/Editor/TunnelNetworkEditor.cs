@@ -19,7 +19,11 @@ namespace CarX.EditorTools
                 foreach (var n in Object.FindObjectsByType<TunnelNetwork>(FindObjectsInactive.Exclude)) n.MarkDirty();
                 EditorApplication.delayCall += () =>
                 {
-                    foreach (var n in Object.FindObjectsByType<TunnelNetwork>(FindObjectsInactive.Exclude)) TunnelTrash.Sync(n);
+                    foreach (var n in Object.FindObjectsByType<TunnelNetwork>(FindObjectsInactive.Exclude))
+                    {
+                        TunnelTrash.Sync(n);
+                        TunnelGraffiti.Sync(n);
+                    }
                 };
             };
             Selection.selectionChanged += Redirect;
@@ -64,9 +68,9 @@ namespace CarX.EditorTools
     [CustomEditor(typeof(TunnelNetwork))]
     public class TunnelNetworkEditor : Editor
     {
-        enum Tool { Select, Pen, Brush, Marker, Scissors, Trash }
+        enum Tool { Select, Pen, Brush, Marker, Scissors, Trash, Graffiti }
 
-        static readonly string[] ToolNames = { "Выбор", "Перо", "Кисть", "Метка", "Ножницы", "Мусор" };
+        static readonly string[] ToolNames = { "Выбор", "Перо", "Кисть", "Метка", "Ножницы", "Мусор", "Граффити" };
         static readonly string[] ToolHints =
         {
             "Клик по узлу или линии. Узел двигайте стрелками, Delete удаляет выбранное. Esc снимает выделение.",
@@ -74,7 +78,8 @@ namespace CarX.EditorTools
             "Клик по линии красит её в выбранный тип. С Shift красит весь тоннель от камеры до камеры.",
             "Клик по линии ставит метку выбранного вида. Для трубы выберите «Вертикальная решётка в трубе»: обычный подъём на круглой трубе не ставится. Двигать и удалять в инспекторе линии.",
             "Клик по линии вставляет узел. Клик по узлу убирает его (линии с двух сторон сливаются).",
-            "Клик по линии, комнате или камере: больше мусора. Shift+клик: меньше. Ctrl+клик: разложить по-новому (новый сид)."
+            "Клик по линии, комнате или камере: больше мусора. Shift+клик: меньше. Ctrl+клик: разложить по-новому (новый сид).",
+            "Клик по линии, комнате или камере: больше граффити на стенах. Shift+клик: меньше. Ctrl+клик: разложить по-новому (новый сид)."
         };
 
         static Tool tool = Tool.Select;
@@ -114,6 +119,12 @@ namespace CarX.EditorTools
                 {
                     if (on) SceneVisibilityManager.instance.Hide(trash.gameObject, true);
                     else SceneVisibilityManager.instance.Show(trash.gameObject, true);
+                }
+                var paint = net.transform.Find(TunnelGraffiti.RootName);
+                if (paint != null)
+                {
+                    if (on) SceneVisibilityManager.instance.Hide(paint.gameObject, true);
+                    else SceneVisibilityManager.instance.Show(paint.gameObject, true);
                 }
                 if (!on) net.MarkDirty();
             }
@@ -365,6 +376,7 @@ namespace CarX.EditorTools
                     }
                     break;
                 case Tool.Trash: TrashClick(net, node, edge, e); break;
+                case Tool.Graffiti: GraffitiClick(net, node, edge, e); break;
                 case Tool.Scissors:
                     if (node != null) { Record("Убрать узел"); Dissolve(net, node); Changed(); }
                     else if (edge != null)
@@ -522,6 +534,80 @@ namespace CarX.EditorTools
             GUILayout.Label("Мусор: " + spots + " точек на " + places + " участках, объектов " + objects, style);
         }
 
+        static void GraffitiClick(TunnelNetwork net, GraphNode node, GraphEdge edge, Event ev)
+        {
+            if (node != null && !TunnelGraffiti.CanHold(net, node)) node = null;
+            if (node == null && edge == null) node = HoverFloorArea(net, ev.mousePosition);
+            if (node == null && edge == null) return;
+            if (!TunnelGraffiti.Ready) Note("В папке Graffiti нет картинок: количество запомнится, граффити появятся, когда картинки будут в проекте");
+            int step = TunnelGraffiti.PerClick;
+            Record("Граффити");
+            if (node != null)
+            {
+                if (ev.control || ev.command) node.graffitiSeed = TunnelGraffiti.NewSeed();
+                else node.graffiti = Mathf.Max(0, node.graffiti + (ev.shift ? -step : step));
+                selNode = node.id; selEdge = null;
+            }
+            else
+            {
+                if (ev.control || ev.command) edge.graffitiSeed = TunnelGraffiti.NewSeed();
+                else edge.graffiti = Mathf.Max(0, edge.graffiti + (ev.shift ? -step : step));
+                selEdge = edge.id; selNode = null;
+            }
+            EditorUtility.SetDirty(net);
+            TunnelGraffiti.Sync(net);
+            SceneView.RepaintAll();
+            RepaintInspector();
+        }
+
+        static void GraffitiEverywhere(TunnelNetwork net, int sign)
+        {
+            Record(sign > 0 ? "Граффити везде" : "Меньше граффити везде");
+            int step = TunnelGraffiti.PerClick;
+            foreach (var e in net.edges) e.graffiti = Mathf.Max(0, e.graffiti + sign * TunnelGraffiti.EverywhereStep(net, e, step));
+            foreach (var n in net.nodes) if (TunnelGraffiti.CanHold(net, n)) n.graffiti = Mathf.Max(0, n.graffiti + sign * step * (net.IsRoom(n.id) ? 2 : 1));
+            EditorUtility.SetDirty(net);
+            TunnelGraffiti.Sync(net);
+        }
+
+        static void GraffitiPanel(TunnelNetwork net)
+        {
+            EditorGUI.BeginChangeCheck();
+            int pc = EditorGUILayout.IntSlider("Штук за клик", TunnelGraffiti.PerClick, 1, 8);
+            if (EditorGUI.EndChangeCheck()) TunnelGraffiti.PerClick = pc;
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("+ Везде", EditorStyles.miniButton)) GraffitiEverywhere(net, 1);
+            if (GUILayout.Button("− Везде", EditorStyles.miniButton)) GraffitiEverywhere(net, -1);
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Новый сид везде", EditorStyles.miniButton))
+            {
+                Record("Граффити: новый сид");
+                foreach (var e in net.edges) if (e.graffiti > 0) e.graffitiSeed = TunnelGraffiti.NewSeed();
+                foreach (var n in net.nodes) if (n.graffiti > 0) n.graffitiSeed = TunnelGraffiti.NewSeed();
+                EditorUtility.SetDirty(net);
+                TunnelGraffiti.Sync(net);
+            }
+            if (GUILayout.Button("Убрать все", EditorStyles.miniButton))
+            {
+                Record("Убрать все граффити");
+                foreach (var e in net.edges) e.graffiti = 0;
+                foreach (var n in net.nodes) n.graffiti = 0;
+                EditorUtility.SetDirty(net);
+                TunnelGraffiti.Sync(net);
+            }
+            GUILayout.EndHorizontal();
+            int spots, places, objects;
+            TunnelGraffiti.Stats(net, out spots, out places, out objects);
+            var style = new GUIStyle(EditorStyles.wordWrappedMiniLabel);
+            if (!TunnelGraffiti.Ready)
+            {
+                style.normal.textColor = new Color(1f, 0.6f, 0.3f);
+                GUILayout.Label("В папке Graffiti нет картинок: граффити не ставятся и не удаляются, количество хранится в графе.", style);
+            }
+            GUILayout.Label("Граффити: " + spots + " штук на " + places + " участках, на стенах " + objects, style);
+        }
+
         /// <summary>Removes a node; a node between exactly two lines merges them into one.</summary>
         static void Dissolve(TunnelNetwork net, GraphNode n)
         {
@@ -542,7 +628,15 @@ namespace CarX.EditorTools
             net.RemoveNode(n.id);
             if (x == y) return;
             var ne = net.AddEdge(x, y, e1.type);
-            if (ne != null) { ne.shafts = shafts; ne.seed = e1.seed; ne.trash = e1.trash + e2.trash; ne.trashSeed = e1.trashSeed; }
+            if (ne != null)
+            {
+                ne.shafts = shafts;
+                ne.seed = e1.seed;
+                ne.trash = e1.trash + e2.trash;
+                ne.trashSeed = e1.trashSeed;
+                ne.graffiti = e1.graffiti + e2.graffiti;
+                ne.graffitiSeed = e1.graffitiSeed;
+            }
         }
 
         static void AddColumn(TunnelNetwork net, GraphNode n, ColumnShape shape)
@@ -794,6 +888,20 @@ namespace CarX.EditorTools
                 foreach (var n in net.nodes)
                     if (n.trash > 0) Handles.Label(net.World(n.position) + Vector3.up * 0.9f, "мусор " + n.trash, ls);
             }
+            if (selected && tool == Tool.Graffiti)
+            {
+                var ls = new GUIStyle(EditorStyles.boldLabel);
+                ls.normal.textColor = new Color(0.95f, 0.45f, 0.75f);
+                foreach (var e in net.edges)
+                {
+                    if (e.graffiti <= 0) continue;
+                    var A = net.Node(e.a); var B = net.Node(e.b);
+                    if (A == null || B == null) continue;
+                    Handles.Label(net.World((A.position + B.position) * 0.5f) + Vector3.up * 1.05f, "граффити " + e.graffiti, ls);
+                }
+                foreach (var n in net.nodes)
+                    if (n.graffiti > 0) Handles.Label(net.World(n.position) + Vector3.up * 1.35f, "граффити " + n.graffiti, ls);
+            }
             // problems
             Handles.color = Color.red;
             foreach (var i in net.issues)
@@ -807,10 +915,10 @@ namespace CarX.EditorTools
         public static void PanelGUI(TunnelNetwork net)
         {
             var lib = net.library;
-            GUILayout.BeginVertical(GUILayout.Width(250f));
+            GUILayout.BeginVertical(GUILayout.Width(280f));
             int nt = GUILayout.SelectionGrid((int)tool, ToolNames, 3, EditorStyles.miniButton);
             if (nt != (int)tool) { tool = (Tool)nt; penLast = null; SceneView.RepaintAll(); }
-            GUILayout.Label(ToolHints[(int)tool], EditorStyles.wordWrappedMiniLabel, GUILayout.Height(tool == Tool.Marker ? 58f : 42f));
+            GUILayout.Label(ToolHints[(int)tool], EditorStyles.wordWrappedMiniLabel, GUILayout.Height(tool == Tool.Marker ? 58f : tool == Tool.Trash || tool == Tool.Graffiti ? 56f : 42f));
 
             if (lib != null)
             {
@@ -833,6 +941,7 @@ namespace CarX.EditorTools
             if (tool == Tool.Marker) markerType = (ShaftType)EditorGUILayout.EnumPopup("Вид метки", markerType);
             if (tool == Tool.Pen) penHeight = EditorGUILayout.FloatField("Высота нового узла", penHeight);
             if (tool == Tool.Trash) TrashPanel(net);
+            if (tool == Tool.Graffiti) GraffitiPanel(net);
             GUILayout.BeginHorizontal();
             snap = GUILayout.Toggle(snap, "Сетка 1 м", EditorStyles.miniButton);
             bool sch = GUILayout.Toggle(Schematic, "Схема", EditorStyles.miniButton);
@@ -982,6 +1091,7 @@ namespace CarX.EditorTools
             ReplaceTypeGUI(net);
 
             TunnelAnchorHooks.NetworkGUI(net);
+            TunnelLightBake.NetworkGUI(net);
 
             EditorGUILayout.Space();
             if (GUILayout.Button("Перестроить всё")) { net.ForceRebuild(); if (!Schematic) net.Build(); }

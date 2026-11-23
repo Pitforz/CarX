@@ -22,6 +22,7 @@ namespace CarX.EditorTools
         const string CutscenePath = FlowDir + "/Cutscene_NewGame.asset";
         const string MenuPath = "Assets/_Project/Scenes/MainMenu.unity";
         const string CanalPath = "Assets/_Project/Scenes/Test/CanalEntrance_Test.unity";
+        const string LabPath = "Assets/_Project/Scenes/MAIN_LEVEL_GRAPHICS_lab.unity";
 
         [MenuItem("CarX/Flow/Создать главное меню (заглушка), катсцену и игрока в канале")]
         static void BuildMenu() { Debug.Log("CarX Flow: " + BuildAll()); }
@@ -47,7 +48,7 @@ namespace CarX.EditorTools
             var seq = AssetDatabase.LoadAssetAtPath<CutsceneSequence>(CutscenePath);
             if (seq != null) return seq;
             seq = ScriptableObject.CreateInstance<CutsceneSequence>();
-            seq.targetScene = "CanalEntrance_Test";
+            seq.targetScene = "MAIN_LEVEL_GRAPHICS_lab";
             seq.fadeOut = 1.4f;
             seq.blackHold = 0.8f;
             seq.holdAfterCards = 1.2f;
@@ -162,10 +163,11 @@ namespace CarX.EditorTools
             var list = new List<EditorBuildSettingsScene>
             {
                 new EditorBuildSettingsScene(MenuPath, true),
+                new EditorBuildSettingsScene(LabPath, true),
                 new EditorBuildSettingsScene(CanalPath, true),
             };
             foreach (var s in EditorBuildSettings.scenes)
-                if (s.path != MenuPath && s.path != CanalPath && File.Exists(s.path)) list.Add(s);
+                if (s.path != MenuPath && s.path != LabPath && s.path != CanalPath && File.Exists(s.path)) list.Add(s);
             EditorBuildSettings.scenes = list.ToArray();
         }
     }

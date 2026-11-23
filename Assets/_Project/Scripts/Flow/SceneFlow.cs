@@ -24,7 +24,7 @@ namespace CarX.Flow
 
         Image _fade;
         Text _text;
-        AudioSource _sfx, _ambient;
+        AudioSource _sfx, _ambient, _voice, _bed, _layer;
         bool _busy;
 
         /// <summary>Идёт ли сейчас переход (повторный запуск игнорируется).</summary>
@@ -95,14 +95,22 @@ namespace CarX.Flow
             _text.verticalOverflow = VerticalWrapMode.Overflow;
             _text.color = new Color(0.92f, 0.9f, 0.84f, 0f);
             _text.raycastTarget = false;
+            _text.supportRichText = true;
 
-            _sfx = gameObject.AddComponent<AudioSource>();
-            _sfx.playOnAwake = false;
-            _sfx.spatialBlend = 0f;
-            _ambient = gameObject.AddComponent<AudioSource>();
-            _ambient.playOnAwake = false;
-            _ambient.loop = true;
-            _ambient.spatialBlend = 0f;
+            _sfx = AddSource(false);
+            _ambient = AddSource(true);
+            _voice = AddSource(false);
+            _bed = AddSource(true);
+            _layer = AddSource(true);
+        }
+
+        AudioSource AddSource(bool loop)
+        {
+            var s = gameObject.AddComponent<AudioSource>();
+            s.playOnAwake = false;
+            s.spatialBlend = 0f;
+            s.loop = loop;
+            return s;
         }
 
         static void Stretch(RectTransform r)
@@ -144,8 +152,10 @@ namespace CarX.Flow
             }
             load.allowSceneActivation = false;
 
-            // 3. карточки на чёрном экране
-            if (s.cards != null)
+            // 3. ход катсцены: диалог и дорога, либо старые карточки
+            if (s.moments != null && s.moments.Length > 0)
+                yield return Timeline(s);
+            else if (s.cards != null)
                 foreach (var card in s.cards)
                     if (card != null) yield return ShowCard(card, s.skippable);
             yield return Wait(s.holdAfterCards, false);
@@ -170,8 +180,213 @@ namespace CarX.Flow
             _busy = false;
         }
 
+        IEnumerator Timeline(CutsceneSequence s)
+        {
+            foreach (var m in s.moments)
+            {
+                if (m == null) continue;
+                if (m.stopBeds) StopBeds();
+                bool dialogue = m.lines != null && m.lines.Length > 0;
+                float dur = m.seconds;
+                bool usingSfx = false, usingBed = false;
+                if (m.clip != null)
+                {
+                    if (dialogue)
+                    {
+                        _voice.clip = m.clip;
+                        _voice.volume = m.volume;
+                        _voice.loop = false;
+                        _voice.Play();
+                        // Длина клипа иногда ещё 0, пока файл не раскрылся. Секунды в катсцене — нижняя граница,
+                        // чтобы разговор не обрывался на полуслове.
+                        dur = Mathf.Max(m.clip.length, m.seconds);
+                        if (dur < 1f) dur = 54.8f;
+                    }
+                    else if (m.loop && (dur <= 0f || dur > m.clip.length - 0.05f))
+                    {
+                        _bed.clip = m.clip;
+                        _bed.volume = m.volume;
+                        _bed.loop = true;
+                        _bed.Play();
+                        usingBed = true;
+                        if (dur <= 0f) dur = m.clip.length;
+                    }
+                    else
+                    {
+                        _sfx.clip = m.clip;
+                        _sfx.volume = m.volume;
+                        _sfx.loop = false;
+                        _sfx.Play();
+                        usingSfx = true;
+                        if (dur <= 0f) dur = m.clip.length;
+                        else dur = Mathf.Max(dur, m.clip.length);
+                    }
+                }
+                if (m.layer != null)
+                {
+                    _layer.clip = m.layer;
+                    _layer.volume = m.layerVolume;
+                    _layer.loop = dur <= 0f || dur > m.layer.length - 0.05f;
+                    _layer.Play();
+                }
+                if (m.sting != null) _sfx.PlayOneShot(m.sting, m.stingVolume);
+                if (dialogue) yield return Dialogue(m, dur, s.skippable);
+                else yield return PlayMoment(m, dur, s.skippable, usingSfx, usingBed);
+                if (usingSfx) _sfx.Stop();
+            }
+            _voice.Stop();
+            StopBeds();
+            _sfx.Stop();
+            _text.text = "";
+            SetTextAlpha(0f);
+        }
+
+        IEnumerator Dialogue(CutsceneSequence.Moment m, float dur, bool skippable)
+        {
+            PlaceText(false);
+            int shown = -1;
+            float t = 0f;
+            while (t < dur || (_voice.isPlaying && t < dur + 2f))
+            {
+                if (t > 90f) break;
+                if (skippable && SkipPressed()) break;
+                int idx = -1;
+                for (int i = 0; i < m.lines.Length; i++)
+                    if (m.lines[i] != null && t + 0.05f >= m.lines[i].time) idx = i;
+                if (idx != shown && idx >= 0)
+                {
+                    shown = idx;
+                    _text.text = FormatLine(m.lines[idx]);
+                    SetTextAlpha(1f);
+                }
+                t += Time.unscaledDeltaTime;
+                yield return null;
+            }
+            _voice.Stop();
+            for (float f = 0f; f < 0.35f; f += Time.unscaledDeltaTime)
+            {
+                SetTextAlpha(1f - f / 0.35f);
+                yield return null;
+            }
+            SetTextAlpha(0f);
+            _text.text = "";
+        }
+
+        IEnumerator PlayMoment(CutsceneSequence.Moment m, float dur, bool skippable, bool usingSfx, bool usingBed)
+        {
+            bool timed = m.places != null && m.places.Length > 0;
+            bool titled = !timed && !string.IsNullOrEmpty(m.title);
+            if (titled)
+            {
+                PlaceText(true);
+                _text.text = FormatTitle(m.title);
+            }
+            float fadeIn = Mathf.Min(0.7f, Mathf.Max(0.05f, dur * 0.25f));
+            float textOut = Mathf.Min(0.6f, Mathf.Max(0.05f, dur * 0.2f));
+            int shown = -1;
+            float t = 0f;
+            while (t < dur)
+            {
+                if (skippable && SkipPressed()) break;
+                float k = 1f;
+                if (m.fadeOut > 0.05f && t > dur - m.fadeOut)
+                    k = Mathf.Clamp01((dur - t) / m.fadeOut);
+                if (usingSfx) _sfx.volume = m.volume * k;
+                if (usingBed) _bed.volume = m.volume * k;
+                if (m.layer != null) _layer.volume = m.layerVolume * k;
+                if (timed)
+                {
+                    int idx = -1;
+                    for (int i = 0; i < m.places.Length; i++)
+                    {
+                        var card = m.places[i];
+                        if (card == null || string.IsNullOrEmpty(card.text)) continue;
+                        if (t >= card.time && t < card.time + Mathf.Max(0.2f, card.hold)) idx = i;
+                    }
+                    if (idx != shown)
+                    {
+                        shown = idx;
+                        if (idx >= 0)
+                        {
+                            PlaceText(true);
+                            _text.text = FormatTitle(m.places[idx].text);
+                        }
+                        else _text.text = "";
+                    }
+                    if (idx >= 0)
+                    {
+                        var card = m.places[idx];
+                        float local = t - card.time;
+                        float hold = Mathf.Max(0.2f, card.hold);
+                        float edge = Mathf.Min(0.55f, hold * 0.22f);
+                        float a = 1f;
+                        if (local < edge) a = local / edge;
+                        else if (local > hold - edge) a = (hold - local) / edge;
+                        SetTextAlpha(Mathf.Clamp01(a));
+                    }
+                    else SetTextAlpha(0f);
+                }
+                else if (titled)
+                {
+                    float a = 1f;
+                    if (t < fadeIn) a = t / fadeIn;
+                    else if (t > dur - textOut) a = (dur - t) / textOut;
+                    SetTextAlpha(Mathf.Clamp01(a));
+                }
+                t += Time.unscaledDeltaTime;
+                yield return null;
+            }
+            if (titled || timed)
+            {
+                SetTextAlpha(0f);
+                _text.text = "";
+            }
+        }
+
+        static string FormatLine(CutsceneSequence.Line line)
+        {
+            string color = line.speaker == "Виктор" ? "#e6c48a" : "#c5d4e4";
+            if (string.IsNullOrEmpty(line.speaker)) return line.text;
+            return "<color=" + color + ">" + line.speaker + "</color>\n" + line.text;
+        }
+
+        static string FormatTitle(string text)
+        {
+            int n = text.IndexOf('\n');
+            if (n < 0) return "<size=50>" + text + "</size>";
+            return "<size=52>" + text.Substring(0, n) + "</size>\n<size=30>" + text.Substring(n + 1) + "</size>";
+        }
+
+        void PlaceText(bool title)
+        {
+            var rt = _text.rectTransform;
+            if (title)
+            {
+                rt.anchorMin = new Vector2(0.12f, 0.34f);
+                rt.anchorMax = new Vector2(0.88f, 0.7f);
+                _text.alignment = TextAnchor.MiddleCenter;
+                _text.fontSize = 42;
+            }
+            else
+            {
+                rt.anchorMin = new Vector2(0.1f, 0.06f);
+                rt.anchorMax = new Vector2(0.9f, 0.4f);
+                _text.alignment = TextAnchor.LowerCenter;
+                _text.fontSize = 32;
+            }
+            rt.offsetMin = rt.offsetMax = Vector2.zero;
+        }
+
+        void StopBeds()
+        {
+            _bed.Stop();
+            _layer.Stop();
+        }
+
         IEnumerator ShowCard(CutsceneSequence.Card c, bool skippable)
         {
+            PlaceText(true);
+            _text.fontSize = 40;
             _text.text = c.typewriter ? "" : c.text;
             SetTextAlpha(0f);
             if (c.sound != null) _sfx.PlayOneShot(c.sound, c.soundVolume);

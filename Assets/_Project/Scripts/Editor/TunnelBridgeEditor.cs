@@ -13,13 +13,16 @@ namespace CarX.EditorTools
             var bridge = (TunnelBridge)target;
             serializedObject.Update();
             EditorGUILayout.HelpBox(
-                "Пролёт между двумя узлами двух графов. Узлы и рёбра графов не меняются. " +
-                "На один граф не больше двух мостов. Занятый узел выбрать снова нельзя.",
+                "Мост: одна плита длиной в сегмент тоннеля графа A, встык к тупику A. " +
+                "Граф B целиком сдвигается и поворачивается, чтобы его тупик встал встык с другим концом плиты на одной оси. " +
+                "Узлы и рёбра графов не меняются. Узлы A и B должны быть тупиками. На один граф не больше двух мостов.",
                 MessageType.Info);
             if (!bridge.Built && !string.IsNullOrEmpty(bridge.Status))
                 EditorGUILayout.HelpBox(bridge.Status, MessageType.Warning);
+            else if (bridge.Built && !string.IsNullOrEmpty(bridge.Note))
+                EditorGUILayout.HelpBox(bridge.Note, MessageType.Warning);
             else if (bridge.Built)
-                EditorGUILayout.HelpBox("Пролёт построен на этом объекте. В графы ничего не записано.", MessageType.None);
+                EditorGUILayout.HelpBox("Пролёт построен на этом объекте, граф B пристыкован. В графы ничего не записано.", MessageType.None);
 
             var netAProp = serializedObject.FindProperty("networkA");
             var netBProp = serializedObject.FindProperty("networkB");
@@ -32,7 +35,6 @@ namespace CarX.EditorTools
             EditorGUILayout.PropertyField(netBProp, new GUIContent("Граф B"));
             netB = netBProp.objectReferenceValue as TunnelNetwork;
             NodePopup(nodeBProp, netB, bridge, nodeAProp.stringValue, netA != null && netA == netB, "Узел B");
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("type"), new GUIContent("Тип пролёта"));
             if (serializedObject.ApplyModifiedProperties())
                 bridge.RebuildNow();
         }

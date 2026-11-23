@@ -11,6 +11,8 @@ Shader "CarX/SkyDome"
         _SunDir ("Direction To Sun", Vector) = (0, 0.6, 0.8, 0)
         _SunSize ("Sun Size", Range(0.00005, 0.01)) = 0.0004
         _Glow ("Glow Around Sun", Range(0, 2)) = 0.5
+        _SunDiscBoost ("Sun Disc Brightness", Range(1, 300)) = 1
+        _SunHalo ("Halo Around Sun", Range(0, 3)) = 0
         [HDR] _CloudLit ("Clouds Lit", Color) = (26, 20, 20, 1)
         [HDR] _CloudShade ("Clouds Shade", Color) = (11, 10, 13, 1)
         _Clouds ("Clouds: cover, 1/size, wind, seed", Vector) = (0.45, 1, 0.004, 0)
@@ -40,6 +42,8 @@ Shader "CarX/SkyDome"
                 float4 _SunDir;
                 float _SunSize;
                 float _Glow;
+                float _SunDiscBoost;
+                float _SunHalo;
                 float4 _CloudLit;
                 float4 _CloudShade;
                 float4 _Clouds;
@@ -88,7 +92,9 @@ Shader "CarX/SkyDome"
                 float3 s = normalize(_SunDir.xyz);
                 float m = saturate(dot(d, s));
                 c += _SunColor.rgb * _Glow * 0.02 * pow(m, 12.0);
-                float3 sunDisc = _SunColor.rgb * smoothstep(1.0 - _SunSize, 1.0 - _SunSize * 0.5, m);
+                float3 sunDisc = _SunColor.rgb * _SunDiscBoost * smoothstep(1.0 - _SunSize, 1.0 - _SunSize * 0.5, m);
+                // halo: a bright corona hugging the disc (about 2 degrees) and a wider soft aureole (about 8 degrees), seen through thin cloud too
+                float3 halo = _SunColor.rgb * _SunHalo * (2.5 * pow(m, 3000.0) + 0.35 * pow(m, 300.0));
 
                 // clouds: a flat layer high above, fbm coverage, lit towards the sun, fading into the horizon haze
                 float cover = 0.0;
@@ -104,7 +110,7 @@ Shader "CarX/SkyDome"
                     cl = lerp(_Horizon.rgb, cl, smoothstep(0.0, 0.3, y));
                     c = lerp(c, cl, cover);
                 }
-                c += sunDisc * (1.0 - cover);
+                c += sunDisc * (1.0 - cover) + halo * (1.0 - 0.6 * cover);
                 return half4(c, 1);
             }
             ENDHLSL

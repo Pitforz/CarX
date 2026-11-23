@@ -27,8 +27,43 @@ namespace CarX.Level
         [Range(1f, 40f)] public float shaftReach = 10f;
         [Tooltip("Видимый столб света в воздухе под решёткой и люком (0 = нет)")]
         [Range(0f, 2f)] public float shaftBeam = 0.25f;
-        [Tooltip("Летающие пылинки в луче. Выключено = нет ни у одного водостока")]
-        public bool shaftDust = false;
+        [HideInInspector] public bool shaftDust = false;   // replaced by dustAmount
+
+        [Header("Солнце в решётках и люках (тоннели)")]
+        [Tooltip("Цвет солнечного света из решёток и люков и неба над ними. Выходы наружу берут Daylight Color выше")]
+        public Color grateLightColor = new Color(1f, 0.82f, 0.55f);
+        [Tooltip("Высота солнца над горизонтом, °. 90 = в зените (свет падает отвесно). Чем ниже, тем косее лучи и тем сильнее глубокая шахта закрывает свет")]
+        [Range(45f, 90f)] public float sunElevation = 90f;
+        [Tooltip("С какой стороны светит солнце, °: 0 = со стороны +Z мира, 90 = со стороны +X")]
+        [Range(0f, 360f)] public float sunAzimuth = 30f;
+        [Tooltip("Резкость тени от прутьев решётки и краёв проёма: 1 = чёткие полосы, 0 = сильно размытые")]
+        [Range(0f, 1f)] public float grateShadowSharpness = 0.6f;
+        [Tooltip("Количество пыли в лучах. 0 = пыли нет")]
+        [Range(0f, 3f)] public float dustAmount = 1f;
+        [Tooltip("Высота точки, из которой светит «солнце» решётки, м над решёткой. Больше = лучи параллельнее, но свет уходит глубже под пол")]
+        [Range(4f, 40f)] public float sunDistance = 15f;
+
+        [Header("Мягкий свет и отсветы (запекаются: меню CarX → Перезапечь свет)")]
+        [Tooltip("Яркость мягкого ореола вокруг светлого пятна: свет, отражённый от пятна на стены и потолок")]
+        [Range(0f, 4f)] public float haloStrength = 1f;
+        [Tooltip("Радиус ореола, м")]
+        [Range(1f, 12f)] public float haloRadius = 5f;
+        [Tooltip("Слабый свет, который уходит далеко вглубь тёмного тоннеля: яркость")]
+        [Range(0f, 4f)] public float farGlowStrength = 1f;
+        [Tooltip("Как далеко уходит этот слабый свет, м")]
+        [Range(5f, 60f)] public float farGlowRange = 25f;
+        [Tooltip("Сила естественных отражений света от пола и стен")]
+        [Range(0f, 4f)] public float bounceStrength = 1f;
+        [Tooltip("Сколько раз свет отражается при запекании: больше = светлее в глубине, но дольше запекать")]
+        [Range(1, 4)] public int bounceCount = 2;
+
+        [Header("Живые тени под решётками (NPC, игрок)")]
+        [Tooltip("Сколько ближайших к камере решёток дают живые тени одновременно. Остальные светят без них (стены свет всё равно не пропускают)")]
+        [Range(0, 12)] public int realtimeShadowGrates = 4;
+        [Tooltip("Дальше этого расстояния от камеры решётка светит без живых теней, м")]
+        [Range(5f, 80f)] public float realtimeShadowDistance = 25f;
+        [Tooltip("Игрок отбрасывает тень (объекты с тегом Player). Выключено = тень игрока убирается в Play")]
+        public bool playerShadow = true;
 
         [Header("Адаптация глаза (камера темнеет у яркого света)")]
         [Tooltip("Включено: у выхода и под решёткой картинка темнеет, особенно если смотришь на свет. Тоннель за светом становится чёрным")]
@@ -37,6 +72,8 @@ namespace CarX.Level
         [Range(0.05f, 5f)] public float eyeAdaptTime = 1f;
         [Tooltip("Сила адаптации (1 = как в профиле TunnelExitFX)")]
         [Range(0f, 2f)] public float eyeAdaptStrength = 1f;
+        [Tooltip("Насколько глаз темнеет у решёток и люков: 0 = не темнеет, 1 = как у выхода наружу. Меньше — видны отсветы на стенах у пятна света")]
+        [Range(0f, 1f)] public float grateEyeAdapt = 0.3f;
 
         [Header("Выходы наружу (узлы «Выход наружу»)")]
         [Tooltip("Сила прожектора, который светит из выхода вдоль тоннеля")]
@@ -85,6 +122,30 @@ namespace CarX.Level
             }
         }
         public Color SkyColor { get { return daylightColor * skyBrightness; } }
+        /// <summary>Sky seen through grates and manhole holes.</summary>
+        public Color GrateSkyColor { get { return grateLightColor * skyBrightness; } }
+
+        /// <summary>World direction towards the sun (unit, pointing up).</summary>
+        public Vector3 SunDirection
+        {
+            get
+            {
+                float el = Mathf.Clamp(sunElevation, 45f, 90f) * Mathf.Deg2Rad, az = sunAzimuth * Mathf.Deg2Rad;
+                return new Vector3(Mathf.Sin(az) * Mathf.Cos(el), Mathf.Sin(el), Mathf.Cos(az) * Mathf.Cos(el)).normalized;
+            }
+        }
+
+        /// <summary>Changes when anything the baked tunnel light depends on changes (sun, halo, bounces).</summary>
+        public int BakeHash()
+        {
+            unchecked
+            {
+                int h = grateLightColor.GetHashCode();
+                foreach (var f in new[] { sunElevation, sunAzimuth, sunDistance, shaftFloorLight, haloStrength, haloRadius, farGlowStrength, farGlowRange, bounceStrength, (float)bounceCount, grateOpenness, manholeOpenness })
+                    h = h * 31 + Mathf.RoundToInt(f * 1000f);
+                return h;
+            }
+        }
         /// <summary>Changes when anything the shafts are built from changes.</summary>
         public int DaylightHash()
         {
@@ -119,7 +180,11 @@ namespace CarX.Level
         }
 
 #if UNITY_EDITOR
-        void OnValidate() { UnityEditor.EditorApplication.delayCall += TunnelNetwork.MarkAllDirty; }
+        void OnValidate()
+        {
+            UnityEditor.EditorApplication.delayCall += TunnelNetwork.MarkAllDirty;
+            UnityEditor.EditorApplication.delayCall += ShaftRuntime.RefreshAll;   // grate light, beams and dust follow the sliders live
+        }
 #endif
     }
 }

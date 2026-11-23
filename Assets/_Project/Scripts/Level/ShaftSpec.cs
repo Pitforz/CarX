@@ -37,8 +37,10 @@ namespace CarX.Level
         [Range(0f, 4f)] public float beam = 1f;
         [Tooltip("Свет, отражённый от пола на потолок рядом с проёмом")]
         [Range(0f, 4f)] public float bounce = 1f;
-        [Tooltip("Пылинки в луче (только если включены в TunnelTypes → Shaft Dust)")]
+        [Tooltip("Пылинки в луче (количество: TunnelTypes → Пыль в лучах)")]
         public bool dust = true;
+        [Tooltip("Может гаснуть (например, над решёткой проезжает машина). Такой проём не запекается: его свет целиком живой и выключается скриптом (ShaftRuntime.lit). Дороже обычного, ставьте точечно")]
+        public bool canFlicker = false;
 
         public static float DefaultBrightness(ShaftType t)
         {
@@ -81,6 +83,7 @@ namespace CarX.Level
                 h = h * 31 + beam.GetHashCode();
                 h = h * 31 + bounce.GetHashCode();
                 h = h * 31 + (dust ? 1 : 0);
+                h = h * 31 + (canFlicker ? 7 : 0);
                 return h;
             }
         }

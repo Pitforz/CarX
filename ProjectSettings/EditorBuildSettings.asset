@@ -9,6 +9,9 @@ EditorBuildSettings:
     path: Assets/_Project/Scenes/MainMenu.unity
     guid: 681c0e4c8dcd1f14fb574494793b23e5
   - enabled: 1
+    path: Assets/_Project/Scenes/MAIN_LEVEL_GRAPHICS_lab.unity
+    guid: 703a649045858bb45bebce0d112d6237
+  - enabled: 1
     path: Assets/_Project/Scenes/Test/CanalEntrance_Test.unity
     guid: d691c81b54caded43bf012e2fee42869
   - enabled: 1
