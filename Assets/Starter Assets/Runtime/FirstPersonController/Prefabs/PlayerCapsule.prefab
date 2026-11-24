@@ -384,8 +384,6 @@ MonoBehaviour:
   _lookSmoothingTime: 0.045
   SpeedChangeRate: 10
   Gravity: -30
-  _jumpHeight: 0.8
-  _crouchJumpHeight: 0.35
   _crouchHeight: 1.2
   _crouchSpeed: 2
   _crouchCameraDrop: 0.35

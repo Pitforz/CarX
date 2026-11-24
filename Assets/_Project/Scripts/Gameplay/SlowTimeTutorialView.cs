@@ -99,11 +99,11 @@ namespace CarX.Gameplay
             FitToScreen();
         }
 
-        internal void ShowEncounterChoice(System.Action<int> onChoice)
+        internal void ShowEncounterChoice(System.Action<int> onChoice, Font subtitleFont)
         {
             _onChoice = onChoice;
             if (_choiceCard == null)
-                BuildEncounterChoice();
+                BuildEncounterChoice(subtitleFont ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf"));
 
             _card.gameObject.SetActive(false);
             _choiceCard.gameObject.SetActive(true);
@@ -137,13 +137,12 @@ namespace CarX.Gameplay
             _gameplayCanvas.enabled = suspended;
         }
 
-        void BuildEncounterChoice()
+        void BuildEncounterChoice(Font font)
         {
             _root.gameObject.AddComponent<UnityEngine.UI.GraphicRaycaster>();
             _choiceCard = MakeBox(_root, "Final Encounter Choice", Vector2.zero, ChoiceSize,
                 new Color32(20, 20, 20, 244));
             _choiceCard.pivot = new Vector2(0.5f, 0f);
-            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             MakeText(_choiceCard, font, "Title", "Что сделает Алексей?", 24, new Vector2(-75f, 90f),
                 new Vector2(280f, 30f)).fontStyle = FontStyle.Bold;
             _timer = MakeText(_choiceCard, font, "Timer", "", 24, new Vector2(175f, 90f),

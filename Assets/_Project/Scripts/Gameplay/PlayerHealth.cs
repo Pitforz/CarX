@@ -1,8 +1,5 @@
 using System;
 using UnityEngine;
-#if ENABLE_INPUT_SYSTEM
-using UnityEngine.InputSystem;
-#endif
 
 namespace CarX.Gameplay
 {
@@ -11,10 +8,9 @@ namespace CarX.Gameplay
     public class PlayerHealth : MonoBehaviour
     {
         internal enum DamageSource { Other, Melee, Gunfire }
+        internal enum Difficulty { Easy, Normal, Hard }
 
         public const int MaxHealth = 100;
-        const int TestDamage = 5;
-        const int TestBleeding = 5;
         const double BleedingInterval = 7.0;
         const double HealthRecoveryInterval = 50.0;
         const int MaxFlashlightCondition = 100;
@@ -36,6 +32,7 @@ namespace CarX.Gameplay
 
         internal float FlashlightCharge => _flashlightCondition / (float)MaxFlashlightCondition;
         internal DamageSource FlashlightBreakCause { get; private set; }
+        internal Difficulty DifficultyLevel { get; set; } = Difficulty.Normal;
         internal bool CanRepairFlashlight => !IsDead && FlashlightCharge < FlashlightRepairThreshold;
 
         internal bool TryRepairFlashlight()
@@ -58,7 +55,13 @@ namespace CarX.Gameplay
             if (amount <= 0 || IsDead)
                 return;
 
-            SetHealth(CurrentHealth - Mathf.Clamp(amount, 0, MaxHealth), isDirectDamage: true, source: source);
+            int damage = DifficultyLevel switch
+            {
+                Difficulty.Easy => Mathf.CeilToInt(amount * 0.5f),
+                Difficulty.Hard => Mathf.Min(amount, MaxHealth) * 2,
+                _ => amount
+            };
+            SetHealth(CurrentHealth - Mathf.Min(damage, MaxHealth), isDirectDamage: true, source: source);
             if (_hurtClips == null || _hurtClips.Length == 0)
                 return;
 
@@ -122,23 +125,6 @@ namespace CarX.Gameplay
         {
             if (Time.timeScale == 0f)
                 return;
-
-#if ENABLE_INPUT_SYSTEM
-            var keyboard = Keyboard.current;
-            bool damagePressed = keyboard?.hKey.wasPressedThisFrame == true;
-            bool singleDamagePressed = keyboard?.jKey.wasPressedThisFrame == true;
-            bool bleedingPressed = keyboard?.kKey.wasPressedThisFrame == true;
-#else
-            bool damagePressed = Input.GetKeyDown(KeyCode.H);
-            bool singleDamagePressed = Input.GetKeyDown(KeyCode.J);
-            bool bleedingPressed = Input.GetKeyDown(KeyCode.K);
-#endif
-            if (damagePressed)
-                TakeDamage(TestDamage);
-            if (singleDamagePressed)
-                TakeDamage(1);
-            if (bleedingPressed)
-                AddBleeding(TestBleeding);
 
             double now = Time.timeAsDouble;
             if (Bleeding > 0 && now >= _nextBleedingTick)

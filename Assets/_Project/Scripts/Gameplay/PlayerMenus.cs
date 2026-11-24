@@ -28,6 +28,7 @@ namespace CarX.Gameplay
         const string FollowFatherHint = "Пройди дальше по тоннелям и выясни, куда увели отца.";
         const string MouseSensitivityPref = "CarX.MouseSensitivityPercent";
         const string MasterVolumePref = "CarX.MasterVolumePercent";
+        const string DifficultyPref = "CarX.Difficulty";
         const int DefaultSensitivity = 100;
         const int MinSensitivity = 25;
         const int MaxSensitivity = 200;
@@ -39,7 +40,7 @@ namespace CarX.Gameplay
         const float SlowTimeScale = 0.02f;
         const float SlowTimePhysicsStepScale = 0.1f;
 
-        enum Menu { None, Pause, Settings, Quests, Dying, Death, Dialogue, Clue, SlowTime }
+        enum Menu { None, Pause, Settings, Quests, Dying, Death, Dialogue, Clue, SlowTime, EndingFade, Ending }
         enum DeniQuestion { Talk, ContinueReturn, AskAboutKey, CheckFlashlight }
 
         [SerializeField] Material _clueBlur;
@@ -47,13 +48,14 @@ namespace CarX.Gameplay
         NoteReaderView _noteReader;
         SlowTimeTutorialView _slowTimeTutorial;
         System.Action<int> _selectEncounterChoice;
-        System.Action _skipEncounterDialogue;
         System.Action _resumeEncounterFight;
         bool _encounterInputLocked;
         bool _encounterCinematic;
         bool _slowTimePaused;
         bool _openingClue;
         System.Action _onClueDismissed;
+        AudioSource[] _clueAmbience;
+        bool[] _previousClueAmbiencePauseOverrides;
         PlayerStatusHud _hud;
         PlayerHealth _health;
         PlayerInventory _inventory;
@@ -67,10 +69,20 @@ namespace CarX.Gameplay
         PauseMenuView _pauseMenu;
         SettingsMenuView _settingsMenu;
         QuestJournalView _questJournal;
-        RectTransform _deathPanel;
+        RectTransform _endingPanel;
+        CanvasGroup _endingBlack;
+        UnityEngine.UI.Image _movingEndingFade;
+        UnityEngine.UI.Text _endingTitle;
+        UnityEngine.UI.Text _endingCaption;
+        UnityEngine.UI.Text _endingSecondaryLabel;
+        UnityEngine.UI.Button _endingRestartButton;
+        UnityEngine.UI.Button _endingSecondaryButton;
+        bool _endingReturnsToMenu;
+        string _deathEndingTitle;
+        bool _deathEndingReturnsToMenu;
+        const float EndingWait = 5f;
         NpcQuestionsView _questionsView;
         UnityEngine.UI.Text _talkHint;
-        UnityEngine.UI.Text _skipDialogueHint;
         readonly List<string> _questions = new();
         readonly List<int> _caretakerQuestionIds = new();
         readonly List<DeniQuestion> _deniQuestions = new();
@@ -134,6 +146,9 @@ namespace CarX.Gameplay
             _sensitivityPercent = Mathf.Clamp(PlayerPrefs.GetInt(MouseSensitivityPref, DefaultSensitivity),
                 MinSensitivity, MaxSensitivity);
             _masterVolumePercent = Mathf.Clamp(PlayerPrefs.GetInt(MasterVolumePref, DefaultMasterVolume), 0, 100);
+            _health.DifficultyLevel = (PlayerHealth.Difficulty)Mathf.Clamp(
+                PlayerPrefs.GetInt(DifficultyPref, (int)PlayerHealth.Difficulty.Normal),
+                (int)PlayerHealth.Difficulty.Easy, (int)PlayerHealth.Difficulty.Hard);
             ApplySensitivity();
             ApplyMasterVolume();
         }
@@ -151,7 +166,7 @@ namespace CarX.Gameplay
 
         void BeginDeath()
         {
-            if (_menu == Menu.Dying || _menu == Menu.Death)
+            if (_menu is Menu.Dying or Menu.Death or Menu.EndingFade or Menu.Ending)
                 return;
 
             _activeTour?.Cancel();
@@ -161,7 +176,7 @@ namespace CarX.Gameplay
 
             if (_deathFall == null || !_deathFall.isActiveAndEnabled)
             {
-                SetMenu(Menu.Death);
+                FinishDeath();
                 return;
             }
 
@@ -174,13 +189,130 @@ namespace CarX.Gameplay
             _deathFall.Play(camera != null ? camera : Camera.main, () =>
             {
                 if (_menu == Menu.Dying)
-                    SetMenu(Menu.Death);
+                    FinishDeath();
             });
+        }
+
+        void FinishDeath()
+        {
+            ConfigureResult("Вы погибли", _deathEndingTitle ?? "Плохая концовка", success: false,
+                returnToMainMenu: _deathEndingReturnsToMenu);
+            _endingBlack.alpha = 1f;
+            SetMenu(Menu.Death);
+        }
+
+        internal void SetDeathEnding(string title, bool returnToMainMenu)
+        {
+            _deathEndingTitle = title;
+            _deathEndingReturnsToMenu = returnToMainMenu;
+        }
+
+        internal void ShowStoryEnding(string title, string subtitle, bool success, bool returnToMainMenu)
+        {
+            _hud.ShowSubtitle(subtitle, duration: EndingWait);
+            if (!success)
+            {
+                StartCoroutine(FadeWhilePlaying(title, returnToMainMenu));
+                return;
+            }
+
+            ConfigureResult("Вы прошли игру", title, success: true, returnToMainMenu: returnToMainMenu);
+            StartEndingFade(Time.unscaledTime + EndingWait);
+        }
+
+        System.Collections.IEnumerator FadeWhilePlaying(string title, bool returnToMainMenu)
+        {
+            const float fadeDuration = 1.65f;
+            var rect = MakePanel(_hud.HudRect, "Final Scene Fade", Color.clear);
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = rect.offsetMax = Vector2.zero;
+            _movingEndingFade = rect.GetComponent<UnityEngine.UI.Image>();
+            _movingEndingFade.raycastTarget = false;
+
+            float elapsed = 0f;
+            while (isActiveAndEnabled && !_health.IsDead && elapsed < EndingWait + fadeDuration)
+            {
+                yield return null;
+                if (_movingEndingFade == null || _health.IsDead || !isActiveAndEnabled)
+                    break;
+
+                bool playing = _menu == Menu.None;
+                _movingEndingFade.enabled = playing;
+                if (!playing)
+                    continue;
+
+                elapsed += Time.unscaledDeltaTime;
+                rect.SetAsLastSibling();
+                float alpha = Mathf.SmoothStep(0f, 1f, (elapsed - EndingWait) / fadeDuration);
+                _movingEndingFade.color = new Color(0f, 0f, 0f, alpha);
+            }
+
+            ClearMovingEndingFade();
+            if (!isActiveAndEnabled || _health.IsDead)
+                yield break;
+            ConfigureResult(title, null, success: false, returnToMainMenu: returnToMainMenu);
+            _endingBlack.GetComponent<UnityEngine.UI.Image>().color = Color.black;
+            _endingBlack.alpha = 1f;
+            SetMenu(Menu.Ending);
+        }
+
+        void ClearMovingEndingFade()
+        {
+            if (_movingEndingFade != null)
+            {
+                _movingEndingFade.enabled = false;
+                Destroy(_movingEndingFade.gameObject);
+            }
+            _movingEndingFade = null;
+        }
+
+        void ConfigureResult(string title, string caption, bool success, bool returnToMainMenu)
+        {
+            if (_overlay == null)
+                BuildMenus();
+            if (_endingPanel == null)
+                BuildEndingMenu();
+
+            _endingBlack.GetComponent<UnityEngine.UI.Image>().color = new Color32(30, 17, 11, 255);
+            _endingTitle.text = title;
+            _endingTitle.color = success ? new Color32(154, 222, 128, 255) : new Color32(255, 151, 51, 255);
+            _endingCaption.text = caption;
+            _endingCaption.gameObject.SetActive(!string.IsNullOrEmpty(caption));
+            _endingReturnsToMenu = returnToMainMenu;
+            _endingSecondaryLabel.text = returnToMainMenu ? "Главное меню" : "Выйти из игры";
+            _endingRestartButton.interactable = _endingSecondaryButton.interactable = true;
+        }
+
+        void StartEndingFade(float fadeAt)
+        {
+            _endingBlack.alpha = 0f;
+            SetMenu(Menu.EndingFade);
+            StartCoroutine(FadeToEnding(fadeAt));
+        }
+
+        System.Collections.IEnumerator FadeToEnding(float fadeAt)
+        {
+            const float fadeDuration = 1.65f;
+            while (_menu == Menu.EndingFade && Time.unscaledTime < fadeAt)
+                yield return null;
+            float start = Time.unscaledTime;
+            while (_menu == Menu.EndingFade)
+            {
+                float progress = (Time.unscaledTime - start) / fadeDuration;
+                _endingBlack.alpha = Mathf.SmoothStep(0f, 1f, progress);
+                if (progress >= 1f)
+                {
+                    SetMenu(Menu.Ending);
+                    yield break;
+                }
+                yield return null;
+            }
         }
 
         void Update()
         {
-            if (_hud.HudRect == null || _menu == Menu.Dying || _menu == Menu.Death)
+            if (_hud.HudRect == null || _menu is Menu.Dying or Menu.Death or Menu.EndingFade or Menu.Ending)
                 return;
 
             if (_health.IsDead)
@@ -195,16 +327,12 @@ namespace CarX.Gameplay
             bool quests = keyboard?.tKey.wasPressedThisFrame == true;
             bool inventory = keyboard?.tabKey.wasPressedThisFrame == true;
             bool interact = keyboard?.eKey.wasPressedThisFrame == true;
-            bool skipDialogue = keyboard?.mKey.wasPressedThisFrame == true;
-            bool slowTime = keyboard?.oKey.wasPressedThisFrame == true;
             bool resumeTime = keyboard?.spaceKey.wasPressedThisFrame == true;
 #else
             bool escape = Input.GetKeyDown(KeyCode.Escape);
             bool quests = Input.GetKeyDown(KeyCode.T);
             bool inventory = Input.GetKeyDown(KeyCode.Tab);
             bool interact = Input.GetKeyDown(KeyCode.E);
-            bool skipDialogue = Input.GetKeyDown(KeyCode.M);
-            bool slowTime = Input.GetKeyDown(KeyCode.O);
             bool resumeTime = Input.GetKeyDown(KeyCode.Space);
 #endif
             if (escape && (IsPaused || _encounterInputLocked || _resumeEncounterFight != null))
@@ -234,11 +362,7 @@ namespace CarX.Gameplay
             }
 
             if (_encounterInputLocked)
-            {
-                if (_menu == Menu.None && skipDialogue)
-                    _skipEncounterDialogue?.Invoke();
                 return;
-            }
 
             if (_menu == Menu.Clue)
             {
@@ -248,6 +372,17 @@ namespace CarX.Gameplay
                     SetMenu(Menu.None);
                     onDismissed?.Invoke();
                 }
+                else
+                {
+#if ENABLE_INPUT_SYSTEM
+                    bool previous = keyboard?.leftArrowKey.wasPressedThisFrame == true;
+                    bool next = keyboard?.rightArrowKey.wasPressedThisFrame == true;
+#else
+                    bool previous = Input.GetKeyDown(KeyCode.LeftArrow);
+                    bool next = Input.GetKeyDown(KeyCode.RightArrow);
+#endif
+                    _noteReader.TurnPage((next ? 1 : 0) - (previous ? 1 : 0));
+                }
                 return;
             }
 
@@ -256,7 +391,7 @@ namespace CarX.Gameplay
 
             if (_menu == Menu.Dialogue)
             {
-                if (escape || inventory || skipDialogue || _dialogueNpc == null || !_dialogueNpc.CanTalk)
+                if (escape || inventory || _dialogueNpc == null || !_dialogueNpc.CanTalk)
                 {
                     _dismissedDialogueNpc = _dialogueNpc;
                     SetMenu(Menu.None);
@@ -274,35 +409,12 @@ namespace CarX.Gameplay
                 SetMenu(_menu == Menu.Quests ? Menu.None : Menu.Quests);
             else if (_menu == Menu.None && Time.timeScale > 0f)
             {
-                if (slowTime)
-                {
-                    ShowSlowTimeTutorial();
-                    return;
-                }
-
-                if (skipDialogue && SkipActiveDialogue())
-                    return;
-
-                if (!HandleDeniQuestInteraction(interact, skipDialogue))
+                if (!HandleDeniQuestInteraction(interact))
                     UpdateTalkTarget(interact);
             }
         }
 
-        bool SkipActiveDialogue()
-        {
-            if (!IsNpcSpeaking)
-                return false;
-
-            _activeTour?.Skip();
-            _activeDeniDialogue?.SkipConversation();
-            _answeringNpc?.SkipAnswer();
-            _workshop?.SkipConversation();
-            _closedFrame = Time.frameCount;
-            HideTalkHint();
-            return true;
-        }
-
-        bool HandleDeniQuestInteraction(bool interact, bool skipDialogue)
+        bool HandleDeniQuestInteraction(bool interact)
         {
             if (!CanStartNpcConversation || _deniQuest == null || _pistol == null || _pistol.ViewCamera == null)
                 return false;
@@ -363,9 +475,7 @@ namespace CarX.Gameplay
                 return true;
             }
 
-            if (skipDialogue)
-                _deniQuest.SkipRemainingReturnDialogue();
-            if ((interact || (skipDialogue && _deniQuest.ToolsReturned)) && StartDeniReturn(_deniQuest))
+            if (interact && StartDeniReturn(_deniQuest))
             {
                 _closedFrame = Time.frameCount;
                 return true;
@@ -375,7 +485,7 @@ namespace CarX.Gameplay
             _clueInView = false;
             HideDialogueQuestions();
             string action = _deniQuest.ToolsReturned ? "E — продолжить разговор" : "E — отдать ящик";
-            ShowTalkHint(_deniQuest.HasReturnDialogueRemaining ? action + "\nM — пропустить диалог" : action);
+            ShowTalkHint(action);
             return true;
         }
 
@@ -572,7 +682,7 @@ namespace CarX.Gameplay
             confirm |= Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter);
             float wheel = Input.mouseScrollDelta.y;
 #endif
-            int shortcutCount = _menu == Menu.Dialogue ? Mathf.Min(_questions.Count, 9) : 0;
+            int shortcutCount = _menu == Menu.Dialogue ? Mathf.Min(_questions.Count, 8) : 0;
             for (int i = 0; i < shortcutCount; i++)
             {
 #if ENABLE_INPUT_SYSTEM
@@ -694,11 +804,6 @@ namespace CarX.Gameplay
 
             _questionsView?.UpdateLayout(_hud.HudRect);
 
-            if (_skipDialogueHint != null)
-                _skipDialogueHint.gameObject.SetActive(_menu == Menu.None &&
-                    (_skipEncounterDialogue != null || IsNpcSpeaking) &&
-                    (_inventory == null || !_inventory.IsOpen));
-
             if (_overlay == null)
                 return;
 
@@ -708,23 +813,11 @@ namespace CarX.Gameplay
             UpdateLayout();
         }
 
-        public void ShowSlowTimeTutorial()
-        {
-            if (!isActiveAndEnabled || BlocksGameplayInput || _hud.HudRect == null || _health.IsDead ||
-                Time.timeScale <= 0f || (_inventory != null && _inventory.IsOpen))
-                return;
-
-            OpenSlowTime();
-        }
-
-        internal void LockEncounterInput(Vector3 facingPoint, System.Action skipDialogue)
+        internal void LockEncounterInput(Vector3 facingPoint)
         {
             _encounterInputLocked = true;
-            _skipEncounterDialogue = skipDialogue;
             _inventory?.CloseForMenu();
             _controller?.BeginEncounterLook(facingPoint);
-            EnsureSkipDialogueHint();
-            _skipDialogueHint.text = "M — перейти к выбору";
             HideTalkHint();
         }
 
@@ -735,10 +828,7 @@ namespace CarX.Gameplay
 
             _encounterInputLocked = false;
             _encounterCinematic = false;
-            _skipEncounterDialogue = null;
             _controller?.EndEncounterLook();
-            if (_skipDialogueHint != null)
-                _skipDialogueHint.text = "M — пропустить диалог";
             if (_menu != Menu.SlowTime)
                 _controller?.SetControlsFrozen(false);
         }
@@ -749,7 +839,7 @@ namespace CarX.Gameplay
                 return false;
 
             _selectEncounterChoice = selectChoice;
-            _slowTimeTutorial.ShowEncounterChoice(SelectEncounterChoice);
+            _slowTimeTutorial.ShowEncounterChoice(SelectEncounterChoice, _hud.SubtitleFont);
             if (_inputs != null)
                 _inputs.cursorLocked = false;
             ShowCursor();
@@ -760,12 +850,9 @@ namespace CarX.Gameplay
 
         internal void ShowEncounterChoiceHint(string text) => _slowTimeTutorial.SetChoiceHint(text);
 
-        internal void BeginEncounterCinematic(System.Action skipDialogue = null)
+        internal void BeginEncounterCinematic()
         {
             _encounterCinematic = true;
-            _skipEncounterDialogue = skipDialogue;
-            if (_skipDialogueHint != null && skipDialogue != null)
-                _skipDialogueHint.text = "M — пропустить диалог";
             SetMenu(Menu.None);
         }
 
@@ -830,14 +917,19 @@ namespace CarX.Gameplay
 
         internal bool ShowClue(ClueNote note, System.Action onDismissed = null)
         {
-            if (!isActiveAndEnabled || note == null || note.Paper == null || BlocksGameplayInput || _health.IsDead)
+            return note != null && note.Paper != null && ShowClues(new[] { note.Paper }, onDismissed);
+        }
+
+        internal bool ShowClues(Sprite[] documents, System.Action onDismissed = null, AudioSource[] ambience = null)
+        {
+            if (!isActiveAndEnabled || BlocksGameplayInput || _health.IsDead)
                 return false;
 
-            StartCoroutine(OpenClue(note.Paper, onDismissed));
+            StartCoroutine(OpenClue(documents, onDismissed, ambience));
             return true;
         }
 
-        System.Collections.IEnumerator OpenClue(Sprite image, System.Action onDismissed)
+        System.Collections.IEnumerator OpenClue(Sprite[] documents, System.Action onDismissed, AudioSource[] ambience)
         {
             _openingClue = true;
             _inventory?.CloseForMenu();
@@ -852,9 +944,32 @@ namespace CarX.Gameplay
             if (_overlay == null)
                 BuildMenus();
             _noteReader ??= new NoteReaderView(_overlay);
-            _noteReader.Open(image, _clueBlur, capture);
+            _noteReader.Open(documents, _clueBlur, capture);
             _onClueDismissed = onDismissed;
+            if (ambience != null)
+            {
+                _clueAmbience = ambience;
+                _previousClueAmbiencePauseOverrides = new bool[ambience.Length];
+                for (int i = 0; i < ambience.Length; i++)
+                {
+                    if (ambience[i] == null)
+                        continue;
+                    _previousClueAmbiencePauseOverrides[i] = ambience[i].ignoreListenerPause;
+                    ambience[i].ignoreListenerPause = true;
+                }
+            }
             SetMenu(Menu.Clue);
+        }
+
+        void RestoreClueAmbience()
+        {
+            if (_clueAmbience == null)
+                return;
+            for (int i = 0; i < _clueAmbience.Length; i++)
+                if (_clueAmbience[i] != null)
+                    _clueAmbience[i].ignoreListenerPause = _previousClueAmbiencePauseOverrides[i];
+            _clueAmbience = null;
+            _previousClueAmbiencePauseOverrides = null;
         }
 
         static bool IsPauseMenu(Menu menu) => menu is Menu.Pause or Menu.Settings;
@@ -902,11 +1017,13 @@ namespace CarX.Gameplay
             {
                 _noteReader?.Close();
                 _onClueDismissed = null;
+                RestoreClueAmbience();
             }
             if (_menu == Menu.Settings && _settingsChanged)
             {
                 PlayerPrefs.SetInt(MouseSensitivityPref, _sensitivityPercent);
                 PlayerPrefs.SetInt(MasterVolumePref, _masterVolumePercent);
+                PlayerPrefs.SetInt(DifficultyPref, (int)_health.DifficultyLevel);
                 PlayerPrefs.Save();
                 _settingsChanged = false;
             }
@@ -936,8 +1053,8 @@ namespace CarX.Gameplay
                     ContinueFromPause, () => SetMenu(Menu.Settings), QuitGame);
             if (menu == Menu.Settings && _settingsMenu == null)
                 _settingsMenu = new SettingsMenuView(_overlay,
-                    MinSensitivity, MaxSensitivity, _sensitivityPercent, _masterVolumePercent,
-                    ChangeSensitivity, ChangeMasterVolume, () => SetMenu(Menu.Pause));
+                    MinSensitivity, MaxSensitivity, _sensitivityPercent, _masterVolumePercent, _health.DifficultyLevel,
+                    ChangeSensitivity, ChangeMasterVolume, ChangeDifficulty, () => SetMenu(Menu.Pause));
             if (menu == Menu.Quests && _questJournal == null)
             {
                 var questFont = _hud.QuestFont;
@@ -978,8 +1095,8 @@ namespace CarX.Gameplay
             }
 
             // Keep audio running during the fall so breathing and heartbeat can fade out.
-            AudioListener.pause = menu == Menu.Dying ? _previousAudioPause : true;
-            if (menu == Menu.Dying || (menu == Menu.SlowTime && _selectEncounterChoice == null))
+            AudioListener.pause = menu is Menu.Dying or Menu.EndingFade ? _previousAudioPause : true;
+            if ((menu is Menu.Dying or Menu.EndingFade) || (menu == Menu.SlowTime && _selectEncounterChoice == null))
             {
                 Cursor.lockState = CursorLockMode.Locked;
                 Cursor.visible = false;
@@ -994,7 +1111,14 @@ namespace CarX.Gameplay
                 _settingsMenu.Root.gameObject.SetActive(menu == Menu.Settings);
             if (_questJournal != null)
                 _questJournal.Root.gameObject.SetActive(menu == Menu.Quests);
-            _deathPanel.gameObject.SetActive(menu == Menu.Death);
+            bool result = menu is Menu.Death or Menu.Ending;
+            bool ending = result || menu == Menu.EndingFade;
+            _overlay.GetComponent<UnityEngine.UI.Image>().color = ending ? Color.clear : new Color32(0, 0, 0, 160);
+            if (_endingPanel != null)
+            {
+                _endingBlack.gameObject.SetActive(ending);
+                _endingPanel.gameObject.SetActive(result);
+            }
             _overlay.SetAsLastSibling();
             _overlay.gameObject.SetActive(menu != Menu.Dying && menu != Menu.SlowTime && menu != Menu.Dialogue);
             if (menu == Menu.Dialogue)
@@ -1004,6 +1128,8 @@ namespace CarX.Gameplay
                 _pauseMenu.FocusContinue();
             else if (menu == Menu.Settings)
                 _settingsMenu.FocusFirst();
+            else if (result && _endingRestartButton.interactable)
+                EventSystem.current?.SetSelectedGameObject(_endingRestartButton.gameObject);
         }
 
         void BuildMenus()
@@ -1030,35 +1156,46 @@ namespace CarX.Gameplay
             _trackedQuest.alignment = TextAnchor.UpperRight;
             _trackedQuest.rectTransform.pivot = Vector2.one;
             _trackedQuest.gameObject.SetActive(_questTracked);
-            EnsureSkipDialogueHint();
 
             _overlay = MakePanel(hud, "Menu Overlay", new Color32(0, 0, 0, 160));
             _overlay.anchorMin = Vector2.zero;
             _overlay.anchorMax = Vector2.one;
             _overlay.offsetMin = _overlay.offsetMax = Vector2.zero;
 
-            _deathPanel = MakePanel(_overlay, "Death Menu", new Color32(30, 33, 35, 255));
-            _deathPanel.sizeDelta = new Vector2(400f, 230f);
-            var deathTitle = MakeText(_deathPanel, font, "Death Title", "Вы погибли", 32,
-                new Vector2(0f, 70f), new Vector2(320f, 42f));
-            deathTitle.color = new Color32(244, 120, 110, 255);
-            MakeButton(_deathPanel, font, "Начать заново", 6f, RestartScene);
-            MakeButton(_deathPanel, font, "Выйти из игры", -53f, QuitGame);
-
             _overlay.gameObject.SetActive(false);
         }
 
-        void EnsureSkipDialogueHint()
+        void BuildEndingMenu()
         {
-            if (_skipDialogueHint != null)
-                return;
+            Font font = _hud.SubtitleFont ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            RectTransform black = MakePanel(_overlay, "Result Background", new Color32(30, 17, 11, 255));
+            black.anchorMin = Vector2.zero;
+            black.anchorMax = Vector2.one;
+            black.offsetMin = black.offsetMax = Vector2.zero;
+            _endingBlack = black.gameObject.AddComponent<CanvasGroup>();
+            _endingPanel = MakePanel(black, "Result Menu", Color.clear);
+            _endingPanel.sizeDelta = new Vector2(1000f, 550f);
+            _endingCaption = MakeText(_endingPanel, font, "Ending Caption", string.Empty, 31,
+                new Vector2(0f, 215f), new Vector2(910f, 48f));
+            _endingCaption.color = new Color32(236, 188, 150, 255);
+            _endingTitle = MakeText(_endingPanel, font, "Result Title", string.Empty, 78,
+                new Vector2(0f, 151f), new Vector2(930f, 118f));
+            _endingTitle.resizeTextForBestFit = true;
+            _endingTitle.resizeTextMinSize = 40;
+            _endingTitle.resizeTextMaxSize = 78;
 
-            Font font = _hud.QuestFont ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            _skipDialogueHint = MakeText(_hud.HudRect, font, "Skip Dialogue Hint", "M — пропустить диалог", 16,
-                new Vector2(0f, 18f), new Vector2(280f, 24f));
-            var rect = _skipDialogueHint.rectTransform;
-            rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0.5f, 0f);
-            _skipDialogueHint.gameObject.SetActive(false);
+            MakeResultButton(_endingPanel, font, "Начать заново", 8f, primary: true, RestartScene,
+                out _endingRestartButton);
+            _endingSecondaryLabel = MakeResultButton(_endingPanel, font, "Выйти из игры", -140f,
+                primary: false, LeaveResult, out _endingSecondaryButton);
+            _endingRestartButton.navigation = new UnityEngine.UI.Navigation
+            {
+                mode = UnityEngine.UI.Navigation.Mode.Explicit, selectOnDown = _endingSecondaryButton
+            };
+            _endingSecondaryButton.navigation = new UnityEngine.UI.Navigation
+            {
+                mode = UnityEngine.UI.Navigation.Mode.Explicit, selectOnUp = _endingRestartButton
+            };
         }
 
         void ChangeSensitivity(int value)
@@ -1073,6 +1210,12 @@ namespace CarX.Gameplay
             _masterVolumePercent = value;
             _settingsChanged = true;
             ApplyMasterVolume();
+        }
+
+        void ChangeDifficulty(PlayerHealth.Difficulty value)
+        {
+            _health.DifficultyLevel = value;
+            _settingsChanged = true;
         }
 
         void ApplySensitivity()
@@ -1218,10 +1361,13 @@ namespace CarX.Gameplay
                 _pauseMenu.Fit(min, center, size);
             if (_menu == Menu.Quests)
                 _questJournal.Fit(center, size);
-            _deathPanel.anchorMin = _deathPanel.anchorMax = center;
-            float deathScale = Mathf.Clamp01(Mathf.Min(size.x / (_deathPanel.sizeDelta.x + 32f),
-                size.y / (_deathPanel.sizeDelta.y + 32f)));
-            _deathPanel.localScale = new Vector3(deathScale, deathScale, 1f);
+            if (_endingPanel != null)
+            {
+                _endingPanel.anchorMin = _endingPanel.anchorMax = center;
+                float endingScale = 0.76f * Mathf.Min(size.x / _endingPanel.sizeDelta.x,
+                    size.y / _endingPanel.sizeDelta.y);
+                _endingPanel.localScale = new Vector3(endingScale, endingScale, 1f);
+            }
 
             var tracker = _trackedQuest.rectTransform;
             tracker.anchorMin = tracker.anchorMax = max;
@@ -1253,26 +1399,34 @@ namespace CarX.Gameplay
             return label;
         }
 
-        static UnityEngine.UI.Text MakeButton(RectTransform parent, Font font, string text, float y, UnityAction action)
+        static UnityEngine.UI.Text MakeResultButton(RectTransform parent, Font font, string text, float y,
+            bool primary, UnityAction action, out UnityEngine.UI.Button button)
         {
-            var rect = MakePanel(parent, text, Color.white);
+            var rect = MakePanel(parent, text,
+                primary ? new Color32(255, 152, 55, 255) : new Color32(172, 105, 64, 255));
             rect.anchoredPosition = new Vector2(0f, y);
-            rect.sizeDelta = new Vector2(280f, 46f);
-            var button = rect.gameObject.AddComponent<UnityEngine.UI.Button>();
-            button.targetGraphic = rect.GetComponent<UnityEngine.UI.Image>();
+            rect.sizeDelta = new Vector2(704f, 110f);
+            var fill = MakePanel(rect, "Fill", Color.white);
+            fill.sizeDelta = rect.sizeDelta - new Vector2(4f, 4f);
+            button = rect.gameObject.AddComponent<UnityEngine.UI.Button>();
+            button.targetGraphic = fill.GetComponent<UnityEngine.UI.Image>();
             var colors = button.colors;
-            colors.normalColor = new Color32(57, 61, 65, 255);
-            colors.highlightedColor = new Color32(79, 84, 89, 255);
-            colors.pressedColor = new Color32(43, 46, 49, 255);
+            colors.normalColor = primary ? new Color32(123, 57, 20, 255) : new Color32(73, 47, 32, 255);
+            colors.highlightedColor = primary ? new Color32(151, 74, 27, 255) : new Color32(105, 67, 43, 255);
+            colors.pressedColor = new Color32(88, 45, 24, 255);
             colors.selectedColor = colors.highlightedColor;
+            colors.disabledColor = colors.normalColor;
+            colors.fadeDuration = 0f;
             button.colors = colors;
             button.onClick.AddListener(action);
-            return MakeText(rect, font, "Label", text, 18, Vector2.zero, rect.sizeDelta);
+            var label = MakeText(rect, font, "Label", text, 46, Vector2.zero, fill.sizeDelta);
+            label.color = new Color32(255, 241, 216, 255);
+            return label;
         }
 
         void RestartScene()
         {
-            if (_restartingScene || _menu != Menu.Death)
+            if (_restartingScene || _menu is not (Menu.Death or Menu.Ending) || !_endingRestartButton.interactable)
                 return;
 
             var scene = gameObject.scene;
@@ -1285,6 +1439,16 @@ namespace CarX.Gameplay
 #endif
                 load = SceneManager.LoadSceneAsync(scene.buildIndex, LoadSceneMode.Single);
             _restartingScene = load != null;
+        }
+
+        void LeaveResult()
+        {
+            if (_restartingScene || _menu is not (Menu.Death or Menu.Ending) || !_endingSecondaryButton.interactable)
+                return;
+            if (_endingReturnsToMenu)
+                _restartingScene = SceneManager.LoadSceneAsync("MainMenu", LoadSceneMode.Single) != null;
+            else
+                QuitGame();
         }
 
         static void QuitGame()
@@ -1304,13 +1468,14 @@ namespace CarX.Gameplay
 
         void OnApplicationFocus(bool focused)
         {
-            if (focused && _menu != Menu.None && _menu != Menu.Dying &&
+            if (focused && _menu is not (Menu.None or Menu.Dying or Menu.EndingFade) &&
                 (_menu != Menu.SlowTime || _selectEncounterChoice != null))
                 ShowCursor();
         }
 
         void OnDisable()
         {
+            ClearMovingEndingFade();
             _openingClue = false;
             if (_encounterInputLocked)
                 UnlockEncounterInput();
@@ -1324,8 +1489,6 @@ namespace CarX.Gameplay
             HideTalkHint();
             if (_trackedQuest != null)
                 _trackedQuest.gameObject.SetActive(false);
-            if (_skipDialogueHint != null)
-                _skipDialogueHint.gameObject.SetActive(false);
         }
 
         void OnDestroy()
@@ -1339,8 +1502,6 @@ namespace CarX.Gameplay
                 Destroy(_overlay.gameObject);
             if (_trackedQuest != null)
                 Destroy(_trackedQuest.gameObject);
-            if (_skipDialogueHint != null)
-                Destroy(_skipDialogueHint.gameObject);
         }
 
         void HideTalkHint()
