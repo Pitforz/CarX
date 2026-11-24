@@ -78,6 +78,12 @@ namespace CarX.Gameplay
         Material _weaponMaterial;
         readonly Queue<GameObject> _impactMarks = new();
         int _loaded = MagazineSize;
+        internal int LoadedRounds => _loaded;
+
+        internal void RestoreLoadedRounds(int loaded)
+        {
+            _loaded = Mathf.Clamp(loaded, 0, MagazineSize);
+        }
         int _reserve = MagazineSize;
         bool _equipped;
         bool _aiming;

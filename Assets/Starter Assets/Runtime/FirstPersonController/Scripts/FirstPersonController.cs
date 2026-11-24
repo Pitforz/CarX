@@ -822,6 +822,23 @@ namespace StarterAssets
 			AudibleFootstep?.Invoke(transform.position, movement / Time.deltaTime);
 		}
 
+		internal float LookPitch => _cinemachineTargetPitch;
+
+		internal void RestoreCheckpointPose(Vector3 position, Quaternion rotation, float pitch)
+		{
+			var body = GetComponent<CharacterController>();
+			if (body != null)
+				body.enabled = false;
+			transform.SetPositionAndRotation(position, rotation);
+			if (body != null)
+				body.enabled = true;
+			_cinemachineTargetPitch = Mathf.Clamp(pitch, _lookUpLimit, _lookDownLimit);
+			_aimSwayDegrees = Vector2.zero;
+			_pendingLookRotation = _lookVelocity = Vector2.zero;
+			if (CinemachineCameraTarget != null)
+				CinemachineCameraTarget.transform.localRotation = GetViewRotation(Quaternion.identity);
+		}
+
 		private void UpdateVerticalVelocity()
 		{
 			if (_controller.isGrounded && _verticalVelocity <= 0f)

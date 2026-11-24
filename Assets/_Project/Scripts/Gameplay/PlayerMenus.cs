@@ -195,6 +195,9 @@ namespace CarX.Gameplay
 
         void FinishDeath()
         {
+            if (FloorDoorCheckpoint.TryReload())
+                return;
+
             ConfigureResult("Вы погибли", _deathEndingTitle ?? "Плохая концовка", success: false,
                 returnToMainMenu: _deathEndingReturnsToMenu);
             _endingBlack.alpha = 1f;

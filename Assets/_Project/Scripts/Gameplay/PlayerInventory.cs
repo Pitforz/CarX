@@ -86,6 +86,11 @@ namespace CarX.Gameplay
             _innerVoice = GetComponent<PlayerInnerVoice>();
         }
 
+        void Start()
+        {
+            FloorDoorCheckpoint.Apply(this);
+        }
+
         void Update()
         {
             if (_hud.HudRect == null || _pistol.ViewCamera == null || (_health != null && _health.IsDead) ||
@@ -528,6 +533,22 @@ namespace CarX.Gameplay
             Destroy(toolbox.gameObject);
             RefreshWheel();
             return true;
+        }
+
+        internal void RestoreCheckpoint(bool hasKey, int reserveRounds)
+        {
+            _spareRounds = Mathf.Max(0, reserveRounds);
+            _carriedToolbox = null;
+            HasLowerFloorKey = hasKey;
+            if (!hasKey)
+                return;
+
+            foreach (var key in FindObjectsByType<DoorKeyPickup>(FindObjectsInactive.Include))
+            {
+                _lowerFloorKeyIcon = key.Icon;
+                break;
+            }
+            RefreshWheel();
         }
 
         internal bool ReceiveLowerFloorKey(DoorKeyPickup key)

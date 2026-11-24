@@ -33,7 +33,18 @@ namespace CarX.Gameplay
                 return false;
 
             _openingStarted = true;
+            FloorDoorCheckpoint.Remember(this, inventory);
             return true;
+        }
+
+        internal void RestoreOpened()
+        {
+            _openingStarted = true;
+            _opening = 1f;
+            if (_leftLeaf != null)
+                _leftLeaf.localRotation = _leftClosed * Quaternion.Euler(0f, -90f, 0f);
+            if (_rightLeaf != null)
+                _rightLeaf.localRotation = _rightClosed * Quaternion.Euler(0f, 90f, 0f);
         }
 
         void Update()

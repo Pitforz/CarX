@@ -30,7 +30,19 @@ namespace CarX.Gameplay
         int _flashlightCondition = MaxFlashlightCondition;
         AudioSource _hurtAudio;
 
+        internal int FlashlightConditionPoints => _flashlightCondition;
         internal float FlashlightCharge => _flashlightCondition / (float)MaxFlashlightCondition;
+
+        internal void RestoreCheckpoint(int health, int bleeding, int flashlight)
+        {
+            CurrentHealth = Mathf.Clamp(health, 1, MaxHealth);
+            Bleeding = Mathf.Max(0, bleeding);
+            _flashlightCondition = Mathf.Clamp(flashlight, 0, MaxFlashlightCondition);
+            _nextBleedingTick = Time.timeAsDouble + BleedingInterval;
+            _nextHealthRecovery = Time.timeAsDouble + HealthRecoveryInterval;
+            HealthChanged?.Invoke(CurrentHealth);
+            BleedingChanged?.Invoke(Bleeding);
+        }
         internal DamageSource FlashlightBreakCause { get; private set; }
         internal Difficulty DifficultyLevel { get; set; } = Difficulty.Normal;
         internal bool CanRepairFlashlight => !IsDead && FlashlightCharge < FlashlightRepairThreshold;
