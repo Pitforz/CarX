@@ -92,6 +92,9 @@ namespace CarX.Flow
 
         void Update()
         {
+            // пока меню проявляется из чёрного, отсчёт до звонка не идёт
+            if (!_ringing && !_answered && SceneFlow.Busy) _enteredAt = Time.unscaledTime;
+
             if (_answered || SceneFlow.Busy)
             {
                 if (_overPhone)

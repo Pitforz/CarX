@@ -485,7 +485,10 @@ namespace CarX.Gameplay
             else if (pickup is LowerFloorDoor door)
             {
                 if (door.TryOpen(this))
+                {
                     SetFocusedPickup(null);
+                    _menus?.OnDoorOpened(door);
+                }
                 else if (!door.CanUnlock(this))
                     _hud.ShowSubtitle("Заперто. Нужен ключ.");
             }

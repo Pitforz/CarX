@@ -21,6 +21,7 @@ namespace CarX.Gameplay
         readonly VolumeProfile _profile;
         readonly ColorAdjustments _colorAdjustments;
         RectTransform _choiceCard;
+        RectTransform _keyCard;
         UnityEngine.UI.Text _timer;
         UnityEngine.UI.Text _choiceHint;
         System.Action<int> _onChoice;
@@ -88,6 +89,8 @@ namespace CarX.Gameplay
             _card.gameObject.SetActive(true);
             if (_choiceCard != null)
                 _choiceCard.gameObject.SetActive(false);
+            if (_keyCard != null)
+                _keyCard.gameObject.SetActive(false);
             _cameraData = camera.GetUniversalAdditionalCameraData();
             _previousVolumeMask = _cameraData.volumeLayerMask;
             _previousPostProcessing = _cameraData.renderPostProcessing;
@@ -106,6 +109,8 @@ namespace CarX.Gameplay
                 BuildEncounterChoice(subtitleFont ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf"));
 
             _card.gameObject.SetActive(false);
+            if (_keyCard != null)
+                _keyCard.gameObject.SetActive(false);
             _choiceCard.gameObject.SetActive(true);
             _choiceHint.text = "";
             FitToScreen();
@@ -115,10 +120,63 @@ namespace CarX.Gameplay
         {
             _onChoice = null;
             _choiceCard.gameObject.SetActive(false);
+            if (_keyCard != null)
+                _keyCard.gameObject.SetActive(false);
             _card.sizeDelta = CombatCardSize;
             _sprintHint.gameObject.SetActive(true);
             _tutorialExit.rectTransform.anchoredPosition = new Vector2(0f, -78f);
             _card.gameObject.SetActive(true);
+            FitToScreen();
+        }
+
+        /// <summary>
+        /// Карточка подсказки по клавишам: заголовок, строки «клавиши — действие» и строка внизу.
+        /// </summary>
+        internal void ShowKeyCard(string title, (string[] keys, string label)[] rows, string footer)
+        {
+            if (_keyCard != null)
+                Object.Destroy(_keyCard.gameObject);
+            _card.gameObject.SetActive(false);
+            if (_choiceCard != null)
+                _choiceCard.gameObject.SetActive(false);
+
+            const float titleHeight = 58f;
+            const float rowHeight = 44f;
+            const float footerHeight = 46f;
+            float height = titleHeight + rows.Length * rowHeight + footerHeight;
+            _keyCard = MakeBox(_root, "Key Hint Card", Vector2.zero, new Vector2(CardSize.x, height),
+                new Color32(20, 20, 20, 238));
+            _keyCard.pivot = new Vector2(0.5f, 0f);
+            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            float top = height * 0.5f;
+            MakeText(_keyCard, font, "Title", title, 25, new Vector2(0f, top - 33f),
+                new Vector2(360f, 32f)).fontStyle = FontStyle.Bold;
+
+            for (int i = 0; i < rows.Length; i++)
+            {
+                float y = top - titleHeight - rowHeight * (i + 0.5f);
+                float x = -24f;
+                string[] keys = rows[i].keys;
+                for (int k = keys.Length - 1; k >= 0; k--)
+                {
+                    var size = new Vector2(Mathf.Max(38f, 13f * keys[k].Length + 18f), 38f);
+                    x -= size.x;
+                    var keycap = MakeBox(_keyCard, keys[k] + " Key", new Vector2(x + size.x * 0.5f, y), size,
+                        new Color32(66, 66, 66, 255));
+                    MakeText(keycap, font, "Letter", keys[k], keys[k].Length > 1 ? 17 : 22, Vector2.zero,
+                        size).fontStyle = FontStyle.Bold;
+                    x -= 6f;
+                }
+                var label = MakeText(_keyCard, font, rows[i].label, rows[i].label, 20, new Vector2(-8f, y),
+                    new Vector2(210f, 38f));
+                label.alignment = TextAnchor.MiddleLeft;
+                label.rectTransform.pivot = new Vector2(0f, 0.5f);
+            }
+
+            var exit = MakeText(_keyCard, font, "Exit Hint", footer, 17, new Vector2(0f, -top + 26f),
+                new Vector2(380f, 26f));
+            exit.color = new Color32(216, 216, 216, 255);
+            _keyCard.gameObject.SetActive(true);
             FitToScreen();
         }
 
@@ -198,7 +256,8 @@ namespace CarX.Gameplay
             Rect safe = Screen.safeArea;
             var display = new Vector2(Screen.width, Screen.height);
             Vector2 size = Vector2.Scale(safe.size / display, _root.rect.size);
-            var card = _choiceCard != null && _choiceCard.gameObject.activeSelf ? _choiceCard : _card;
+            var card = _choiceCard != null && _choiceCard.gameObject.activeSelf ? _choiceCard :
+                _keyCard != null && _keyCard.gameObject.activeSelf ? _keyCard : _card;
             float scale = Mathf.Clamp01(Mathf.Min(size.x / (card.sizeDelta.x + 32f),
                 size.y / (card.sizeDelta.y + BottomMargin + 16f)));
             card.anchorMin = card.anchorMax = new Vector2(safe.center.x / display.x, safe.yMin / display.y);

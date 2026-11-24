@@ -45,6 +45,17 @@ namespace CarX.Gameplay
 
         [SerializeField] Material _clueBlur;
 
+        // Подсказки по управлению (карточка с замедлением времени, как у наклона на уровне 3).
+        const float ControlsHintDistance = 5f;
+        enum Tutorial { None, Controls, DarkOrientation }
+        static bool s_controlsTutorialShown;
+        static bool s_darkTutorialShown;
+        Tutorial _tutorial;
+        bool _darkTutorialPending;
+        bool _enableDarkModeNextFrame;
+        bool _spawnKnown;
+        Vector3 _spawnPosition;
+
         NoteReaderView _noteReader;
         SlowTimeTutorialView _slowTimeTutorial;
         System.Action<int> _selectEncounterChoice;
@@ -318,6 +329,8 @@ namespace CarX.Gameplay
             if (_hud.HudRect == null || _menu is Menu.Dying or Menu.Death or Menu.EndingFade or Menu.Ending)
                 return;
 
+            UpdateTutorialTriggers();
+
             if (_health.IsDead)
             {
                 BeginDeath();
@@ -338,7 +351,7 @@ namespace CarX.Gameplay
             bool interact = Input.GetKeyDown(KeyCode.E);
             bool resumeTime = Input.GetKeyDown(KeyCode.Space);
 #endif
-            if (escape && (IsPaused || _encounterInputLocked || _resumeEncounterFight != null))
+            if (escape && (IsPaused || _encounterInputLocked || _resumeEncounterFight != null || _tutorial != Tutorial.None))
             {
                 if (_menu == Menu.Pause)
                     ContinueFromPause();
@@ -349,7 +362,9 @@ namespace CarX.Gameplay
 
             if (_menu == Menu.SlowTime)
             {
-                if (_selectEncounterChoice != null)
+                if (_tutorial != Tutorial.None)
+                    UpdateTutorialInput(resumeTime);
+                else if (_selectEncounterChoice != null)
                 {
                     int choice = ReadEncounterChoice();
                     if (choice != 0)
@@ -904,6 +919,98 @@ namespace CarX.Gameplay
             return 0;
         }
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetTutorials() => s_controlsTutorialShown = s_darkTutorialShown = false;
+
+        internal void OnDoorOpened(LowerFloorDoor door)
+        {
+            if (!s_darkTutorialShown && FloorDoorCheckpoint.IsFirstDoor(door))
+                _darkTutorialPending = true;
+        }
+
+        bool CanShowTutorial => _menu == Menu.None && !_encounterInputLocked && !_openingClue && !_health.IsDead &&
+            Time.timeScale > 0f && (_inventory == null || !_inventory.IsOpen) &&
+            (_innerVoice == null || !_innerVoice.IsSpeaking) && !IsNpcSpeaking;
+
+        void UpdateTutorialTriggers()
+        {
+            if (_enableDarkModeNextFrame && _menu == Menu.None)
+            {
+                _enableDarkModeNextFrame = false;
+                CarX.DarkOrientation.DarkOrientationController.Current?.SetActive(true);
+            }
+
+            if (!_spawnKnown)
+            {
+                _spawnPosition = transform.position;
+                _spawnKnown = true;
+            }
+            if (!CanShowTutorial)
+                return;
+
+            if (_darkTutorialPending)
+            {
+                var mode = CarX.DarkOrientation.DarkOrientationController.Current;
+                if (mode == null || mode.IsActive || !OpenSlowTime())
+                {
+                    _darkTutorialPending = mode != null && !mode.IsActive;
+                    return;
+                }
+                _darkTutorialPending = false;
+                s_darkTutorialShown = true;
+                _tutorial = Tutorial.DarkOrientation;
+                string key = mode.Settings != null ? mode.Settings.toggleKey.ToString() : "G";
+                _slowTimeTutorial.ShowKeyCard("Ориентирование в темноте",
+                    new[] { (new[] { key }, "Нащупать стены руками") },
+                    $"Нажмите <b>{key}</b>, чтобы включить режим");
+                return;
+            }
+
+            if (!s_controlsTutorialShown &&
+                (transform.position - _spawnPosition).sqrMagnitude > ControlsHintDistance * ControlsHintDistance &&
+                OpenSlowTime())
+            {
+                s_controlsTutorialShown = true;
+                _tutorial = Tutorial.Controls;
+                _slowTimeTutorial.ShowKeyCard("Управление", new[]
+                {
+                    (new[] { "W", "A", "S", "D" }, "Передвижение"),
+                    (new[] { "Tab" }, "Инвентарь"),
+                    (new[] { "Ctrl" }, "Присесть"),
+                    (new[] { "1" }, "Достать пистолет"),
+                    (new[] { "F" }, "Фонарик вкл/выкл"),
+                }, "Нажмите <b>Пробел</b>, чтобы продолжить");
+            }
+        }
+
+        void UpdateTutorialInput(bool space)
+        {
+            if (_tutorial == Tutorial.Controls)
+            {
+                if (space)
+                    SetMenu(Menu.None);
+                return;
+            }
+
+            var mode = CarX.DarkOrientation.DarkOrientationController.Current;
+            if (mode == null)
+            {
+                SetMenu(Menu.None);
+                return;
+            }
+#if ENABLE_INPUT_SYSTEM
+            var key = mode.Settings != null ? mode.Settings.toggleKey : Key.G;
+            bool pressed = Keyboard.current != null && key != Key.None && Keyboard.current[key].wasPressedThisFrame;
+#else
+            bool pressed = Input.GetKeyDown(KeyCode.G);
+#endif
+            if (!pressed)
+                return;
+            SetMenu(Menu.None);
+            // Включаем на следующем кадре, чтобы то же нажатие G не переключило режим обратно.
+            _enableDarkModeNextFrame = true;
+        }
+
         bool OpenSlowTime()
         {
             Camera camera = _pistol != null ? _pistol.ViewCamera : null;
@@ -1003,6 +1110,7 @@ namespace CarX.Gameplay
             else if (_menu == Menu.SlowTime || (_slowTimePaused && !willPause && !resumingSlowTime))
             {
                 _slowTimePaused = false;
+                _tutorial = Tutorial.None;
                 _slowTimeTutorial.Close();
                 _selectEncounterChoice = null;
                 _resumeEncounterFight = null;

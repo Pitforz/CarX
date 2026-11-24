@@ -92,8 +92,6 @@ namespace StarterAssets
 		private Vector2 _lookVelocity;
 		private bool _controlsFrozen;
 		private bool _movementLocked;
-		private bool _superSpeedEnabled;
-		private const float SuperSpeedMultiplier = 4f;
 		private int _controlsResumedFrame = -1;
 		private bool _encounterLookActive;
 		private bool _limitEncounterLook;
@@ -397,15 +395,10 @@ namespace StarterAssets
 			var keyboard = Keyboard.current;
 			bool leanRight = IsKeyHeld(keyboard, _leanRightKey);
 			bool leanLeft = IsKeyHeld(keyboard, _leanLeftKey);
-			bool superSpeedPressed = keyboard?.vKey.wasPressedThisFrame == true;
 #else
 			bool leanRight = Input.GetKey(KeyCode.C);
 			bool leanLeft = Input.GetKey(KeyCode.Z);
-			bool superSpeedPressed = Input.GetKeyDown(KeyCode.V);
 #endif
-			if (superSpeedPressed && !_movementLocked && !LookInputBlocked)
-				_superSpeedEnabled = !_superSpeedEnabled;
-
 			float desiredLean = _movementLocked ? 0f : (leanRight ? 1f : 0f) - (leanLeft ? 1f : 0f);
 			if (!_movementLocked)
 				UpdateCrouch();
@@ -773,8 +766,6 @@ namespace StarterAssets
 				moveInput = Vector2.zero;
 			if (moveInput.y < 0f)
 				targetSpeed *= _backwardSpeedMultiplier;
-			if (_superSpeedEnabled)
-				targetSpeed *= SuperSpeedMultiplier;
 			Vector2 targetVelocity = moveInput * (targetSpeed * MovementSpeedMultiplier);
 			// Smooth the whole local velocity, including a release to zero and changes of direction.
 			// Collision-reduced controller.velocity must not restart acceleration every frame at a wall.

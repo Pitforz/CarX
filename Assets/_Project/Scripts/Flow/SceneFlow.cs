@@ -54,6 +54,35 @@ namespace CarX.Flow
             Play(seq);
         }
 
+        /// <summary>Сколько секунд первая сцена проявляется из чёрного при запуске игры.</summary>
+        public const float StartupFadeIn = 2f;
+
+        /// <summary>
+        /// Запуск игры: чёрный экран, пока грузится первая сцена, потом она 2 с проявляется из темноты.
+        /// Только если игра стартует с первой сцены списка (MainMenu), чтобы тестовый Play в других сценах не менялся.
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        static void StartupBlack()
+        {
+            if (SceneManager.GetActiveScene().buildIndex != 0) return;
+            var flow = Get();
+            flow._busy = true;
+            flow._fade.color = Color.black;
+            flow._fade.raycastTarget = true;
+            flow.StartCoroutine(flow.StartupReveal());
+        }
+
+        IEnumerator StartupReveal()
+        {
+            // пара кадров, чтобы Awake/Start сцены и первая отрисовка прошли под чёрным
+            yield return null;
+            yield return null;
+            yield return null;
+            yield return Fade(1f, 0f, StartupFadeIn, Color.black);
+            _fade.raycastTarget = false;
+            _busy = false;
+        }
+
         static SceneFlow Get()
         {
             if (_instance != null) return _instance;

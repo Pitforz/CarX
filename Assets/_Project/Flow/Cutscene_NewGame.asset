@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 255ba90a0ecfbf044b221aff56eb70b6, type: 3}
   m_Name: Cutscene_NewGame
   m_EditorClassIdentifier: Assembly-CSharp::CarX.Flow.CutsceneSequence
-  targetScene: MAIN_LEVEL_GRAPHICS_lab
+  targetScene: CanalEntrance_Test
   fadeOut: 1.2
   blackHold: 0.35
   fadeColor: {r: 0, g: 0, b: 0, a: 1}
@@ -111,7 +111,7 @@ MonoBehaviour:
     layerVolume: 0.4
     sting: {fileID: 0}
     stingVolume: 1
-    seconds: 88
+    seconds: 44
     fadeOut: 0
     stopBeds: 1
     title: 
@@ -120,7 +120,7 @@ MonoBehaviour:
       time: 0.4
       hold: 6.6
     - text: "\u041a\u0410\u041d\u0410\u041b \u0417\u0410 \u0428\u041e\u0421\u0421\u0415\n\u0414\u0430\u043b\u044c\u0448\u0435 \u043f\u0435\u0448\u043a\u043e\u043c."
-      time: 81
+      time: 37.5
       hold: 6.5
     lines: []
   ambientLoop: {fileID: 0}

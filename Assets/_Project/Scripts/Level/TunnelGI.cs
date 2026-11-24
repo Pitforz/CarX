@@ -15,9 +15,10 @@ namespace CarX.Level
         {
             if (r == null) return;
             r.lightProbeUsage = LightProbeUsage.BlendProbes;   // the probes carry the baked bounce light
+#if UNITY_EDITOR
+            // receiveGI exists only in the Editor (it matters for baking only)
             var mr = r as MeshRenderer;
             if (mr != null && contributeGI) mr.receiveGI = ReceiveGI.LightProbes;   // no lightmap, no lightmap UVs needed
-#if UNITY_EDITOR
             if (contributeGI) MarkStatic(r.gameObject);
 #endif
         }

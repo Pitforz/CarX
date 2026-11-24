@@ -89,7 +89,7 @@ namespace CarX.Gameplay
             inventory.RestoreCheckpoint(_hasKey, _reserve);
         }
 
-        static bool IsFirstDoor(LowerFloorDoor door)
+        internal static bool IsFirstDoor(LowerFloorDoor door)
         {
             foreach (var part in door.GetComponentsInChildren<Transform>(true))
             {
