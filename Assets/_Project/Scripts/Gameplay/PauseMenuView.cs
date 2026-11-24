@@ -104,6 +104,7 @@ namespace CarX.Gameplay
             button.transition = UnityEngine.UI.Selectable.Transition.None;
             button.interactable = true;
             label = _text.MakeLabel(rect, "Label", title, new Rect(28, 10f, 486, 46), 25, RegularInk, bold: true);
+            var choiceLabel = label;
             button.onClick.AddListener(action);
             var trigger = rect.gameObject.AddComponent<EventTrigger>();
             var hover = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
@@ -115,8 +116,8 @@ namespace CarX.Gameplay
             {
                 if (_highlightedLabel != null)
                     _highlightedLabel.color = RegularInk;
-                _highlightedLabel = label;
-                label.color = Cream;
+                _highlightedLabel = choiceLabel;
+                choiceLabel.color = Cream;
                 _highlight.anchoredPosition = rect.anchoredPosition;
             });
             trigger.triggers.Add(select);
