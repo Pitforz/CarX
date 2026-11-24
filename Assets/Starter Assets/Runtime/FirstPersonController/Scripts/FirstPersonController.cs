@@ -420,7 +420,7 @@ namespace StarterAssets
 		private void UpdateEncounterEntry(float deltaTime)
 		{
 			GroundedCheck();
-			UpdateVerticalVelocity(false);
+			UpdateVerticalVelocity();
 
 			float previous = _encounterEntryElapsed;
 			_encounterEntryElapsed = Mathf.Min(previous + deltaTime, EncounterEntryDuration);
