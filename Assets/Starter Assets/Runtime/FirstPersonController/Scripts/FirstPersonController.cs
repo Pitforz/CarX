@@ -822,9 +822,9 @@ namespace StarterAssets
 			AudibleFootstep?.Invoke(transform.position, movement / Time.deltaTime);
 		}
 
-		internal float LookPitch => _cinemachineTargetPitch;
+		public float LookPitch => _cinemachineTargetPitch;
 
-		internal void RestoreCheckpointPose(Vector3 position, Quaternion rotation, float pitch)
+		public void RestoreCheckpointPose(Vector3 position, Quaternion rotation, float pitch)
 		{
 			var body = GetComponent<CharacterController>();
 			if (body != null)
