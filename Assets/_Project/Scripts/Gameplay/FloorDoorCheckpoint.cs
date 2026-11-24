@@ -28,7 +28,7 @@ namespace CarX.Gameplay
 
         internal static void Remember(LowerFloorDoor door, PlayerInventory inventory)
         {
-            if (door == null || inventory == null)
+            if (door == null || inventory == null || !IsFirstDoor(door))
                 return;
 
             var player = inventory.transform;
@@ -87,6 +87,18 @@ namespace CarX.Gameplay
             inventory.GetComponent<PlayerHealth>()?.RestoreCheckpoint(_health, _bleeding, _flashlight);
             inventory.GetComponent<PlayerPistol>()?.RestoreLoadedRounds(_loaded);
             inventory.RestoreCheckpoint(_hasKey, _reserve);
+        }
+
+        static bool IsFirstDoor(LowerFloorDoor door)
+        {
+            foreach (var part in door.GetComponentsInChildren<Transform>(true))
+            {
+                var name = part.name;
+                if (name.IndexOf("Old Metal Door Leaf", System.StringComparison.OrdinalIgnoreCase) >= 0 &&
+                    name.IndexOf("first", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+            return false;
         }
     }
 }

@@ -17,12 +17,17 @@ namespace CarX.Gameplay
         readonly TypewriterMenuText _text;
         readonly RectTransform _highlight;
         readonly UnityEngine.UI.Button _continueButton;
+        readonly UnityEngine.UI.Button _loadButton;
+        readonly UnityEngine.UI.Button _settingsButton;
+        readonly UnityEngine.UI.Button _exitButton;
+        readonly UnityEngine.UI.Text _loadLabel;
+        readonly UnityEngine.UI.Text _loadHint;
         UnityEngine.UI.Text _highlightedLabel;
 
         internal RectTransform Root { get; }
 
         internal PauseMenuView(RectTransform parent, TypewriterMenuText text, UnityAction resume,
-            UnityAction openSettings, UnityAction quit)
+            UnityAction loadSave, UnityAction openSettings, UnityAction quit)
         {
             _text = text;
             Root = PlayerStatusHud.CreateRect(parent, "Pause Menu", typeof(UnityEngine.UI.RawImage));
@@ -40,17 +45,40 @@ namespace CarX.Gameplay
             paint.color = paint.texture != null ? Color.white : new Color32(172, 85, 39, 255);
             paint.raycastTarget = false;
 
-            _continueButton = MakeChoice(0, "Продолжить", resume);
-            MakeChoice(1, "Загрузить последнее сохранение", null);
-            var settings = MakeChoice(2, "Настройки", openSettings);
-            var exit = MakeChoice(3, "Выйти", quit);
-            SetNavigation(_continueButton, exit, settings);
-            SetNavigation(settings, _continueButton, exit);
-            SetNavigation(exit, settings, _continueButton);
+            _continueButton = MakeChoice(0, "Продолжить", resume, out _);
+            _loadButton = MakeChoice(1, "Загрузить последнее сохранение", loadSave, out _loadLabel);
+            _loadHint = _text.MakeLabel(_loadButton.GetComponent<RectTransform>(), "Unavailable Hint",
+                "Нет сохранений", new Rect(28, 44, 480, 20), 14, MutedInk);
+            _settingsButton = MakeChoice(2, "Настройки", openSettings, out _);
+            _exitButton = MakeChoice(3, "Выйти", quit, out _);
+            SetLoadAvailable(false);
 
             _text.MakeLabel(Root, "Esc Key", "Esc", new Rect(83, 505, 33, 22), 12, Cream, bold: true,
                 alignment: TextAnchor.MiddleCenter);
             _text.MakeLabel(Root, "Resume Hint", "продолжить", new Rect(126, 503, 180, 26), 14, MutedInk, bold: true);
+        }
+
+        internal void SetLoadAvailable(bool available)
+        {
+            _loadButton.interactable = available;
+            _loadLabel.color = available ? RegularInk : MutedInk;
+            var labelRect = _loadLabel.rectTransform;
+            labelRect.anchoredPosition = new Vector2(labelRect.anchoredPosition.x, available ? 10f : 5f);
+            _loadHint.gameObject.SetActive(!available);
+            if (available)
+            {
+                SetNavigation(_continueButton, _exitButton, _loadButton);
+                SetNavigation(_loadButton, _continueButton, _settingsButton);
+                SetNavigation(_settingsButton, _loadButton, _exitButton);
+                SetNavigation(_exitButton, _settingsButton, _continueButton);
+            }
+            else
+            {
+                SetNavigation(_continueButton, _exitButton, _settingsButton);
+                SetNavigation(_loadButton, _continueButton, _settingsButton);
+                SetNavigation(_settingsButton, _continueButton, _exitButton);
+                SetNavigation(_exitButton, _settingsButton, _continueButton);
+            }
         }
 
         internal void FocusContinue()
@@ -66,25 +94,16 @@ namespace CarX.Gameplay
             Root.localScale = new Vector3(scale, scale, 1f);
         }
 
-        UnityEngine.UI.Button MakeChoice(int row, string title, UnityAction action)
+        UnityEngine.UI.Button MakeChoice(int row, string title, UnityAction action, out UnityEngine.UI.Text label)
         {
             var rect = TypewriterMenuText.Place(Root, title, typeof(UnityEngine.UI.Image), RowBox(row));
             var hitArea = rect.GetComponent<UnityEngine.UI.Image>();
             hitArea.color = Color.clear;
             hitArea.canvasRenderer.cullTransparentMesh = false;
             var button = rect.gameObject.AddComponent<UnityEngine.UI.Button>();
-            bool enabled = action != null;
             button.transition = UnityEngine.UI.Selectable.Transition.None;
-            button.interactable = enabled;
-            var label = _text.MakeLabel(rect, "Label", title, new Rect(28, enabled ? 10f : 5f, 486, 46), 25,
-                enabled ? RegularInk : MutedInk, bold: true);
-
-            if (!enabled)
-            {
-                _text.MakeLabel(rect, "Unavailable Hint", "Нет сохранений", new Rect(28, 44, 480, 20), 14, MutedInk);
-                return button;
-            }
-
+            button.interactable = true;
+            label = _text.MakeLabel(rect, "Label", title, new Rect(28, 10f, 486, 46), 25, RegularInk, bold: true);
             button.onClick.AddListener(action);
             var trigger = rect.gameObject.AddComponent<EventTrigger>();
             var hover = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };

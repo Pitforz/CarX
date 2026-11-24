@@ -1053,7 +1053,7 @@ namespace CarX.Gameplay
                 BuildMenus();
             if (menu == Menu.Pause && _pauseMenu == null)
                 _pauseMenu = new PauseMenuView(_overlay, _typewriterText ??= new TypewriterMenuText(),
-                    ContinueFromPause, () => SetMenu(Menu.Settings), QuitGame);
+                    ContinueFromPause, LoadDoorCheckpoint, () => SetMenu(Menu.Settings), QuitGame);
             if (menu == Menu.Settings && _settingsMenu == null)
                 _settingsMenu = new SettingsMenuView(_overlay,
                     MinSensitivity, MaxSensitivity, _sensitivityPercent, _masterVolumePercent, _health.DifficultyLevel,
@@ -1128,7 +1128,10 @@ namespace CarX.Gameplay
                 _questionsView.SetFocused(true);
             UpdateLayout();
             if (menu == Menu.Pause)
+            {
+                _pauseMenu.SetLoadAvailable(FloorDoorCheckpoint.HasSave);
                 _pauseMenu.FocusContinue();
+            }
             else if (menu == Menu.Settings)
                 _settingsMenu.FocusFirst();
             else if (result && _endingRestartButton.interactable)
@@ -1425,6 +1428,12 @@ namespace CarX.Gameplay
             var label = MakeText(rect, font, "Label", text, 46, Vector2.zero, fill.sizeDelta);
             label.color = new Color32(255, 241, 216, 255);
             return label;
+        }
+
+        void LoadDoorCheckpoint()
+        {
+            if (!FloorDoorCheckpoint.TryReload())
+                _pauseMenu?.SetLoadAvailable(false);
         }
 
         void RestartScene()
