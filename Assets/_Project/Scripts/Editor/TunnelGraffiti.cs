@@ -562,6 +562,9 @@ namespace CarX.EditorTools
             g.flip = s.flip;
             g.depth = Mathf.Clamp(size * 0.25f, 0.3f, 1f);
             g.Refresh();
+            // paint layer only as thick as the wall under it needs: no stripes on the faces of a side branch or a corner
+            float fit;
+            if (GraffitiWindow.FitDepth(g, out fit)) { g.depth = fit; g.Refresh(); }
         }
 
         static void Frame(Vector3 dir, out Vector3 right, out Vector3 up)
